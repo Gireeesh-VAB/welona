@@ -1,0 +1,102 @@
+import bcrypt from 'bcryptjs';
+import { z } from 'zod';
+import { db } from '@/lib/db';
+import { route, parseBody } from '@/lib/api/handler';
+import { ok, created } from '@/lib/api/response';
+import { Errors } from '@/lib/api/errors';
+import { requireAuth, requirePermission } from '@/lib/auth/service';
+
+const staffCreateSchema = z.object({
+  name: z.string().trim().min(1, 'Name is required'),
+  email: z.string().trim().email('Enter a valid email'),
+  phone: z.string().trim().optional(),
+  password: z.string().min(8, 'Password must be at least 8 characters'),
+  roleId: z.string().min(1, 'Role is required'),
+  branchId: z.string().min(1).optional(),
+  status: z.enum(['active', 'suspended']).optional(),
+});
+
+/**
+ * GET /api/v1/staff — every employee in the organisation, with their role
+ * and branch, for the Employees directory.
+ */
+export const GET = route(async (req) => {
+  const claims = requireAuth(req);
+  requirePermission(claims, 'staff:read');
+
+  const staff = await db.staff.findMany({
+    where: { orgId: claims.orgId },
+    include: {
+      role: { select: { name: true } },
+      branch: { select: { name: true } },
+    },
+    orderBy: { name: 'asc' },
+  });
+
+  return ok(
+    staff.map((s) => ({
+      id: s.id,
+      name: s.name,
+      email: s.email,
+      phone: s.phone,
+      avatarUrl: s.avatarUrl,
+      status: s.status,
+      twoFactorEnabled: s.twoFactorEnabled,
+      roleName: s.role.name,
+      branchName: s.branch?.name ?? null,
+      lastLoginAt: s.lastLoginAt ? s.lastLoginAt.toISOString() : null,
+      createdAt: s.createdAt.toISOString(),
+      employeeCode: s.employeeCode,
+      designation: s.designation,
+      dateOfJoining: s.dateOfJoining ? s.dateOfJoining.toISOString() : null,
+      dateOfBirth: s.dateOfBirth ? s.dateOfBirth.toISOString() : null,
+      gender: s.gender,
+      address: s.address,
+      emergencyContact: s.emergencyContact,
+      weeklyOff: s.weeklyOff,
+      shiftStart: s.shiftStart,
+      shiftEnd: s.shiftEnd,
+      bankName: s.bankName,
+      bankAccountName: s.bankAccountName,
+      bankAccountNumber: s.bankAccountNumber,
+      bankIfsc: s.bankIfsc,
+      salary: s.salary,
+    })),
+  );
+});
+
+/** POST /api/v1/staff — add a new employee (creates their sign-in account). */
+export const POST = route(async (req) => {
+  const claims = requireAuth(req);
+  requirePermission(claims, 'staff:create');
+  const body = await parseBody(req, staffCreateSchema);
+
+  const role = await db.role.findFirst({ where: { id: body.roleId, orgId: claims.orgId } });
+  if (!role) throw Errors.notFound('Role');
+
+  if (body.branchId) {
+    const branch = await db.branch.findFirst({
+      where: { id: body.branchId, orgId: claims.orgId },
+    });
+    if (!branch) throw Errors.notFound('Branch');
+  }
+
+  const email = body.email.toLowerCase();
+  const existing = await db.staff.findUnique({ where: { email } });
+  if (existing) throw Errors.conflict('An employee with this email already exists');
+
+  const staff = await db.staff.create({
+    data: {
+      orgId: claims.orgId,
+      roleId: body.roleId,
+      branchId: body.branchId ?? null,
+      name: body.name,
+      email,
+      phone: body.phone || null,
+      passwordHash: await bcrypt.hash(body.password, 10),
+      status: body.status ?? 'active',
+    },
+  });
+
+  return created({ id: staff.id, name: staff.name, email: staff.email });
+});

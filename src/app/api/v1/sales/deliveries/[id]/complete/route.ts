@@ -1,0 +1,51 @@
+import { db } from '@/lib/db';
+import { route } from '@/lib/api/handler';
+import { ok } from '@/lib/api/response';
+import { Errors } from '@/lib/api/errors';
+import { requireAuth, requirePermission } from '@/lib/auth/service';
+import { DELIVERY_TRANSITIONS, assertTransition } from '@/lib/sales/transitions';
+import { recomputeOrderDeliveryStatus } from '@/lib/sales/service';
+import { serializeDelivery, type DeliveryLine } from '@/lib/sales/serializers';
+
+type Ctx = { params: { id: string } };
+
+/**
+ * POST /api/v1/sales/deliveries/[id]/complete — mark a delivery delivered.
+ * Adds the delivered quantities to each order line and recomputes the
+ * order's delivery status (confirmed → partially_delivered → delivered).
+ */
+export const POST = route<Ctx>(async (req, { params }) => {
+  const claims = requireAuth(req);
+  requirePermission(claims, 'sales:update');
+
+  const delivery = await db.delivery.findFirst({
+    where: { id: params.id, orgId: claims.orgId },
+  });
+  if (!delivery) throw Errors.notFound('Delivery');
+  assertTransition(DELIVERY_TRANSITIONS, delivery.status, 'delivered', 'delivery');
+
+  let lines: DeliveryLine[] = [];
+  try {
+    const parsed = JSON.parse(delivery.lineQuantities);
+    if (Array.isArray(parsed)) lines = parsed as DeliveryLine[];
+  } catch {
+    lines = [];
+  }
+
+  const updated = await db.$transaction(async (tx) => {
+    for (const line of lines) {
+      await tx.orderItem.update({
+        where: { id: line.orderItemId },
+        data: { quantityDelivered: { increment: line.quantity } },
+      });
+    }
+    const result = await tx.delivery.update({
+      where: { id: params.id },
+      data: { status: 'delivered', deliveredAt: new Date(), handledById: claims.sub },
+    });
+    await recomputeOrderDeliveryStatus(tx, delivery.orderId);
+    return result;
+  });
+
+  return ok(serializeDelivery(updated));
+});

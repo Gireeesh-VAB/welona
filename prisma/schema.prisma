@@ -1,0 +1,1184 @@
+// Welona Admin — local development database.
+// Reference: Developer Reference Architecture v2.0, section 5.2.
+//
+// Engine is SQLite for zero-config local development. To move to the
+// production PostgreSQL (section 5.1) change `provider` to "postgresql"
+// and point DATABASE_URL at the Postgres instance — no model changes needed.
+//
+// NOTE: SQLite has no native enum or array types. Enum-like fields are
+// stored as strings backed by TypeScript const unions (see src/lib/enums.ts);
+// list-valued fields (permissions, branchIds) are stored as JSON strings.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+/// The tenant. Every other record is scoped to an Organization.
+model Organization {
+  id          String       @id @default(cuid())
+  name        String
+  slug        String       @unique
+  branches    Branch[]
+  roles       Role[]
+  staff       Staff[]
+  customers   Customer[]
+  leads       Lead[]
+  quotations  Quotation[]
+  salesOrders SalesOrder[]
+  invoices    Invoice[]
+  treatments  Treatment[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+}
+
+/// A physical location belonging to an Organization.
+model Branch {
+  id               String        @id @default(cuid())
+  orgId            String
+  org              Organization  @relation(fields: [orgId], references: [id])
+  name             String
+  code             String
+  address          String?
+  city             String?
+  phone            String?
+  email            String?
+  ipAddress        String?
+  zoneId           String?
+  zone             Zone?         @relation(fields: [zoneId], references: [id])
+  createdByAdminId String?
+  createdByAdmin   AdminUser?    @relation(fields: [createdByAdminId], references: [id])
+  isActive         Boolean       @default(true)
+  staff            Staff[]
+  customers        Customer[]
+  leads            Lead[]
+  quotations       Quotation[]
+  salesOrders      SalesOrder[]
+  invoices         Invoice[]
+  marketingOfferBranches MarketingOfferBranch[]
+  employees        Employee[]
+  systemUsers      SystemUser[]
+  packageCancellations PackageCancellation[]
+  receiptCancellations ReceiptCancellation[]
+  voucherCancellations VoucherCancellation[]
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
+
+  @@unique([orgId, code])
+}
+
+/// An RBAC role (section 7.3). `permissions` is a JSON array of
+/// `module:action` strings; `["*"]` grants everything.
+model Role {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id])
+  name        String
+  key         String
+  scope       String // "organization" | "branch"
+  permissions String // JSON string: string[]
+  isSystem    Boolean      @default(true)
+  staff       Staff[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@unique([orgId, key])
+}
+
+/// A staff member who can sign in to the Admin Panel.
+model Staff {
+  id               String           @id @default(cuid())
+  orgId            String
+  org              Organization     @relation(fields: [orgId], references: [id])
+  branchId         String?
+  branch           Branch?          @relation(fields: [branchId], references: [id])
+  roleId           String
+  role             Role             @relation(fields: [roleId], references: [id])
+  name             String
+  email            String           @unique
+  phone            String?
+  passwordHash     String
+  avatarUrl        String?
+  status           String           @default("active") // "active" | "suspended"
+  twoFactorEnabled Boolean          @default(true)
+  lastLoginAt      DateTime?
+  // HR / employment details
+  employeeCode      String?
+  designation       String?
+  dateOfJoining     DateTime?
+  dateOfBirth       DateTime?
+  gender            String?
+  address           String?
+  emergencyContact  String?
+  weeklyOff         String? // e.g. "Sunday"
+  shiftStart        String? // "HH:mm"
+  shiftEnd          String? // "HH:mm"
+  bankName          String?
+  bankAccountName   String?
+  bankAccountNumber String?
+  bankIfsc          String?
+  salary            Int? // monthly, minor units
+  refreshTokens    RefreshToken[]
+  loginChallenges  LoginChallenge[]
+  // Sales pipeline ownership — a staff member is the "salesperson".
+  leadsOwned       Lead[]           @relation("LeadOwner")
+  quotationsOwned  Quotation[]      @relation("QuotationOwner")
+  ordersOwned      SalesOrder[]     @relation("OrderOwner")
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+}
+
+/// Persisted refresh tokens so they can be revoked on logout
+/// (the production design keeps these in Redis — section 7.1).
+model RefreshToken {
+  id        String    @id @default(cuid())
+  staffId   String
+  staff     Staff     @relation(fields: [staffId], references: [id])
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+/// Holds the one-time code for the mandatory 2FA step (section 7.1)
+/// while a staff member completes sign-in.
+model LoginChallenge {
+  id         String    @id @default(cuid())
+  staffId    String
+  staff      Staff     @relation(fields: [staffId], references: [id])
+  otp        String
+  expiresAt  DateTime
+  consumedAt DateTime?
+  createdAt  DateTime  @default(now())
+}
+
+/// A super-admin / management console user. Separate identity from Staff so
+/// the /admin/* side has its own login pool and credentials are never mixed
+/// with employee accounts.
+model AdminUser {
+  id                String              @id @default(cuid())
+  name              String
+  email             String              @unique
+  passwordHash      String
+  status            String              @default("active") // "active" | "suspended"
+  lastLoginAt       DateTime?
+  refreshTokens     AdminRefreshToken[]
+  createdBranches      Branch[]
+  createdCategories    Category[]
+  createdServices      Service[]
+  createdLedgers       Ledger[]
+  createdPaymentModes  PaymentMode[]
+  createdTaxes         Tax[]
+  createdMedias        Media[]
+  createdMarketingOffers MarketingOffer[]
+  createdDesignations  Designation[]
+  createdDepartments   Department[]
+  createdEmployees     Employee[]
+  createdSystemUsers   SystemUser[]
+  createdCancellationCustomers CancellationCustomer[]
+  createdPackageCancellations  PackageCancellation[]
+  createdReceiptCancellations  ReceiptCancellation[]
+  createdVoucherCancellations  VoucherCancellation[]
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+}
+
+/// Refresh tokens for the AdminUser session pool. Kept in a separate table so
+/// the admin and staff session lifecycles stay fully independent.
+model AdminRefreshToken {
+  id        String    @id @default(cuid())
+  adminId   String
+  admin     AdminUser @relation(fields: [adminId], references: [id])
+  token     String    @unique
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime  @default(now())
+}
+
+/// A geographic / operational zone — admin-managed master data used to
+/// group branches and assign territory. The pair (country, stateName) is
+/// unique so the admin can't accidentally enter the same state twice.
+model Zone {
+  id        String     @id @default(cuid())
+  country   String
+  stateName String
+  remarks   String?
+  branches  Branch[]
+  medias    Media[]
+  employees Employee[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@unique([country, stateName])
+}
+
+/// A job title used for employees (Doctor, Therapist, Receptionist, etc.).
+/// IP address is captured server-side from the request — the admin form
+/// only asks for `name` + `remarks`. Admin-managed master data.
+model Designation {
+  id               String     @id @default(cuid())
+  name             String     @unique
+  remarks          String?
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  employees        Employee[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([isActive])
+}
+
+/// An organisational department (Front Desk, Clinical, Finance, Marketing,
+/// HR, etc.). Same shape as Designation — form asks for `name` + `remarks`,
+/// IP captured server-side. Admin-managed master data.
+model Department {
+  id               String     @id @default(cuid())
+  name             String     @unique
+  remarks          String?
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  employees        Employee[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([isActive])
+}
+
+/// An HR employee record — separate from the `Staff` table (which is the
+/// login/login-and-RBAC identity). An Employee is HR data: personal info,
+/// designation, department, branch, payroll, shift. All dropdowns on the
+/// form pull from the master tables (Designation, Department, Branch, Zone)
+/// so adding new master rows shows up immediately in the picker.
+model Employee {
+  id              String       @id @default(cuid())
+  // --- Personal ---
+  name            String
+  biometricId     String?      @unique
+  fatherName      String?
+  gender          String?
+  dob             DateTime?
+  mobileNo        String
+  mobileAlternate String?
+  email           String?
+  panNo           String?
+  pincode         String?
+  address         String?
+  // --- Official ---
+  employeeCode    String       @unique
+  designationId   String?
+  designation     Designation? @relation(fields: [designationId], references: [id])
+  departmentId   String?
+  department     Department?  @relation(fields: [departmentId], references: [id])
+  branchId       String?
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+  zoneId         String?
+  zone           Zone?        @relation(fields: [zoneId], references: [id])
+  joiningDate    DateTime
+  relievingDate  DateTime?
+  salary         Int          @default(0) // minor units (paise)
+  bankName       String?
+  bankAccountNo  String?
+  callerType     String?
+  pf             Boolean      @default(false)
+  esi            Boolean      @default(false)
+  // --- Shift ---
+  weeklyOff      String?
+  // --- Audit ---
+  ipAddress      String?
+  isActive       Boolean      @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  systemUsers    SystemUser[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([branchId])
+  @@index([departmentId])
+  @@index([designationId])
+}
+
+/// A pending package-cancellation request handled from the admin module.
+/// Customer name is denormalised (just a string) so the request can be filed
+/// without forcing a join — the admin can pick a CancellationCustomer or
+/// type a free-text name. Amounts are minor units (paise).
+model PackageCancellation {
+  id               String     @id @default(cuid())
+  branchId         String?
+  branch           Branch?    @relation(fields: [branchId], references: [id])
+  customerName     String
+  packageNo        String
+  amount           Int        @default(0)
+  remarks          String?
+  requestedDate    DateTime   @default(now())
+  status           String     @default("requested") // requested | approved | rejected | cancelled
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([branchId])
+  @@index([status])
+}
+
+/// A pending receipt-cancellation request — admin reviews and approves the
+/// refund of a previously-issued receipt. Paid amount is minor units (paise).
+model ReceiptCancellation {
+  id               String     @id @default(cuid())
+  branchId         String?
+  branch           Branch?    @relation(fields: [branchId], references: [id])
+  customerName     String
+  packageNo        String?
+  receiptNo        String
+  paidAmount       Int        @default(0)
+  remarks          String?
+  requestDate      DateTime   @default(now())
+  status           String     @default("requested")
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([branchId])
+  @@index([status])
+}
+
+/// A pending voucher-cancellation request — admin reviews and reverses a
+/// previously-recorded expense voucher. Amount is minor units (paise).
+model VoucherCancellation {
+  id               String     @id @default(cuid())
+  branchId         String?
+  branch           Branch?    @relation(fields: [branchId], references: [id])
+  expenseType      String
+  amount           Int        @default(0)
+  remarks          String?
+  cancelReason     String?
+  requestDate      DateTime   @default(now())
+  status           String     @default("requested")
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([branchId])
+  @@index([status])
+}
+
+/// A lightweight customer record used by the admin Cancellation module —
+/// distinct from the operational `Customer` table so the admin flow stays
+/// independent of the sales/bookings pipeline.
+model CancellationCustomer {
+  id               String     @id @default(cuid())
+  name             String
+  mobileNo         String
+  gender           String?
+  email            String?
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([mobileNo])
+}
+
+/// A login-capable user account in the operational app. Separate from the
+/// `AdminUser` (super-admin) pool — these are linked to an `Employee` and a
+/// `Branch`, and are managed from the HR / User master.
+model SystemUser {
+  id               String     @id @default(cuid())
+  userName         String     @unique
+  passwordHash     String
+  email            String?
+  employeeId       String?
+  employee         Employee?  @relation(fields: [employeeId], references: [id])
+  branchId         String?
+  branch           Branch?    @relation(fields: [branchId], references: [id])
+  isActive         Boolean    @default(true)
+  ipAddress        String?
+  lastLoginAt      DateTime?
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([branchId])
+  @@index([employeeId])
+}
+
+/// A lead-source / marketing channel (Youtube, Website, SMS, Referral,
+/// Pamphlet, Walk-in, etc.) tracked per zone for enquiry attribution.
+/// Admin-managed master data.
+model Media {
+  id               String     @id @default(cuid())
+  zoneId           String
+  zone             Zone       @relation(fields: [zoneId], references: [id])
+  name             String
+  remarks          String?
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@unique([zoneId, name])
+  @@index([zoneId])
+  @@index([isActive])
+}
+
+/// A tax code (IGST / CGST / SGST / GST slabs / cess) used when generating
+/// invoices. `percentBps` is the rate in basis points — 250 = 2.5%, 1800 = 18%.
+/// Admin-managed master data.
+model Tax {
+  id               String     @id @default(cuid())
+  name             String     @unique
+  percentBps       Int        @default(0)
+  remarks          String?
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([isActive])
+}
+
+/// A payment mode the clinic accepts (Cash, Cheque, UPI, EMI providers like
+/// Bajaj / Fibe / Shopse, gateway integrations like Medscred, etc.).
+/// Admin-managed master data.
+model PaymentMode {
+  id               String     @id @default(cuid())
+  name             String     @unique
+  remarks          String?
+  ipAddress        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([isActive])
+}
+
+/// A ledger account — the clinic's chart of accounts. Each ledger belongs
+/// to a `group` (sales / purchase / cash / bank / sundry_debtor / etc.) and
+/// optionally carries an opening balance. Admin-managed master data.
+model Ledger {
+  id               String     @id @default(cuid())
+  name             String     @unique
+  group            String     // e.g. sales | purchase | cash | bank | sundry_debtor | indirect_expense
+  openingBalance   Int        @default(0) // minor units (paise)
+  balanceType      String     @default("debit") // "debit" | "credit"
+  description      String?
+  gstNumber        String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([group])
+  @@index([isActive])
+}
+
+/// A category of offerings (e.g. "Skin Services", "Products", "LASER") used
+/// to group `Service` master entries. Admin-managed master data.
+///
+/// The "has*" / "is*" / "*Based" booleans are capability flags inherited
+/// from the source admin UI's category creation form — they describe which
+/// features (consultant assignment, sessions, discounts, doctor selection,
+/// combo bundling, etc.) the services inside this category will support.
+model Category {
+  id                    String               @id @default(cuid())
+  name                  String               @unique
+  categoryCode          String?              @unique
+  description           String?
+  isActive              Boolean              @default(true)
+  // --- Capability flags ---
+  hasServiceBy          Boolean              @default(false)
+  hasIndividualDiscount Boolean              @default(false)
+  hasTotalDiscount      Boolean              @default(false)
+  hasTokenReference     Boolean              @default(false)
+  hasShareIncentive     Boolean              @default(false)
+  hasConsultant         Boolean              @default(false)
+  hasTeleCaller         Boolean              @default(false)
+  hasMedia              Boolean              @default(false)
+  hasDirectPayment      Boolean              @default(false)
+  hasDND                Boolean              @default(false)
+  hasSession            Boolean              @default(false)
+  hasRating             Boolean              @default(false)
+  isAmountEditable      Boolean              @default(false)
+  hasQuantity           Boolean              @default(false)
+  hasDoctor             Boolean              @default(false)
+  hasValidity           Boolean              @default(false)
+  isCombo               Boolean              @default(false)
+  servicesInCombo       Boolean              @default(false)
+  hasAllSessionsLink    Boolean              @default(false)
+  hasBreakPackage       Boolean              @default(false)
+  sessionBased          Boolean              @default(false)
+  targetWeightBased     Boolean              @default(false)
+  hasMeasurement        Boolean              @default(false)
+  // --- Relations ---
+  services              Service[]
+  marketingOfferItems   MarketingOfferItem[]
+  createdByAdminId      String?
+  createdByAdmin        AdminUser?           @relation(fields: [createdByAdminId], references: [id])
+  createdAt             DateTime             @default(now())
+  updatedAt             DateTime             @updatedAt
+}
+
+/// A service or product the clinic offers — master data for the catalogue.
+/// `hasMeasurements` flags items that record body measurements (e.g. half
+/// legs, full body) and `hasComplementary` flags those bundled with extras.
+/// Prices are integer minor units (paise); taxPercent is a whole percentage.
+model Service {
+  id                String      @id @default(cuid())
+  categoryId        String
+  category          Category    @relation(fields: [categoryId], references: [id])
+  name              String
+  hsnSacCode        String?
+  minPrice          Int         @default(0) // minor units
+  maxPrice          Int         @default(0) // minor units
+  taxPercent        Int         @default(0) // whole percent, 0..100
+  hasMeasurements   Boolean     @default(false)
+  hasComplementary  Boolean     @default(false)
+  isActive          Boolean     @default(true)
+  createdByAdminId  String?
+  createdByAdmin       AdminUser?           @relation(fields: [createdByAdminId], references: [id])
+  marketingOfferItems  MarketingOfferItem[]
+  createdAt            DateTime             @default(now())
+  updatedAt            DateTime             @updatedAt
+
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+/// A marketing package / offer the admin pushes to selected branches over a
+/// date range. Bundles a list of services (with quantities) and constrains
+/// applicability with a min/max amount window. Admin-managed master data.
+/// (Distinct from the customer-specific `Offer` model further down, which
+/// is a one-off promotion on a single customer's profile.)
+model MarketingOffer {
+  id                String                 @id @default(cuid())
+  packageName       String
+  packageCode       String                 @unique
+  fromDate          DateTime
+  toDate            DateTime
+  // minAmount / maxAmount: lower & upper price band, minor units (paise).
+  minAmount         Int                    @default(0)
+  maxAmount         Int                    @default(0)
+  remarks           String?
+  // frontImageUrl: image stored as a data URL (no upload backend yet) or
+  // an external URL pasted in by the admin.
+  frontImageUrl     String?
+  isActive          Boolean                @default(true)
+  createdByAdminId  String?
+  createdByAdmin    AdminUser?             @relation(fields: [createdByAdminId], references: [id])
+  branches          MarketingOfferBranch[]
+  items             MarketingOfferItem[]
+  createdAt         DateTime               @default(now())
+  updatedAt         DateTime               @updatedAt
+
+  @@index([isActive])
+}
+
+/// Many-to-many join — a MarketingOffer applies to a set of Branches.
+model MarketingOfferBranch {
+  id       String         @id @default(cuid())
+  offerId  String
+  offer    MarketingOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  branchId String
+  branch   Branch         @relation(fields: [branchId], references: [id])
+
+  @@unique([offerId, branchId])
+  @@index([branchId])
+}
+
+/// A single service line inside a MarketingOffer.
+model MarketingOfferItem {
+  id         String         @id @default(cuid())
+  offerId    String
+  offer      MarketingOffer @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category       @relation(fields: [categoryId], references: [id])
+  serviceId  String
+  service    Service        @relation(fields: [serviceId], references: [id])
+  quantity   Int            @default(1)
+  sortOrder  Int            @default(0)
+
+  @@index([offerId])
+}
+
+// ===========================================================================
+// Sales pipeline (module M13)
+//
+// Pipeline: Lead -> Quotation -> SalesOrder -> Delivery -> Invoice -> Payment.
+// Money is stored as integer minor units (paise). Status fields are strings
+// constrained by const unions in src/lib/enums.ts. The "salesperson" is a
+// Staff member referenced via `ownerStaffId`.
+// ===========================================================================
+
+/// A customer of the organization — the single owner of customer data.
+model Customer {
+  id          String       @id @default(cuid())
+  orgId       String
+  org         Organization @relation(fields: [orgId], references: [id])
+  branchId    String?
+  branch      Branch?      @relation(fields: [branchId], references: [id])
+  type        String       @default("individual") // individual | business
+  name        String
+  email       String?
+  phone       String?
+  companyName String?
+  gstin       String?
+  address     String?
+  city        String?
+  notes       String?
+  avatarUrl   String? // profile photo (data URL)
+  tags        String       @default("[]") // JSON string: string[]
+  isActive    Boolean      @default(true)
+  createdById String?
+  leads          Lead[]
+  quotations     Quotation[]
+  orders         SalesOrder[]
+  invoices       Invoice[]
+  followUps      FollowUp[]
+  bookings       Booking[]
+  packages       Package[]
+  offers         Offer[]
+  prescriptions  Prescription[]
+  medicalReports MedicalReport[]
+  feedback       Feedback[]
+  documents      Document[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+
+  @@index([orgId])
+  @@index([orgId, phone])
+}
+
+/// "Who is interested in buying?" — a sales lead.
+model Lead {
+  id             String       @id @default(cuid())
+  orgId          String
+  org            Organization @relation(fields: [orgId], references: [id])
+  branchId       String?
+  branch         Branch?      @relation(fields: [branchId], references: [id])
+  customerId     String?
+  customer       Customer?    @relation(fields: [customerId], references: [id])
+  treatmentId    String?
+  treatment      Treatment?   @relation(fields: [treatmentId], references: [id])
+  contactName    String
+  contactPhone   String?
+  contactEmail   String?
+  source         String       @default("other")
+  status         String       @default("new")
+  interest       String?
+  gender         String?
+  enquiryType    String?
+  media          String?
+  callType       String?
+  healthStatus   String?
+  leadTransfer   Boolean      @default(false)
+  estimatedValue Int? // minor units
+  ownerStaffId   String
+  owner          Staff        @relation("LeadOwner", fields: [ownerStaffId], references: [id])
+  notes          String?
+  lostReason     String?
+  quotations     Quotation[]
+  followUps      FollowUp[]
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([orgId, status])
+}
+
+/// A logged follow-up interaction against an enquiry (lead) — when the
+/// customer was contacted, what was discussed and when to follow up next.
+model FollowUp {
+  id           String    @id @default(cuid())
+  orgId        String
+  leadId       String
+  lead         Lead      @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  customerId   String?
+  customer     Customer? @relation(fields: [customerId], references: [id])
+  contactedAt  DateTime? // when the customer was contacted
+  dueAt        DateTime? // next follow-up date
+  note         String? // call discussion notes
+  remarks      String? // observations / remarks
+  status       String    @default("pending") // pending | completed | cancelled
+  outcome      String? // interaction outcome (see FOLLOWUP_OUTCOMES)
+  completedAt  DateTime?
+  assignedToId String?
+  createdById  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  @@index([orgId, status])
+  @@index([leadId])
+  @@index([customerId])
+}
+
+/// "What did we quote them? Did they approve?" — a price quotation.
+model Quotation {
+  id             String          @id @default(cuid())
+  orgId          String
+  org            Organization    @relation(fields: [orgId], references: [id])
+  branchId       String?
+  branch         Branch?         @relation(fields: [branchId], references: [id])
+  number         String
+  customerId     String
+  customer       Customer        @relation(fields: [customerId], references: [id])
+  leadId         String?
+  lead           Lead?           @relation(fields: [leadId], references: [id])
+  ownerStaffId   String
+  owner          Staff           @relation("QuotationOwner", fields: [ownerStaffId], references: [id])
+  status         String          @default("draft")
+  validUntil     DateTime?
+  subtotal       Int             @default(0)
+  discountAmt    Int             @default(0)
+  taxAmt         Int             @default(0)
+  total          Int             @default(0)
+  currency       String          @default("INR")
+  notes          String?
+  sentAt         DateTime?
+  approvedAt     DateTime?
+  approvedById   String?
+  rejectedReason String?
+  items          QuotationItem[]
+  order          SalesOrder?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@unique([orgId, number])
+  @@index([orgId, status])
+}
+
+/// A single line on a quotation. Snapshots description + price.
+model QuotationItem {
+  id          String    @id @default(cuid())
+  quotationId String
+  quotation   Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  productId   String?
+  description String
+  quantity    Int       @default(1)
+  unitPrice   Int // minor units
+  discountAmt Int       @default(0)
+  taxRate     Int       @default(0) // basis points, e.g. 1800 = 18%
+  lineTotal   Int
+  sortOrder   Int       @default(0)
+}
+
+/// "What order did they place?" — a confirmed sales order.
+model SalesOrder {
+  id            String       @id @default(cuid())
+  orgId         String
+  org           Organization @relation(fields: [orgId], references: [id])
+  branchId      String?
+  branch        Branch?      @relation(fields: [branchId], references: [id])
+  number        String
+  customerId    String
+  customer      Customer     @relation(fields: [customerId], references: [id])
+  quotationId   String?      @unique
+  quotation     Quotation?   @relation(fields: [quotationId], references: [id])
+  ownerStaffId  String
+  owner         Staff        @relation("OrderOwner", fields: [ownerStaffId], references: [id])
+  status        String       @default("pending")
+  paymentStatus String       @default("unpaid") // cached, derived from invoices
+  subtotal      Int          @default(0)
+  discountAmt   Int          @default(0)
+  taxAmt        Int          @default(0)
+  total         Int          @default(0)
+  currency      String       @default("INR")
+  orderedAt     DateTime     @default(now())
+  notes         String?
+  items         OrderItem[]
+  deliveries    Delivery[]
+  invoices      Invoice[]
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@unique([orgId, number])
+  @@index([orgId, status])
+}
+
+/// A single line on a sales order.
+model OrderItem {
+  id                String     @id @default(cuid())
+  orderId           String
+  order             SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  productId         String?
+  description       String
+  quantity          Int        @default(1)
+  quantityDelivered Int        @default(0)
+  unitPrice         Int
+  discountAmt       Int        @default(0)
+  taxRate           Int        @default(0)
+  lineTotal         Int
+  sortOrder         Int        @default(0)
+}
+
+/// "Did we deliver?" — a delivery/fulfilment record against an order.
+model Delivery {
+  id             String     @id @default(cuid())
+  orgId          String
+  orderId        String
+  order          SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  status         String     @default("scheduled")
+  scheduledFor   DateTime?
+  dispatchedAt   DateTime?
+  deliveredAt    DateTime?
+  handledById    String?
+  trackingRef    String?
+  lineQuantities String     @default("[]") // JSON: [{ orderItemId, quantity }]
+  notes          String?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([orgId, status])
+}
+
+/// "Did they pay?" — an invoice raised to a customer.
+model Invoice {
+  id         String       @id @default(cuid())
+  orgId      String
+  org        Organization @relation(fields: [orgId], references: [id])
+  branchId   String?
+  branch     Branch?      @relation(fields: [branchId], references: [id])
+  number     String
+  customerId String
+  customer   Customer     @relation(fields: [customerId], references: [id])
+  orderId    String?
+  order      SalesOrder?  @relation(fields: [orderId], references: [id])
+  status     String       @default("draft")
+  issuedAt   DateTime?
+  dueAt      DateTime?
+  subtotal   Int          @default(0)
+  taxAmt     Int          @default(0)
+  total      Int          @default(0)
+  amountPaid Int          @default(0) // cached sum of payments
+  currency   String       @default("INR")
+  notes      String?
+  payments   Payment[]
+  createdAt  DateTime     @default(now())
+  updatedAt  DateTime     @updatedAt
+
+  @@unique([orgId, number])
+  @@index([orgId, status])
+}
+
+/// A payment received against an invoice. Append-only ledger.
+model Payment {
+  id           String   @id @default(cuid())
+  orgId        String
+  invoiceId    String
+  invoice      Invoice  @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  amount       Int // minor units
+  method       String   @default("cash")
+  reference    String?
+  receivedAt   DateTime @default(now())
+  recordedById String?
+  createdAt    DateTime @default(now())
+
+  @@index([orgId])
+}
+
+/// Per-organization sequence counters for human-readable document numbers
+/// (e.g. QT-0001, SO-0001, INV-0001). Avoids races on number generation.
+model Counter {
+  id    String @id @default(cuid())
+  orgId String
+  key   String
+  value Int    @default(0)
+
+  @@unique([orgId, key])
+}
+
+/// A configurable dropdown option (enquiry type, media, call type) managed
+/// as master data in Settings.
+model MasterOption {
+  id        String   @id @default(cuid())
+  orgId     String
+  kind      String // enquiry_type | media | call_type
+  label     String
+  sortOrder Int      @default(0)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([orgId, kind])
+}
+
+/// A treatment/service offered by the organization — a master list managed
+/// in Settings and selected when recording an enquiry.
+model Treatment {
+  id              String       @id @default(cuid())
+  orgId           String
+  org             Organization @relation(fields: [orgId], references: [id])
+  name            String
+  category        String?
+  description     String?
+  durationMinutes Int?
+  price           Int? // minor units
+  isActive        Boolean      @default(true)
+  leads           Lead[]
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([orgId])
+}
+
+// --- Customer relationship modules (Phase 2) --------------------------------
+
+/// A simple service booking for a customer.
+model Booking {
+  id                String        @id @default(cuid())
+  orgId             String
+  branchId          String?
+  customerId        String
+  customer          Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  number            String? // e.g. BKG-0001
+  consultantStaffId String?
+  serviceName       String // summary of the booked services
+  scheduledAt       DateTime
+  status            String        @default("scheduled") // scheduled | completed | cancelled | no_show
+  totalAmount       Int           @default(0) // minor units
+  discount          Int           @default(0) // minor units
+  roundOff          Int           @default(0) // minor units (may be negative)
+  netAmount         Int           @default(0) // minor units
+  notes             String?
+  items             BookingItem[]
+  createdById       String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  @@index([orgId])
+  @@index([customerId])
+}
+
+/// A single service line on a booking.
+model BookingItem {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  category  String?
+  service   String
+  quantity  Int     @default(1)
+  amount    Int     @default(0) // unit amount, minor units
+  lineTotal Int     @default(0) // amount × quantity
+  sortOrder Int     @default(0)
+
+  @@index([bookingId])
+}
+
+/// A session-based treatment package purchased by a customer.
+model Package {
+  id            String    @id @default(cuid())
+  orgId         String
+  customerId    String
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  treatmentId   String? // optional link to a Treatment (not enforced)
+  name          String
+  totalSessions Int
+  usedSessions  Int       @default(0)
+  price         Int       @default(0) // minor units
+  purchasedAt   DateTime  @default(now())
+  expiresAt     DateTime?
+  status        String    @default("active") // active | completed | expired | cancelled
+  notes         String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([orgId])
+  @@index([customerId])
+}
+
+/// A customer-specific promotional offer.
+model Offer {
+  id            String    @id @default(cuid())
+  orgId         String
+  customerId    String
+  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  title         String
+  description   String?
+  discountType  String    @default("percent") // percent | flat
+  discountValue Int       @default(0) // percent: whole %, flat: minor units
+  validFrom     DateTime?
+  validUntil    DateTime?
+  status        String    @default("active") // active | redeemed | expired | cancelled
+  redeemedAt    DateTime?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([orgId])
+  @@index([customerId])
+}
+
+/// A medical prescription issued to a customer.
+model Prescription {
+  id           String   @id @default(cuid())
+  orgId        String
+  customerId   String
+  customer     Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  prescribedBy String? // doctor / staff name
+  diagnosis    String?
+  medications  String? // free-text medication list
+  notes        String?
+  fileUrl      String? // optional external document reference
+  issuedAt     DateTime @default(now())
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([customerId])
+}
+
+/// A medical report / document record for a customer.
+model MedicalReport {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  title       String
+  reportType  String? // e.g. blood test, scan
+  findings    String?
+  notes       String?
+  fileUrl     String? // optional external document reference
+  reportedAt  DateTime @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([customerId])
+}
+
+/// A piece of feedback left by a customer.
+model Feedback {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rating      Int // 1-5
+  comment     String?
+  relatedTo   String? // service / context the feedback is about
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([customerId])
+}
+
+/// A general document record for a customer (metadata + optional file URL).
+model Document {
+  id          String   @id @default(cuid())
+  orgId       String
+  customerId  String
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  title       String
+  docType     String? // e.g. ID proof, consent form, invoice copy
+  fileUrl     String? // optional external document reference
+  notes       String?
+  uploadedAt  DateTime @default(now())
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([customerId])
+}
+
+// --- Cash management (Phase 3) ----------------------------------------------
+
+/// A physical cash count broken down by note/coin denomination.
+model CashDenomination {
+  id          String   @id @default(cuid())
+  orgId       String
+  branchId    String?
+  countedAt   DateTime @default(now())
+  label       String? // e.g. "Morning count", "Closing count"
+  breakdown   String // JSON: { "500": 10, "200": 5, ... }
+  total       Int      @default(0) // minor units
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([orgId])
+}
+
+/// A petty-cash ledger entry — small cash received or spent.
+model PettyCashEntry {
+  id          String   @id @default(cuid())
+  orgId       String
+  branchId    String?
+  entryDate   DateTime @default(now())
+  direction   String // "in" | "out"
+  category    String?
+  description String
+  amount      Int // minor units
+  paidTo      String?
+  reference   String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([orgId])
+}
+
+/// An accounting voucher (payment / receipt / journal / contra).
+model Voucher {
+  id          String   @id @default(cuid())
+  orgId       String
+  branchId    String?
+  number      String
+  voucherType String // "payment" | "receipt" | "journal" | "contra"
+  voucherDate DateTime @default(now())
+  party       String
+  amount      Int // minor units
+  mode        String   @default("cash") // "cash" | "bank"
+  narration   String?
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  @@index([orgId])
+}
+
+/// An end-of-day cash close — reconciles counted cash against expected.
+model DayClose {
+  id              String   @id @default(cuid())
+  orgId           String
+  branchId        String?
+  closeDate       DateTime
+  openingCash     Int      @default(0)
+  cashCollections Int      @default(0)
+  pettyCashIn     Int      @default(0)
+  pettyCashOut    Int      @default(0)
+  expectedCash    Int      @default(0)
+  countedCash     Int      @default(0)
+  difference      Int      @default(0)
+  note            String?
+  closedById      String?
+  closedAt        DateTime @default(now())
+  createdAt       DateTime @default(now())
+
+  @@index([orgId])
+}

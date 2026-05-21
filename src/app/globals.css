@@ -1,0 +1,73 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700&display=swap');
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  font-family: 'Poppins', system-ui, sans-serif;
+  /* CSS vars are injected at runtime by ThemeProvider; the fallback values
+     mirror the Sage on Ivory premium default in src/theme/colors.ts. */
+  background-color: var(--bg-primary, #f8f4ed);
+  color: var(--text-primary, #1f2622);
+}
+
+/* Subtle shimmer used for loading skeletons — picks up the live palette. */
+@keyframes welona-shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+.welona-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-tertiary, #efe9dc) 25%,
+    var(--bg-secondary, #ffffff) 50%,
+    var(--bg-tertiary, #efe9dc) 75%
+  );
+  background-size: 800px 100%;
+  animation: welona-shimmer 1.4s infinite linear;
+}
+
+/* Printing — isolate the receipt sheet from the dashboard chrome. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #receipt-paper,
+  #receipt-paper * {
+    visibility: visible;
+  }
+  #receipt-paper {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-tertiary, #efe9dc);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border, #e5ddc9);
+  border-radius: 8px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--brand-primary, #4f6f52);
+}
