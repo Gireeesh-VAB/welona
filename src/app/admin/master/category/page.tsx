@@ -24,6 +24,7 @@ import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { useRouter } from 'next/navigation';
 import {
   useAdminCategories,
+  useCreateAdminCategory,
   useDeleteAdminCategory,
   useUpdateAdminCategory,
 } from '@/hooks/useAdminCategories';
@@ -31,8 +32,20 @@ import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminCategory } from '@/types/admin-category';
+import type { AdminCategoryCreateInput } from '@/lib/admin-categories';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const CATEGORY_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Name',         key: 'name',         required: true,  type: 'string', hint: 'e.g. Skin Services' },
+  { header: 'Code',         key: 'categoryCode', required: false, type: 'string' },
+  { header: 'Description',  key: 'description',  required: false, type: 'string' },
+];
+const CATEGORY_BULK_SAMPLES = [
+  { name: 'Skin Services',  categoryCode: 'SKIN',     description: 'Dermatology, peels, facials' },
+  { name: 'LASER',          categoryCode: 'LASER',    description: 'Laser hair removal & skin laser' },
+];
 
 function formatDate(iso: string): string {
   return new Date(iso).toLocaleDateString('en-IN', {
@@ -57,6 +70,7 @@ export default function AdminMasterCategoryPage() {
     limit,
   });
 
+  const create = useCreateAdminCategory();
   const update = useUpdateAdminCategory();
   const remove = useDeleteAdminCategory();
 
@@ -216,13 +230,24 @@ export default function AdminMasterCategoryPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => router.push('/admin/master/category/new')}
-        >
-          Add Category
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Categories"
+            entityPlural="categories"
+            columns={CATEGORY_BULK_COLUMNS}
+            sampleRows={CATEGORY_BULK_SAMPLES}
+            onImport={async (row) => {
+              await create.mutateAsync(row as AdminCategoryCreateInput);
+            }}
+          />
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => router.push('/admin/master/category/new')}
+          >
+            Add Category
+          </Button>
+        </Space>
       </div>
 
       <Card

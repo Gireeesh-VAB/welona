@@ -39,8 +39,23 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminService } from '@/types/admin-service';
 import type { AdminServiceCreateInput } from '@/lib/admin-services';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const SERVICE_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Category',    key: '_category',  required: true,  type: 'string', hint: 'Category name, e.g. Skin Services' },
+  { header: 'Name',        key: 'name',       required: true,  type: 'string', hint: 'e.g. TCA Peel' },
+  { header: 'HSN/SAC',     key: 'hsnSacCode', required: false, type: 'string' },
+  { header: 'Min Price',   key: 'minPrice',   required: true,  type: 'number', hint: 'In rupees, e.g. 3500',
+    transform: (v) => Math.round(Number(v) * 100) },
+  { header: 'Max Price',   key: 'maxPrice',   required: true,  type: 'number', hint: 'In rupees, e.g. 7500',
+    transform: (v) => Math.round(Number(v) * 100) },
+  { header: 'Tax %',       key: 'taxPercent', required: false, type: 'number', hint: '0-100' },
+];
+const SERVICE_BULK_SAMPLES = [
+  { _category: 'Skin Services', name: 'TCA Peel', hsnSacCode: '999722', minPrice: '3500', maxPrice: '7500', taxPercent: '18' },
+];
 
 interface ServiceFormValues {
   categoryId: string;
@@ -348,9 +363,36 @@ export default function AdminMasterServicesPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Service
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Services"
+            entityPlural="services"
+            columns={SERVICE_BULK_COLUMNS}
+            sampleRows={SERVICE_BULK_SAMPLES}
+            onImport={async (row) => {
+              const catName = String(row._category ?? '').toLowerCase();
+              const category = (categoriesData?.items ?? []).find(
+                (c) => c.name.toLowerCase() === catName,
+              );
+              if (!category) throw new Error(`Category "${row._category}" not found — add it first under Master → Category`);
+              const body: AdminServiceCreateInput = {
+                categoryId: category.id,
+                name: String(row.name),
+                hsnSacCode: row.hsnSacCode ? String(row.hsnSacCode) : undefined,
+                minPrice: Number(row.minPrice),
+                maxPrice: Number(row.maxPrice),
+                taxPercent: row.taxPercent !== undefined ? Number(row.taxPercent) : 0,
+                hasMeasurements: false,
+                hasComplementary: false,
+                isActive: true,
+              };
+              await create.mutateAsync(body);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Service
+          </Button>
+        </Space>
       </div>
 
       <Card

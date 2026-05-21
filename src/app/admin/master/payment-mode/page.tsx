@@ -32,6 +32,16 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminPaymentMode } from '@/types/admin-payment-mode';
 import type { AdminPaymentModeCreateInput } from '@/lib/admin-payment-modes';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
+
+const PAYMENT_MODE_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Name',    key: 'name',    required: true,  type: 'string', hint: 'e.g. UPI' },
+  { header: 'Remarks', key: 'remarks', required: false, type: 'string', hint: 'Optional notes' },
+];
+const PAYMENT_MODE_BULK_SAMPLES = [
+  { name: 'UPI',         remarks: 'GPay / PhonePe / Paytm' },
+  { name: 'Credit Card', remarks: 'POS terminal' },
+];
 
 const { Title, Text } = Typography;
 
@@ -247,9 +257,20 @@ export default function AdminMasterPaymentModePage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Paymode
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Payment Modes"
+            entityPlural="payment modes"
+            columns={PAYMENT_MODE_BULK_COLUMNS}
+            sampleRows={PAYMENT_MODE_BULK_SAMPLES}
+            onImport={async (row) => {
+              await create.mutateAsync(row as AdminPaymentModeCreateInput);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Paymode
+          </Button>
+        </Space>
       </div>
 
       <Card

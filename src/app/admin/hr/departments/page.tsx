@@ -32,8 +32,18 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminDepartment } from '@/types/admin-department';
 import type { AdminDepartmentCreateInput } from '@/lib/admin-departments';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const DEPARTMENT_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Name',    key: 'name',    required: true,  type: 'string', hint: 'e.g. Front Desk' },
+  { header: 'Remarks', key: 'remarks', required: false, type: 'string', hint: 'Optional description' },
+];
+const DEPARTMENT_BULK_SAMPLES = [
+  { name: 'Front Desk', remarks: 'Reception & customer-facing roles' },
+  { name: 'Clinical',   remarks: 'Doctors, therapists, nurses' },
+];
 
 interface DepartmentFormValues {
   name: string;
@@ -246,9 +256,20 @@ export default function AdminHrDepartmentsPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Department
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Departments"
+            entityPlural="departments"
+            columns={DEPARTMENT_BULK_COLUMNS}
+            sampleRows={DEPARTMENT_BULK_SAMPLES}
+            onImport={async (row) => {
+              await create.mutateAsync(row as AdminDepartmentCreateInput);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Department
+          </Button>
+        </Space>
       </div>
 
       <Card

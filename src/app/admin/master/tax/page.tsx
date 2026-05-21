@@ -33,8 +33,26 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminTax } from '@/types/admin-tax';
 import type { AdminTaxCreateInput } from '@/lib/admin-taxes';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const TAX_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Name',    key: 'name',       required: true,  type: 'string', hint: 'e.g. GST 18' },
+  { header: 'Percent', key: 'percentBps', required: true,  type: 'number',
+    hint: 'Percentage value, e.g. 18 for 18%',
+    transform: (v) => Math.round(Number(v) * 100), // store as basis points
+    validate: (v) => {
+      const n = Number(v);
+      if (n < 0 || n > 100) return 'Percent must be between 0 and 100';
+      return null;
+    } },
+  { header: 'Remarks', key: 'remarks',    required: false, type: 'string', hint: 'Optional' },
+];
+const TAX_BULK_SAMPLES = [
+  { name: 'GST 5',  percentBps: '5',  remarks: 'GST 5% slab' },
+  { name: 'GST 18', percentBps: '18', remarks: 'GST 18% slab' },
+];
 
 interface TaxFormValues {
   name: string;
@@ -266,9 +284,20 @@ export default function AdminMasterTaxPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Tax
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Taxes"
+            entityPlural="tax rates"
+            columns={TAX_BULK_COLUMNS}
+            sampleRows={TAX_BULK_SAMPLES}
+            onImport={async (row) => {
+              await create.mutateAsync(row as AdminTaxCreateInput);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Tax
+          </Button>
+        </Space>
       </div>
 
       <Card

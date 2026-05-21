@@ -36,8 +36,23 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminBranch } from '@/types/admin-branch';
 import type { AdminBranchCreateInput } from '@/lib/admin-branches';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const BRANCH_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Branch Name', key: 'branchName', required: true,  type: 'string', hint: 'e.g. Jubilee Hills' },
+  { header: 'Branch Code', key: 'branchCode', required: true,  type: 'string', hint: 'Unique, e.g. JH001' },
+  { header: 'State',       key: '_state',     required: true,  type: 'string', hint: 'Zone state name, e.g. Telangana' },
+  { header: 'Address',     key: 'address',    required: false, type: 'string' },
+  { header: 'Phone',       key: 'phone',      required: false, type: 'phone',  hint: '+91-9876543210' },
+  { header: 'Email',       key: 'email',      required: false, type: 'email' },
+  { header: 'IP Address',  key: 'ipAddress',  required: false, type: 'string', hint: 'Branch LAN IP, optional' },
+];
+const BRANCH_BULK_SAMPLES = [
+  { branchName: 'Jubilee Hills', branchCode: 'JH001', _state: 'Telangana',
+    address: 'Road No. 36, Jubilee Hills', phone: '+91-9876543210', email: 'jubilee@welona.com', ipAddress: '192.168.1.10' },
+];
 
 interface BranchFormValues {
   branchName: string;
@@ -333,9 +348,34 @@ export default function AdminMasterBranchesPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Branch
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Branches"
+            entityPlural="branches"
+            columns={BRANCH_BULK_COLUMNS}
+            sampleRows={BRANCH_BULK_SAMPLES}
+            onImport={async (row) => {
+              const state = String(row._state ?? '').toLowerCase();
+              const zone = (zonesData?.items ?? []).find(
+                (z) => z.stateName.toLowerCase() === state,
+              );
+              if (!zone) throw new Error(`Zone "${row._state}" not found — add it first under Master → Zone`);
+              const body: AdminBranchCreateInput = {
+                branchName: String(row.branchName),
+                branchCode: String(row.branchCode),
+                zoneId: zone.id,
+                address: row.address ? String(row.address) : undefined,
+                phone: row.phone ? String(row.phone) : undefined,
+                email: row.email ? String(row.email) : undefined,
+                ipAddress: row.ipAddress ? String(row.ipAddress) : undefined,
+              };
+              await createBranch.mutateAsync(body);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Branch
+          </Button>
+        </Space>
       </div>
 
       {/* --- Stats strip --- */}

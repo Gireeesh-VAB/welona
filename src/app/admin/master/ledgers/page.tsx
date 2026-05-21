@@ -42,6 +42,24 @@ import {
 } from '@/lib/admin-ledgers';
 import type { AdminLedger } from '@/types/admin-ledger';
 import type { AdminLedgerCreateInput } from '@/lib/admin-ledgers';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
+
+const LEDGER_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Name',          key: 'name',           required: true,  type: 'string', hint: 'e.g. Cash on Hand' },
+  { header: 'Group',         key: 'group',          required: true,  type: 'enum',
+    enumOptions: [...LEDGER_GROUPS], hint: 'One of the LEDGER groups' },
+  { header: 'Balance Type',  key: 'balanceType',    required: true,  type: 'enum',
+    enumOptions: ['debit', 'credit'], hint: 'debit or credit' },
+  { header: 'Opening (₹)',   key: 'openingBalance', required: false, type: 'number',
+    hint: 'In rupees, e.g. 50000',
+    transform: (v) => Math.round(Number(v) * 100) },
+  { header: 'GST Number',    key: 'gstNumber',      required: false, type: 'string' },
+  { header: 'Description',   key: 'description',    required: false, type: 'string' },
+];
+const LEDGER_BULK_SAMPLES = [
+  { name: 'Cash on Hand', group: 'cash', balanceType: 'debit', openingBalance: '50000', gstNumber: '', description: 'Petty cash + drawer float' },
+  { name: 'GST Payable',  group: 'duties_taxes', balanceType: 'credit', openingBalance: '0', gstNumber: '', description: 'Output GST collected on sales' },
+];
 
 const { Title, Text } = Typography;
 
@@ -329,9 +347,29 @@ export default function AdminMasterLedgersPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Ledger
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Ledgers"
+            entityPlural="ledgers"
+            columns={LEDGER_BULK_COLUMNS}
+            sampleRows={LEDGER_BULK_SAMPLES}
+            onImport={async (row) => {
+              const body: AdminLedgerCreateInput = {
+                name: String(row.name),
+                group: row.group as LedgerGroup,
+                balanceType: row.balanceType as 'debit' | 'credit',
+                openingBalance: row.openingBalance !== undefined ? Number(row.openingBalance) : 0,
+                gstNumber: row.gstNumber ? String(row.gstNumber) : undefined,
+                description: row.description ? String(row.description) : undefined,
+                isActive: true,
+              };
+              await create.mutateAsync(body);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Ledger
+          </Button>
+        </Space>
       </div>
 
       <Card

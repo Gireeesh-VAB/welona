@@ -36,8 +36,19 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminMedia } from '@/types/admin-media';
 import type { AdminMediaCreateInput } from '@/lib/admin-medias';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const MEDIA_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Name',    key: 'name',    required: true,  type: 'string', hint: 'e.g. Instagram' },
+  { header: 'State',   key: '_state',  required: true,  type: 'string', hint: 'Zone state, e.g. Telangana' },
+  { header: 'Remarks', key: 'remarks', required: false, type: 'string' },
+];
+const MEDIA_BULK_SAMPLES = [
+  { name: 'Instagram', _state: 'Telangana', remarks: 'Instagram ads' },
+  { name: 'Whatsapp',  _state: 'Telangana', remarks: 'Whatsapp broadcasts' },
+];
 
 interface MediaFormValues {
   zoneId: string;
@@ -283,9 +294,31 @@ export default function AdminMasterMediaPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Media
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Media"
+            entityPlural="media channels"
+            columns={MEDIA_BULK_COLUMNS}
+            sampleRows={MEDIA_BULK_SAMPLES}
+            onImport={async (row) => {
+              const state = String(row._state ?? '').toLowerCase();
+              const zone = (zonesData?.items ?? []).find(
+                (z) => z.stateName.toLowerCase() === state,
+              );
+              if (!zone) throw new Error(`Zone "${row._state}" not found — add it first under Master → Zone`);
+              const body: AdminMediaCreateInput = {
+                zoneId: zone.id,
+                name: String(row.name),
+                remarks: row.remarks ? String(row.remarks) : undefined,
+                isActive: true,
+              };
+              await create.mutateAsync(body);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Media
+          </Button>
+        </Space>
       </div>
 
       <Card

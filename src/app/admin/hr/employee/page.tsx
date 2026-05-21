@@ -48,8 +48,47 @@ import {
   CALLER_TYPE_OPTIONS,
   type AdminEmployeeCreateInput,
 } from '@/lib/admin-employees';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const EMPLOYEE_BULK_COLUMNS: BulkColumn[] = [
+  // Personal
+  { header: 'Name',           key: 'name',         required: true,  type: 'string', hint: 'e.g. Rohit Sharma' },
+  { header: 'Employee Code',  key: 'employeeCode', required: true,  type: 'string', hint: 'Unique, e.g. EMP-0001' },
+  { header: 'Mobile',         key: 'mobileNo',     required: true,  type: 'phone' },
+  { header: 'Father Name',    key: 'fatherName',   required: false, type: 'string' },
+  { header: 'Gender',         key: 'gender',       required: false, type: 'enum',
+    enumOptions: ['male', 'female', 'other'], hint: 'male / female / other' },
+  { header: 'DOB',            key: 'dob',          required: false, type: 'date',  hint: 'DD-MM-YYYY' },
+  { header: 'Email',          key: 'email',        required: false, type: 'email' },
+  { header: 'PAN',            key: 'panNo',        required: false, type: 'string' },
+  { header: 'Pincode',        key: 'pincode',      required: false, type: 'string' },
+  { header: 'Address',        key: 'address',      required: false, type: 'string' },
+  // Official
+  { header: 'Joining Date',   key: 'joiningDate',  required: true,  type: 'date',  hint: 'DD-MM-YYYY' },
+  { header: 'Designation',    key: '_designation', required: false, type: 'string', hint: 'Existing designation name' },
+  { header: 'Department',     key: '_department',  required: false, type: 'string', hint: 'Existing department name' },
+  { header: 'Branch Code',    key: '_branchCode',  required: false, type: 'string', hint: 'Existing branch code, e.g. JH001' },
+  { header: 'Salary (₹)',     key: 'salary',       required: false, type: 'number',
+    transform: (v) => Math.round(Number(v) * 100) },
+  { header: 'Bank Name',      key: 'bankName',     required: false, type: 'string' },
+  { header: 'Bank Account',   key: 'bankAccountNo',required: false, type: 'string' },
+  { header: 'PF',             key: 'pf',           required: false, type: 'boolean', hint: 'Yes/No' },
+  { header: 'ESI',            key: 'esi',          required: false, type: 'boolean', hint: 'Yes/No' },
+  { header: 'Weekly Off',     key: 'weeklyOff',    required: false, type: 'enum',
+    enumOptions: [...WEEKLY_OFF_OPTIONS] },
+  { header: 'Caller Type',    key: 'callerType',   required: false, type: 'enum',
+    enumOptions: [...CALLER_TYPE_OPTIONS] },
+];
+const EMPLOYEE_BULK_SAMPLES = [
+  { name: 'Rohit Sharma', employeeCode: 'EMP-0001', mobileNo: '+91 98100 10001',
+    fatherName: 'Anil Sharma', gender: 'male', dob: '12-04-1986', email: 'rohit.sharma@welona.com',
+    panNo: 'ABCPS1234A', pincode: '500033', address: 'Road No. 36, Jubilee Hills',
+    joiningDate: '15-06-2020', _designation: 'Sr Branch Manager', _department: 'Operations', _branchCode: 'JH001',
+    salary: '95000', bankName: 'HDFC Bank', bankAccountNo: '50100123456789',
+    pf: 'Yes', esi: 'No', weeklyOff: 'Sunday', callerType: 'None' },
+];
 
 interface EmployeeFormValues {
   // Personal
@@ -699,9 +738,58 @@ export default function AdminHrEmployeePage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Employee
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Employees"
+            entityPlural="employees"
+            columns={EMPLOYEE_BULK_COLUMNS}
+            sampleRows={EMPLOYEE_BULK_SAMPLES}
+            onImport={async (row) => {
+              const desigName = String(row._designation ?? '').toLowerCase();
+              const deptName = String(row._department ?? '').toLowerCase();
+              const branchCode = String(row._branchCode ?? '').toLowerCase();
+              const designation = desigName
+                ? (designationsData?.items ?? []).find((d) => d.name.toLowerCase() === desigName)
+                : undefined;
+              const department = deptName
+                ? (departmentsData?.items ?? []).find((d) => d.name.toLowerCase() === deptName)
+                : undefined;
+              const branch = branchCode
+                ? (branchesData?.items ?? []).find((b) => b.branchCode.toLowerCase() === branchCode)
+                : undefined;
+              if (row._designation && !designation) throw new Error(`Designation "${row._designation}" not found`);
+              if (row._department && !department) throw new Error(`Department "${row._department}" not found`);
+              if (row._branchCode && !branch) throw new Error(`Branch code "${row._branchCode}" not found`);
+              const body: AdminEmployeeCreateInput = {
+                name: String(row.name).trim(),
+                employeeCode: String(row.employeeCode).trim(),
+                mobileNo: String(row.mobileNo).trim(),
+                fatherName: row.fatherName ? String(row.fatherName) : undefined,
+                gender: row.gender as 'male' | 'female' | 'other' | undefined,
+                dob: row.dob ? new Date(String(row.dob)).toISOString() : undefined,
+                email: row.email ? String(row.email) : undefined,
+                panNo: row.panNo ? String(row.panNo) : undefined,
+                pincode: row.pincode ? String(row.pincode) : undefined,
+                address: row.address ? String(row.address) : undefined,
+                joiningDate: new Date(String(row.joiningDate)).toISOString(),
+                designationId: designation?.id,
+                departmentId: department?.id,
+                branchId: branch?.id,
+                salary: row.salary !== undefined ? Number(row.salary) : 0,
+                bankName: row.bankName ? String(row.bankName) : undefined,
+                bankAccountNo: row.bankAccountNo ? String(row.bankAccountNo) : undefined,
+                pf: row.pf === true,
+                esi: row.esi === true,
+                weeklyOff: row.weeklyOff ? String(row.weeklyOff) : undefined,
+                callerType: row.callerType ? String(row.callerType) : undefined,
+              };
+              await create.mutateAsync(body);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Employee
+          </Button>
+        </Space>
       </div>
 
       <Card

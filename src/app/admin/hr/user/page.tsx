@@ -36,8 +36,25 @@ import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import type { AdminSystemUser } from '@/types/admin-system-user';
 import type { AdminSystemUserCreateInput } from '@/lib/admin-system-users';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const USER_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'User Name',     key: 'userName', required: true,  type: 'string',
+    hint: 'Letters/digits/._- only, e.g. priya.kapoor',
+    validate: (v) => /^[A-Za-z0-9._-]+$/.test(v) ? null : 'Letters, digits, dot, dash or underscore only',
+  },
+  { header: 'Password',      key: 'password', required: true,  type: 'string',
+    hint: 'Min 6 chars',
+    validate: (v) => v.length >= 6 ? null : 'Password must be at least 6 characters' },
+  { header: 'Email',         key: 'email',    required: false, type: 'email' },
+  { header: 'Employee Code', key: '_empCode', required: false, type: 'string', hint: 'Existing Employee Code, e.g. EMP-0001' },
+  { header: 'Branch Code',   key: '_branchCode', required: false, type: 'string', hint: 'Existing Branch Code, e.g. JH001' },
+];
+const USER_BULK_SAMPLES = [
+  { userName: 'priya.kapoor', password: 'Welona@123', email: 'priya.kapoor@welona.com', _empCode: 'EMP-0002', _branchCode: 'BH002' },
+];
 
 interface UserFormValues {
   userName: string;
@@ -271,9 +288,37 @@ export default function AdminHrUserPage() {
             System login users linked to an employee and branch.
           </Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add User
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="System Users"
+            entityPlural="system users"
+            columns={USER_BULK_COLUMNS}
+            sampleRows={USER_BULK_SAMPLES}
+            onImport={async (row) => {
+              const empCode = String(row._empCode ?? '').toLowerCase();
+              const branchCode = String(row._branchCode ?? '').toLowerCase();
+              const employee = empCode
+                ? (employeesData?.items ?? []).find((e) => e.employeeCode.toLowerCase() === empCode)
+                : undefined;
+              const branch = branchCode
+                ? (branchesData?.items ?? []).find((b) => b.branchCode.toLowerCase() === branchCode)
+                : undefined;
+              if (row._empCode && !employee) throw new Error(`Employee code "${row._empCode}" not found`);
+              if (row._branchCode && !branch) throw new Error(`Branch code "${row._branchCode}" not found`);
+              const body: AdminSystemUserCreateInput = {
+                userName: String(row.userName),
+                password: String(row.password),
+                email: row.email ? String(row.email) : undefined,
+                employeeId: employee?.id,
+                branchId: branch?.id,
+              };
+              await create.mutateAsync(body);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add User
+          </Button>
+        </Space>
       </div>
 
       <Card

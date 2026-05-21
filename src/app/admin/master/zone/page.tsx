@@ -31,8 +31,19 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { Zone } from '@/types/zone';
 import type { ZoneCreateInput } from '@/lib/zones';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const ZONE_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Country',    key: 'country',   required: true,  type: 'string', hint: 'e.g. India' },
+  { header: 'State Name', key: 'stateName', required: true,  type: 'string', hint: 'e.g. Telangana' },
+  { header: 'Remarks',    key: 'remarks',   required: false, type: 'string', hint: 'Optional' },
+];
+const ZONE_BULK_SAMPLES = [
+  { country: 'India', stateName: 'Telangana',   remarks: 'South — Hyderabad region' },
+  { country: 'India', stateName: 'Maharashtra', remarks: 'West — Mumbai region' },
+];
 
 interface ZoneFormValues {
   country: string;
@@ -215,9 +226,20 @@ export default function AdminMasterZonePage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Zone
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Zones"
+            entityPlural="zones"
+            columns={ZONE_BULK_COLUMNS}
+            sampleRows={ZONE_BULK_SAMPLES}
+            onImport={async (row) => {
+              await createZone.mutateAsync(row as ZoneCreateInput);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Zone
+          </Button>
+        </Space>
       </div>
 
       <Card

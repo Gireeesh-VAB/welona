@@ -32,8 +32,18 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminDesignation } from '@/types/admin-designation';
 import type { AdminDesignationCreateInput } from '@/lib/admin-designations';
+import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
+
+const DESIGNATION_BULK_COLUMNS: BulkColumn[] = [
+  { header: 'Name',    key: 'name',    required: true,  type: 'string', hint: 'e.g. Doctor' },
+  { header: 'Remarks', key: 'remarks', required: false, type: 'string', hint: 'Optional notes' },
+];
+const DESIGNATION_BULK_SAMPLES = [
+  { name: 'Doctor',    remarks: 'Treats clients' },
+  { name: 'Therapist', remarks: 'Performs sessions' },
+];
 
 interface DesignationFormValues {
   name: string;
@@ -249,9 +259,20 @@ export default function AdminHrDesignationsPage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          Add Designation
-        </Button>
+        <Space>
+          <BulkUploadButton
+            entityName="Designations"
+            entityPlural="designations"
+            columns={DESIGNATION_BULK_COLUMNS}
+            sampleRows={DESIGNATION_BULK_SAMPLES}
+            onImport={async (row) => {
+              await create.mutateAsync(row as AdminDesignationCreateInput);
+            }}
+          />
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+            Add Designation
+          </Button>
+        </Space>
       </div>
 
       <Card
