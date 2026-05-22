@@ -1,0 +1,12 @@
+node_modules/
+.next/
+dist/
+*.tsbuildinfo
+
+# local env
+.env
+.env.local
+
+# OS
+.DS_Store
+Thumbs.db
