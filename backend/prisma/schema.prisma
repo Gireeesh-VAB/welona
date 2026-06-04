@@ -43,6 +43,8 @@ model Branch {
   org              Organization  @relation(fields: [orgId], references: [id])
   name             String
   code             String
+  /// "company" (owned outlet, default) or "franchise". See BRANCH_TYPES in shared/enums.ts.
+  branchType       String        @default("company")
   address          String?
   city             String?
   phone            String?
@@ -50,6 +52,12 @@ model Branch {
   ipAddress        String?
   zoneId           String?
   zone             Zone?         @relation(fields: [zoneId], references: [id])
+  /// Self-referential hierarchy: the branch this one sits under (Head Office ->
+  /// Region -> Outlet). Null for top-level branches. Cycle prevention is
+  /// enforced in the route handlers, not the DB.
+  parentBranchId   String?
+  parent           Branch?       @relation("BranchHierarchy", fields: [parentBranchId], references: [id])
+  children         Branch[]      @relation("BranchHierarchy")
   createdByAdminId String?
   createdByAdmin   AdminUser?    @relation(fields: [createdByAdminId], references: [id])
   isActive         Boolean       @default(true)
@@ -65,10 +73,24 @@ model Branch {
   packageCancellations PackageCancellation[]
   receiptCancellations ReceiptCancellation[]
   voucherCancellations VoucherCancellation[]
+  addresses        BranchAddress[]
+  inventoryStocks  InventoryStock[]
+  inventoryMovements InventoryMovement[]
+  branchProducts   BranchProduct[]
+  branchServices   BranchService[]
+  branchPaymentModes BranchPaymentMode[]
+  branchCategories BranchCategory[]
+  branchLedgers    BranchLedger[]
+  purchaseOrders   PurchaseOrder[]
+  goodsReceipts    GoodsReceipt[]
+  transfersOut     StockTransfer[] @relation("TransferFrom")
+  transfersIn      StockTransfer[] @relation("TransferTo")
+  warehouses       Warehouse[]
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 
   @@unique([orgId, code])
+  @@index([parentBranchId])
 }
 
 /// An RBAC role (section 7.3). `permissions` is a JSON array of
@@ -183,6 +205,18 @@ model AdminUser {
   createdPackageCancellations  PackageCancellation[]
   createdReceiptCancellations  ReceiptCancellation[]
   createdVoucherCancellations  VoucherCancellation[]
+  markedAttendances    Attendance[]
+  createdLeaveTypes    LeaveType[]
+  appliedLeaveApplications  LeaveApplication[] @relation("LeaveAppliedBy")
+  approvedLeaveApplications LeaveApplication[] @relation("LeaveApprovedBy")
+  createdHolidays      Holiday[]
+  createdProducts      Product[]
+  createdInventoryMovements InventoryMovement[]
+  createdSuppliers     Supplier[]
+  createdPurchaseOrders PurchaseOrder[]
+  createdGoodsReceipts GoodsReceipt[]
+  createdStockTransfers StockTransfer[]
+  createdWarehouses    Warehouse[]
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 }
@@ -291,18 +325,40 @@ model Employee {
   esi            Boolean      @default(false)
   // --- Shift ---
   weeklyOff      String?
+  // --- Photo (data URL or external URL; used on the ID card) ---
+  photoUrl       String?
   // --- Audit ---
   ipAddress      String?
   isActive       Boolean      @default(true)
   createdByAdminId String?
   createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
   systemUsers    SystemUser[]
+  attendances    Attendance[]
+  leaveBalances  LeaveBalance[]
+  leaveApplications LeaveApplication[]
+  documents      EmployeeDocument[]
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
   @@index([branchId])
   @@index([departmentId])
   @@index([designationId])
+}
+
+/// An uploaded document attached to an Employee (ID proof, contract, etc.).
+/// `fileUrl` is a data URL (no upload backend) or an external URL.
+model EmployeeDocument {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  title      String
+  docType    String?
+  fileUrl    String
+  notes      String?
+  uploadedAt DateTime @default(now())
+  createdByAdminId String?
+
+  @@index([employeeId])
 }
 
 /// A pending package-cancellation request handled from the admin module.
@@ -413,11 +469,25 @@ model SystemUser {
   lastLoginAt      DateTime?
   createdByAdminId String?
   createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  refreshTokens    SystemRefreshToken[]
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
   @@index([branchId])
   @@index([employeeId])
+}
+
+/// Refresh tokens for the SystemUser (branch-login) session pool. Mirrors
+/// AdminRefreshToken / RefreshToken so the branch session lifecycle stays
+/// fully independent of the admin and staff pools.
+model SystemRefreshToken {
+  id           String     @id @default(cuid())
+  systemUserId String
+  systemUser   SystemUser @relation(fields: [systemUserId], references: [id])
+  token        String     @unique
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  createdAt    DateTime   @default(now())
 }
 
 /// A lead-source / marketing channel (Youtube, Website, SMS, Referral,
@@ -470,6 +540,7 @@ model PaymentMode {
   isActive         Boolean    @default(true)
   createdByAdminId String?
   createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  branchPaymentModes BranchPaymentMode[]
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
@@ -490,6 +561,7 @@ model Ledger {
   isActive         Boolean    @default(true)
   createdByAdminId String?
   createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  branchLedgers    BranchLedger[]
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
@@ -536,7 +608,9 @@ model Category {
   hasMeasurement        Boolean              @default(false)
   // --- Relations ---
   services              Service[]
+  products              Product[]
   marketingOfferItems   MarketingOfferItem[]
+  branchCategories      BranchCategory[]
   createdByAdminId      String?
   createdByAdmin        AdminUser?           @relation(fields: [createdByAdminId], references: [id])
   createdAt             DateTime             @default(now())
@@ -562,6 +636,7 @@ model Service {
   createdByAdminId  String?
   createdByAdmin       AdminUser?           @relation(fields: [createdByAdminId], references: [id])
   marketingOfferItems  MarketingOfferItem[]
+  branchServices       BranchService[]
   createdAt            DateTime             @default(now())
   updatedAt            DateTime             @updatedAt
 
@@ -1181,4 +1256,615 @@ model DayClose {
   createdAt       DateTime @default(now())
 
   @@index([orgId])
+}
+
+// =============================================================================
+// HR — Phase 1 (Attendance, Leave, Holidays)
+// =============================================================================
+
+/// One attendance record per employee per day. `date` is stored at 00:00 UTC
+/// so a (employeeId, date) pair is unique per calendar day. The status string
+/// is one of: present | absent | half_day | wfh | leave | holiday (see
+/// `ATTENDANCE_STATUSES` in `shared/src/enums.ts`).
+model Attendance {
+  id              String     @id @default(cuid())
+  employeeId      String
+  employee        Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  date            DateTime
+  status          String     @default("present")
+  checkIn         DateTime?
+  checkOut        DateTime?
+  hoursWorked     Float?
+  remarks         String?
+  markedByAdminId String?
+  markedByAdmin   AdminUser? @relation(fields: [markedByAdminId], references: [id])
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@unique([employeeId, date])
+  @@index([date])
+  @@index([status])
+}
+
+/// A configurable leave type (Casual Leave, Sick Leave, Earned Leave…).
+/// `daysPerYear` is the default annual allocation given to every employee
+/// when a new yearly balance is rolled. `code` is a short uppercase mnemonic
+/// (CL/SL/EL) shown in compact UIs.
+model LeaveType {
+  id               String             @id @default(cuid())
+  name             String             @unique
+  code             String             @unique
+  daysPerYear      Float              @default(0)
+  paid             Boolean            @default(true)
+  description      String?
+  isActive         Boolean            @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser?         @relation(fields: [createdByAdminId], references: [id])
+  balances         LeaveBalance[]
+  applications     LeaveApplication[]
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([isActive])
+}
+
+/// Yearly leave balance for a single employee + leave type. `allocated` is
+/// the granted amount for the year; `used` is the running consumption.
+/// Balance = allocated - used (computed on read, never stored).
+model LeaveBalance {
+  id          String    @id @default(cuid())
+  employeeId  String
+  employee    Employee  @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId String
+  leaveType   LeaveType @relation(fields: [leaveTypeId], references: [id], onDelete: Cascade)
+  year        Int
+  allocated   Float     @default(0)
+  used        Float     @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@unique([employeeId, leaveTypeId, year])
+  @@index([year])
+}
+
+/// A leave application going through the approval workflow. `days` is the
+/// computed inclusive day count (supports half-days as 0.5). Approval bumps
+/// `LeaveBalance.used` for the matching (employee, leaveType, year).
+model LeaveApplication {
+  id                String     @id @default(cuid())
+  employeeId        String
+  employee          Employee   @relation(fields: [employeeId], references: [id], onDelete: Cascade)
+  leaveTypeId       String
+  leaveType         LeaveType  @relation(fields: [leaveTypeId], references: [id])
+  fromDate          DateTime
+  toDate            DateTime
+  days              Float
+  reason            String?
+  status            String     @default("pending") // pending | approved | rejected | cancelled
+  approverNote      String?
+  approvedByAdminId String?
+  approvedByAdmin   AdminUser? @relation("LeaveApprovedBy", fields: [approvedByAdminId], references: [id])
+  approvedAt        DateTime?
+  appliedByAdminId  String?
+  appliedByAdmin    AdminUser? @relation("LeaveAppliedBy", fields: [appliedByAdminId], references: [id])
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@index([employeeId])
+  @@index([leaveTypeId])
+  @@index([status])
+  @@index([fromDate])
+}
+
+// =============================================================================
+// Branch addresses (multi-address support per branch)
+// =============================================================================
+
+/// Additional address rows for a Branch. The legacy `Branch.address` /
+/// `Branch.city` fields stay as the *primary* address for backwards
+/// compatibility; everything in this table is an *additional* address
+/// (billing, warehouse, satellite, etc.). `type` is a free-form label so a
+/// branch can stack any number of contextual addresses.
+model BranchAddress {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  label     String   // e.g. "Billing", "Warehouse", "Satellite clinic"
+  line1     String
+  line2     String?
+  city      String?
+  state     String?
+  pincode   String?
+  country   String?  @default("India")
+  phone     String?
+  email     String?
+  isPrimary Boolean  @default(false)
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([branchId])
+  @@index([isActive])
+}
+
+/// Append-only audit trail of write actions across admin modules. Actor is
+/// denormalised (type + id + name) so the log survives even if the actor
+/// record is later removed. `metadata` is an optional JSON string.
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorType String   // "admin" | "branch" | "staff" | "system"
+  actorId   String?
+  actorName String?
+  action    String   // "create" | "update" | "delete" | custom (e.g. "dispatch")
+  entity    String   // e.g. "supplier" | "purchase_order" | "warehouse"
+  entityId  String?
+  summary   String?  // human-readable one-line description
+  metadata  String?  // JSON string
+  branchId  String?
+  createdAt DateTime @default(now())
+
+  @@index([entity])
+  @@index([actorType])
+  @@index([createdAt])
+}
+
+// =============================================================================
+// Suppliers (procurement master)
+// =============================================================================
+
+/// A vendor the business purchases stock from. Master data like Product —
+/// global (single-tenant), `code` unique. Linked from PurchaseOrder / GRN.
+model Supplier {
+  id               String     @id @default(cuid())
+  name             String
+  code             String     @unique
+  contactPerson    String?
+  phone            String?
+  email            String?
+  gstin            String?
+  address          String?
+  paymentTerms     String?    // free text, e.g. "Net 30"
+  isActive         Boolean    @default(true)
+  ipAddress        String?
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  purchaseOrders   PurchaseOrder[]
+  goodsReceipts    GoodsReceipt[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([isActive])
+}
+
+// =============================================================================
+// Procurement: Purchase Orders + Goods Receipts (GRN)
+//
+// A PO is raised to a Supplier for a Branch; receiving it (one or more GRNs)
+// writes `purchase` InventoryMovements that raise branch stock. Money is paise.
+// Statuses are strings: PO = draft|sent|partially_received|received|cancelled.
+// =============================================================================
+
+model PurchaseOrder {
+  id               String              @id @default(cuid())
+  orgId            String
+  branchId         String
+  branch           Branch              @relation(fields: [branchId], references: [id])
+  supplierId       String
+  supplier         Supplier            @relation(fields: [supplierId], references: [id])
+  number           String
+  status           String              @default("draft")
+  orderedAt        DateTime            @default(now())
+  expectedAt       DateTime?
+  subtotal         Int                 @default(0)
+  taxAmt           Int                 @default(0)
+  total            Int                 @default(0)
+  notes            String?
+  createdByAdminId String?
+  createdByAdmin   AdminUser?          @relation(fields: [createdByAdminId], references: [id])
+  items            PurchaseOrderItem[]
+  goodsReceipts    GoodsReceipt[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@unique([orgId, number])
+  @@index([branchId])
+  @@index([supplierId])
+  @@index([status])
+}
+
+model PurchaseOrderItem {
+  id               String        @id @default(cuid())
+  poId             String
+  po               PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product       @relation(fields: [productId], references: [id])
+  quantity         Int
+  quantityReceived Int           @default(0)
+  unitPrice        Int           @default(0) // paise
+  taxRate          Int           @default(0) // basis points
+  lineTotal        Int           @default(0) // paise
+  sortOrder        Int           @default(0)
+
+  @@index([poId])
+  @@index([productId])
+}
+
+model GoodsReceipt {
+  id               String             @id @default(cuid())
+  orgId            String
+  branchId         String
+  branch           Branch             @relation(fields: [branchId], references: [id])
+  supplierId       String?
+  supplier         Supplier?          @relation(fields: [supplierId], references: [id])
+  poId             String?
+  po               PurchaseOrder?     @relation(fields: [poId], references: [id])
+  number           String
+  receivedAt       DateTime           @default(now())
+  notes            String?
+  createdByAdminId String?
+  createdByAdmin   AdminUser?         @relation(fields: [createdByAdminId], references: [id])
+  items            GoodsReceiptItem[]
+  createdAt        DateTime           @default(now())
+
+  @@unique([orgId, number])
+  @@index([branchId])
+  @@index([poId])
+}
+
+model GoodsReceiptItem {
+  id        String       @id @default(cuid())
+  grnId     String
+  grn       GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product      @relation(fields: [productId], references: [id])
+  quantity  Int
+  /// Batch this line was received into (batch-tracked products only).
+  batchId   String?
+
+  @@index([grnId])
+  @@index([productId])
+}
+
+// =============================================================================
+// Inter-branch Stock Transfers
+//
+// A transfer moves stock between two branches. Dispatch writes a transfer_out
+// (−) movement at the source; receive writes a transfer_in (+) at the
+// destination. Status: requested|dispatched|received|cancelled.
+// =============================================================================
+
+model StockTransfer {
+  id               String              @id @default(cuid())
+  orgId            String
+  number           String
+  fromBranchId     String
+  fromBranch       Branch              @relation("TransferFrom", fields: [fromBranchId], references: [id])
+  toBranchId       String
+  toBranch         Branch              @relation("TransferTo", fields: [toBranchId], references: [id])
+  status           String              @default("requested")
+  dispatchedAt     DateTime?
+  receivedAt       DateTime?
+  notes            String?
+  createdByAdminId String?
+  createdByAdmin   AdminUser?          @relation(fields: [createdByAdminId], references: [id])
+  items            StockTransferItem[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@unique([orgId, number])
+  @@index([fromBranchId])
+  @@index([toBranchId])
+  @@index([status])
+}
+
+model StockTransferItem {
+  id         String        @id @default(cuid())
+  transferId String
+  transfer   StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  productId  String
+  product    Product       @relation(fields: [productId], references: [id])
+  quantity   Int
+
+  @@index([transferId])
+  @@index([productId])
+}
+
+// =============================================================================
+// Product master + inventory (lean MVP)
+// =============================================================================
+
+/// A retail product carried by the business — distinct from a `Service`.
+/// Inventory rows hang off this; `Service` records remain inventory-free.
+/// Prices are integer paise (minor units), matching the rest of the system.
+model Product {
+  id               String   @id @default(cuid())
+  sku              String   @unique
+  name             String
+  brand            String?
+  categoryId       String?
+  category         Category? @relation(fields: [categoryId], references: [id])
+  hsnSacCode       String?
+  uom              String   @default("unit") // unit, pack, ml, gm, etc.
+  barcode          String?
+  description      String?
+  mrp              Int      @default(0) // paise
+  salePrice        Int      @default(0) // paise
+  purchasePrice    Int      @default(0) // paise
+  taxPercent       Int      @default(0) // e.g. 1800 = 18%
+  reorderLevel     Int      @default(0) // units — drives the low-stock flag
+  /// Product photo — a data URL (no upload backend) or an external image URL.
+  imageUrl         String?
+  /// When true, receipts capture a batch number; FEFO depletion on outbound.
+  trackBatches     Boolean  @default(false)
+  /// When true, batches carry an expiry date (drives expiry alerts).
+  trackExpiry      Boolean  @default(false)
+  isActive         Boolean  @default(true)
+  ipAddress        String?
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  stocks           InventoryStock[]
+  movements        InventoryMovement[]
+  branchProducts   BranchProduct[]
+  purchaseOrderItems PurchaseOrderItem[]
+  goodsReceiptItems  GoodsReceiptItem[]
+  stockTransferItems StockTransferItem[]
+  batches          ProductBatch[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([categoryId])
+  @@index([isActive])
+}
+
+/// A storage location inside a Branch. Every branch has at least one default
+/// ("Main") warehouse; stock is held per (warehouse, product).
+model Warehouse {
+  id               String              @id @default(cuid())
+  branchId         String
+  branch           Branch              @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  name             String
+  code             String
+  isDefault        Boolean             @default(false)
+  isActive         Boolean             @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser?          @relation(fields: [createdByAdminId], references: [id])
+  stocks           InventoryStock[]
+  movements        InventoryMovement[]
+  batchStocks      BatchStock[]
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+
+  @@unique([branchId, code])
+  @@index([branchId])
+}
+
+/// Current on-hand quantity for a (warehouse, product) pair. `branchId` is kept
+/// denormalised for branch-level rollups and scope filtering. One row per pair;
+/// updated atomically by `InventoryMovement` inserts inside a transaction.
+model InventoryStock {
+  id          String   @id @default(cuid())
+  branchId    String
+  branch      Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  warehouseId String
+  warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  quantity    Int      @default(0)
+  updatedAt   DateTime @updatedAt
+  createdAt   DateTime @default(now())
+
+  @@unique([warehouseId, productId])
+  @@index([branchId])
+  @@index([warehouseId])
+  @@index([productId])
+}
+
+/// Inventory ledger — every stock change is logged here. `delta` is signed
+/// (positive in / negative out) so summing rows yields the current quantity
+/// for any (branch, product) at any point in time. `type` is the movement
+/// kind (`opening | purchase | sale | adjustment`).
+model InventoryMovement {
+  id               String   @id @default(cuid())
+  branchId         String
+  branch           Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  warehouseId      String?
+  warehouse        Warehouse? @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  /// Optional batch this movement applied to (batch-tracked products only).
+  batchId          String?
+  type             String   // opening | purchase | sale | adjustment | transfer_in | transfer_out
+  delta            Int      // signed change applied to InventoryStock
+  reason           String?
+  ref              String?  // optional external reference (invoice no, PO no)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime @default(now())
+
+  @@index([branchId])
+  @@index([warehouseId])
+  @@index([productId])
+  @@index([type])
+  @@index([createdAt])
+}
+
+// =============================================================================
+// Shipment tracking (configurable stage workflow)
+//
+// A lightweight inbound-shipment tracker: each shipment moves through stages
+// (ordered → in_transit → received → qc → stocked, or cancelled) and every
+// transition is appended to ShipmentStageEvent with a timestamp. This is a
+// workflow overlay — actual stock is still raised via GRN.
+// =============================================================================
+
+model TrackedShipment {
+  id               String               @id @default(cuid())
+  orgId            String
+  number           String
+  title            String
+  branchId         String?
+  supplier         String?
+  reference        String?
+  stage            String               @default("ordered")
+  notes            String?
+  createdByAdminId String?
+  createdByName    String?
+  events           ShipmentStageEvent[]
+  createdAt        DateTime             @default(now())
+  updatedAt        DateTime             @updatedAt
+
+  @@unique([orgId, number])
+  @@index([branchId])
+  @@index([stage])
+}
+
+model ShipmentStageEvent {
+  id         String          @id @default(cuid())
+  shipmentId String
+  shipment   TrackedShipment @relation(fields: [shipmentId], references: [id], onDelete: Cascade)
+  stage      String
+  note       String?
+  actorName  String?
+  at         DateTime        @default(now())
+
+  @@index([shipmentId])
+}
+
+// =============================================================================
+// Batch / expiry tracking
+//
+// For products flagged `trackBatches`, receipts capture a ProductBatch (batch
+// number + optional mfg/expiry). BatchStock holds the per-(warehouse, batch)
+// quantity — a best-effort batch breakdown alongside the authoritative
+// product-level InventoryStock. Outbound depletes batches FEFO (earliest expiry
+// first). Expiry alerts read ProductBatch.expiryDate where BatchStock > 0.
+// =============================================================================
+
+model ProductBatch {
+  id         String       @id @default(cuid())
+  productId  String
+  product    Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+  batchNo    String
+  mfgDate    DateTime?
+  expiryDate DateTime?
+  supplierId String?
+  stocks     BatchStock[]
+  createdAt  DateTime     @default(now())
+
+  @@unique([productId, batchNo])
+  @@index([productId])
+  @@index([expiryDate])
+}
+
+model BatchStock {
+  id          String       @id @default(cuid())
+  branchId    String
+  warehouseId String
+  warehouse   Warehouse    @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
+  batchId     String
+  batch       ProductBatch @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  quantity    Int          @default(0)
+  updatedAt   DateTime     @updatedAt
+  createdAt   DateTime     @default(now())
+
+  @@unique([warehouseId, batchId])
+  @@index([branchId])
+  @@index([warehouseId])
+  @@index([batchId])
+}
+
+// =============================================================================
+// Branch catalog assignment (availability toggle)
+//
+// Which Products / Services a branch carries. A row's presence = "available";
+// absence = "not carried". No per-branch pricing — the global price applies.
+// =============================================================================
+
+/// A Product made available at a Branch.
+model BranchProduct {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([branchId, productId])
+  @@index([branchId])
+  @@index([productId])
+}
+
+/// A Service offered at a Branch.
+model BranchService {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  serviceId String
+  service   Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([branchId, serviceId])
+  @@index([branchId])
+  @@index([serviceId])
+}
+
+/// A PaymentMode accepted at a Branch.
+model BranchPaymentMode {
+  id            String      @id @default(cuid())
+  branchId      String
+  branch        Branch      @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  paymentModeId String
+  paymentMode   PaymentMode @relation(fields: [paymentModeId], references: [id], onDelete: Cascade)
+  createdAt     DateTime    @default(now())
+
+  @@unique([branchId, paymentModeId])
+  @@index([branchId])
+  @@index([paymentModeId])
+}
+
+/// A Category operated at a Branch.
+model BranchCategory {
+  id         String   @id @default(cuid())
+  branchId   String
+  branch     Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([branchId, categoryId])
+  @@index([branchId])
+  @@index([categoryId])
+}
+
+/// A Ledger that belongs to a Branch.
+model BranchLedger {
+  id        String   @id @default(cuid())
+  branchId  String
+  branch    Branch   @relation(fields: [branchId], references: [id], onDelete: Cascade)
+  ledgerId  String
+  ledger    Ledger   @relation(fields: [ledgerId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([branchId, ledgerId])
+  @@index([branchId])
+  @@index([ledgerId])
+}
+
+/// A public / regional / optional holiday on the org calendar. `region` is a
+/// free-text qualifier (state, branch, country) used only for filtering — no
+/// FK so a region can be deleted without orphaning holidays.
+model Holiday {
+  id               String     @id @default(cuid())
+  date             DateTime
+  name             String
+  type             String     @default("public") // public | regional | optional
+  region           String?
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@unique([date, name])
+  @@index([date])
 }

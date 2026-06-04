@@ -33,6 +33,7 @@ import {
   TeamOutlined,
   UserOutlined,
   WalletOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import type { MenuProps } from 'antd';
 import type { ItemType } from 'antd/es/menu/interface';
@@ -44,7 +45,16 @@ import {
   type AdminNavItem,
 } from '@/config/adminNavigation';
 import { useBrandColors } from '@/hooks/useBrandColors';
+import { useBranchAuthStore } from '@/store/branchAuthStore';
+import { getSessionKind } from '@/lib/api-client';
 import type { colors as colorsType } from '@/theme/colors';
+
+/**
+ * Nav keys a branch (SystemUser) session may see. Branch sessions are scoped
+ * to their own branch, so they only get the modules whose APIs enforce that
+ * scope today (inventory). More are added as enforcement expands.
+ */
+const BRANCH_NAV_KEYS = new Set(['dashboard', 'inventory', 'customers', 'sales', 'hr', 'report']);
 
 /**
  * Walk the nav tree and return the ancestor chain of `targetKey` (excluding
@@ -72,6 +82,19 @@ const { Sider } = Layout;
 const icons: Record<string, ReactNode> = {
   dashboard: <DashboardOutlined />,
   master: <DatabaseOutlined />,
+  inventory: <ShoppingOutlined />,
+  'inventory-warehouses': <DatabaseOutlined />,
+  'inventory-suppliers': <SolutionOutlined />,
+  'inventory-purchase-orders': <SnippetsOutlined />,
+  'inventory-grn': <FileTextOutlined />,
+  'inventory-transfers': <SwapOutlined />,
+  'inventory-reports': <FundProjectionScreenOutlined />,
+  'inventory-batches': <TagsOutlined />,
+  'inventory-tracking': <ScheduleOutlined />,
+  'inventory-alerts': <WarningOutlined />,
+  'inventory-audit': <FileTextOutlined />,
+  customers: <SolutionOutlined />,
+  sales: <FundProjectionScreenOutlined />,
   hr: <TeamOutlined />,
   cancellation: <CloseCircleOutlined />,
   report: <FileTextOutlined />,
@@ -152,6 +175,21 @@ export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProp
   const router = useRouter();
   const pathname = usePathname();
   const colors = useBrandColors();
+  const branch = useBranchAuthStore((s) => s.branch);
+  const isBranchSession = getSessionKind() === 'branch';
+
+  // Branch sessions see a trimmed nav scoped to branch-enforced modules. Their
+  // allowed items are also flattened to leaves (admin-only children like
+  // Suppliers are hidden).
+  const navTree = useMemo(
+    () =>
+      isBranchSession
+        ? adminNavigation
+            .filter((item) => BRANCH_NAV_KEYS.has(item.key))
+            .map((item) => ({ ...item, children: undefined }))
+        : adminNavigation,
+    [isBranchSession],
+  );
 
   const activeItem = getAdminNavItemByPath(pathname);
   const activeKey = activeItem?.key ?? 'dashboard';
@@ -207,7 +245,7 @@ export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProp
     }
   };
 
-  const menuItems = adminNavigation.map((item) => toMenuItem(item, handleClick, colors));
+  const menuItems = navTree.map((item) => toMenuItem(item, handleClick, colors));
 
   return (
     <Sider
@@ -252,11 +290,15 @@ export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProp
                 color: colors.text.placeholder,
                 fontWeight: 600,
                 fontSize: 10,
-                letterSpacing: 3,
+                letterSpacing: isBranchSession ? 1 : 3,
                 marginTop: 2,
+                maxWidth: 200,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
               }}
             >
-              ADMIN
+              {isBranchSession ? (branch?.branchName ?? 'BRANCH').toUpperCase() : 'ADMIN'}
             </span>
           )}
         </div>

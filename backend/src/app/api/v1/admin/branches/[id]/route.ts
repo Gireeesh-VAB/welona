@@ -5,7 +5,8 @@ import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
 import { requireAdminAuth } from '@/lib/auth/service';
 import { adminBranchUpdateSchema } from '@shared/schemas/admin-branches';
-import { toAdminBranch } from '@/lib/admin-branch-mapper';
+import { toAdminBranch, branchAdminInclude } from '@/lib/admin-branch-mapper';
+import { assertValidParent } from '@/lib/admin-branch-hierarchy';
 
 interface RouteContext {
   params: { id: string };
@@ -26,19 +27,27 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
     if (!zone) throw Errors.badRequest('Selected zone no longer exists.');
   }
 
+  // Validate any proposed parent (existence + no cycle through this branch).
+  if (body.parentBranchId !== undefined) {
+    await assertValidParent(params.id, body.parentBranchId);
+  }
+
   try {
     const branch = await db.branch.update({
       where: { id: params.id },
       data: {
         ...(body.branchName !== undefined && { name: body.branchName }),
         ...(body.branchCode !== undefined && { code: body.branchCode }),
+        ...(body.branchType !== undefined && { branchType: body.branchType }),
         ...(body.zoneId !== undefined && { zoneId: body.zoneId }),
+        ...(body.parentBranchId !== undefined && { parentBranchId: body.parentBranchId }),
         ...(body.address !== undefined && { address: body.address ?? null }),
         ...(body.phone !== undefined && { phone: body.phone ?? null }),
         ...(body.email !== undefined && { email: body.email ?? null }),
         ...(body.ipAddress !== undefined && { ipAddress: body.ipAddress ?? null }),
+        ...(body.isActive !== undefined && { isActive: body.isActive }),
       },
-      include: { zone: true, createdByAdmin: true },
+      include: branchAdminInclude,
     });
     return ok(toAdminBranch(branch));
   } catch (error) {

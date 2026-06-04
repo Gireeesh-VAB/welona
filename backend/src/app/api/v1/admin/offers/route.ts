@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import {
   adminOfferCreateSchema,
   adminOfferListQuerySchema,
@@ -23,7 +23,8 @@ const fullInclude = {
  * POST /api/v1/admin/offers — creates the offer + nested branches + items in one tx.
  */
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
+  // Org-wide reference data; branch sessions read it. Writes stay admin-only.
+  requireAdminOrBranchAuth(req);
   const { search, page, limit } = parseQuery(req, adminOfferListQuerySchema);
 
   const where: Prisma.MarketingOfferWhereInput = search

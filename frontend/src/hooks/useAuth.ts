@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api } from '@/lib/api-client';
+import { api, setSessionKind } from '@/lib/api-client';
 import { useAuthStore } from '@/store/authStore';
 import type { AuthUser, SessionResult, TwoFactorChallenge } from '@shared/types/auth';
 
@@ -27,7 +27,10 @@ export function useVerifyOtp() {
   return useMutation({
     mutationFn: (input: { challengeId: string; otp: string }) =>
       api.post<SessionResult>('/auth/verify-otp', input),
-    onSuccess: (data) => setSession(data.user),
+    onSuccess: (data) => {
+      setSessionKind('staff');
+      setSession(data.user);
+    },
   });
 }
 
@@ -38,6 +41,7 @@ export function useLogout() {
   return useMutation({
     mutationFn: () => api.post('/auth/logout'),
     onSettled: () => {
+      setSessionKind(null);
       clearSession();
       queryClient.clear();
     },

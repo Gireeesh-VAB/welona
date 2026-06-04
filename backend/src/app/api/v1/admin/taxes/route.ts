@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import { adminTaxCreateSchema, adminTaxListQuerySchema } from '@shared/schemas/admin-taxes';
 import { toAdminTax } from '@/lib/admin-tax-mapper';
 
@@ -14,7 +14,8 @@ import { toAdminTax } from '@/lib/admin-tax-mapper';
  * POST /api/v1/admin/taxes
  */
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
+  // Org-wide reference data; branch sessions read it. Writes stay admin-only.
+  requireAdminOrBranchAuth(req);
   const { search, page, limit } = parseQuery(req, adminTaxListQuerySchema);
 
   const where: Prisma.TaxWhereInput = search

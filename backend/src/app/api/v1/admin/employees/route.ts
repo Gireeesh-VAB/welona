@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import {
   adminEmployeeCreateSchema,
   adminEmployeeListQuerySchema,
@@ -26,11 +26,13 @@ const fullInclude = {
  * POST /api/v1/admin/employees — IP captured server-side from request headers.
  */
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
-  const { search, branchId, departmentId, page, limit } = parseQuery(
+  const { branchScope } = requireAdminOrBranchAuth(req);
+  const { search, branchId: queryBranchId, departmentId, page, limit } = parseQuery(
     req,
     adminEmployeeListQuerySchema,
   );
+  // Branch sessions are locked to their own branch regardless of the query.
+  const branchId = branchScope ?? queryBranchId;
 
   const where: Prisma.EmployeeWhereInput = {
     ...(branchId && { branchId }),
@@ -94,6 +96,7 @@ export const POST = route(async (req) => {
         pf: body.pf,
         esi: body.esi,
         weeklyOff: body.weeklyOff ?? null,
+        photoUrl: body.photoUrl ?? null,
         ipAddress: ip,
         isActive: true,
         createdByAdminId: claims.sub,

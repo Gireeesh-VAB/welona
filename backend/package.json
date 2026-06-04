@@ -11,6 +11,8 @@
     "type-check": "tsc --noEmit",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
+    "db:seed-hr": "tsx prisma/seed-hr.ts",
+    "db:seed-products": "tsx prisma/seed-products-inventory.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma db push --force-reset && prisma db seed",
     "postinstall": "prisma generate"

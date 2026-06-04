@@ -31,13 +31,19 @@ export const TOTAL_CUSTOMERS = new Set(SALES_REPORT_ROWS.map((r) => r.clientName
 export const ENQUIRY_FUNNEL = (() => {
   const buckets = { New: 0, Contacted: 0, Qualified: 0, Converted: 0, Lost: 0 };
   for (const e of ENQUIRY_REPORT_ROWS) buckets[e.status] += 1;
+  const converted = buckets.Converted;
+  // Paid must be a subset of Converted to keep a proper funnel shape.
+  const paid = Math.min(
+    SALES_REPORT_ROWS.filter((r) => r.paidAmount > 0).length,
+    converted,
+  );
   // Funnel rows ordered top-to-bottom.
   return [
     { stage: 'Enquiries',  count: ENQUIRY_REPORT_ROWS.length },
     { stage: 'Contacted',  count: ENQUIRY_REPORT_ROWS.length - buckets.New },
-    { stage: 'Qualified',  count: buckets.Qualified + buckets.Converted },
-    { stage: 'Converted',  count: buckets.Converted },
-    { stage: 'Paid',       count: SALES_REPORT_ROWS.filter((r) => r.paidAmount > 0).length },
+    { stage: 'Qualified',  count: buckets.Qualified + converted },
+    { stage: 'Converted',  count: converted },
+    { stage: 'Paid',       count: paid },
   ];
 })();
 

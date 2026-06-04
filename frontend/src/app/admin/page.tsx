@@ -35,6 +35,7 @@ import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { useAdminAuthStore } from '@/store/adminAuthStore';
+import { useBranchLock } from '@/hooks/useBranchLock';
 import { formatMoney, formatMoneyShort } from '@shared/format';
 import {
   ALERTS,
@@ -157,41 +158,54 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const colors = useBrandColors();
   const admin = useAdminAuthStore((s) => s.admin);
+  const { isBranchSession, lockedBranchName } = useBranchLock();
 
   const [period, setPeriod] = useState<Period>('This Month');
 
-  const adminFirst = (admin?.name ?? 'Admin').split(' ')[0];
+  // Branch sessions greet with the branch name; admins greet by first name.
+  const adminFirst = isBranchSession
+    ? lockedBranchName ?? 'Branch'
+    : (admin?.name ?? 'Admin').split(' ')[0];
   const now = dayjs(`${TODAY}T09:30:00`);
   const greeting = now.hour() < 12 ? 'Good morning' : now.hour() < 17 ? 'Good afternoon' : 'Good evening';
 
   // ---- Chart options ----
   const revenueChart = useMemo(() => ({
-    grid: { left: 56, right: 24, top: 32, bottom: 30 },
+    color: [colors.gold.primary, colors.status.warning],
+    grid: { left: 16, right: 56, top: 48, bottom: 24, containLabel: true },
     tooltip: {
       trigger: 'axis',
       backgroundColor: colors.black.secondary,
       borderColor: colors.border,
       textStyle: { color: colors.text.primary },
       formatter: (params: Array<{ name: string; value: number; marker: string; seriesName: string }>) =>
-        params.map((p) => `${p.marker} ${p.seriesName}: <strong>${formatMoney(p.value)}</strong>`).join('<br/>')
-        + `<br/><span style="color:${colors.text.placeholder}">${params[0].name}</span>`,
+        `<span style="color:${colors.text.placeholder}">${params[0].name}</span><br/>`
+        + params.map((p) => `${p.marker} ${p.seriesName}: <strong>${formatMoney(p.value)}</strong>`).join('<br/>'),
     },
     legend: {
       data: ['Revenue', 'Target'],
-      textStyle: { color: colors.text.primary },
-      top: 0, right: 12,
+      textStyle: { color: colors.text.primary, fontSize: 12 },
+      icon: 'roundRect',
+      itemWidth: 14,
+      itemHeight: 8,
+      itemGap: 16,
+      top: 8,
+      left: 'center',
     },
     xAxis: {
       type: 'category',
       data: REVENUE_BY_MONTH.map((m) => m.label),
+      boundaryGap: true,
       axisLine: { lineStyle: { color: colors.border } },
-      axisLabel: { color: colors.text.placeholder, fontWeight: 500 },
+      axisTick: { show: false },
+      axisLabel: { color: colors.text.placeholder, fontWeight: 500, margin: 12 },
     },
     yAxis: {
       type: 'value',
       axisLabel: {
         color: colors.text.placeholder,
         formatter: (v: number) => `₹${(v / 100000).toFixed(0)}L`,
+        margin: 12,
       },
       splitLine: { lineStyle: { color: colors.border, type: 'dashed' } },
     },
@@ -201,7 +215,7 @@ export default function AdminDashboardPage() {
         type: 'line',
         smooth: true,
         showSymbol: true,
-        symbolSize: 8,
+        symbolSize: 7,
         data: REVENUE_BY_MONTH.map((m) => m.revenue),
         lineStyle: { color: colors.gold.primary, width: 3 },
         itemStyle: { color: colors.gold.primary, borderColor: colors.black.secondary, borderWidth: 2 },
@@ -209,16 +223,10 @@ export default function AdminDashboardPage() {
           color: {
             type: 'linear', x: 0, y: 0, x2: 0, y2: 1,
             colorStops: [
-              { offset: 0, color: `${colors.gold.primary}80` },
+              { offset: 0, color: `${colors.gold.primary}40` },
               { offset: 1, color: `${colors.gold.primary}00` },
             ],
           },
-        },
-        markPoint: {
-          symbolSize: 50,
-          itemStyle: { color: colors.gold.primary },
-          label: { color: '#FFFFFF', fontWeight: 600 },
-          data: [{ type: 'max', name: 'Peak' }],
         },
       },
       {
@@ -227,6 +235,7 @@ export default function AdminDashboardPage() {
         data: REVENUE_BY_MONTH.map(() => Math.round(TOTAL_REVENUE * 0.92)),
         symbol: 'none',
         lineStyle: { color: colors.status.warning, type: 'dashed', width: 2 },
+        itemStyle: { color: colors.status.warning },
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -243,11 +252,10 @@ export default function AdminDashboardPage() {
     },
     series: [{
       name: 'Pipeline', type: 'funnel',
-      left: 8, right: 8, top: 24, bottom: 8,
-      width: '94%',
-      minSize: '20%',
-      maxSize: '100%',
-      sort: 'descending',
+      left: 24, right: 24, top: 16, bottom: 16,
+      minSize: '30%',
+      maxSize: '85%',
+      sort: 'none',
       gap: 4,
       label: {
         show: true, position: 'inside',
@@ -273,7 +281,7 @@ export default function AdminDashboardPage() {
   }), [colors]);
 
   const branchChart = useMemo(() => ({
-    grid: { left: 100, right: 24, top: 12, bottom: 30 },
+    grid: { left: 100, right: 24, top: 36, bottom: 30 },
     tooltip: {
       trigger: 'axis', axisPointer: { type: 'shadow' },
       backgroundColor: colors.black.secondary,
@@ -284,7 +292,16 @@ export default function AdminDashboardPage() {
         params.map((p) => `${p.marker} ${p.seriesName}: ${formatMoney(p.value)}`).join('<br/>')
       ),
     },
-    legend: { data: ['Revenue', 'Expenses'], textStyle: { color: colors.text.primary }, top: 0 },
+    legend: {
+      data: ['Revenue', 'Expenses'],
+      textStyle: { color: colors.text.primary, fontSize: 12 },
+      icon: 'roundRect',
+      itemWidth: 14,
+      itemHeight: 8,
+      itemGap: 16,
+      top: 6,
+      left: 100,
+    },
     xAxis: {
       type: 'value',
       axisLabel: {
@@ -473,7 +490,9 @@ export default function AdminDashboardPage() {
               {greeting}, {adminFirst}
             </Title>
             <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14 }}>
-              Here&apos;s what&apos;s happening across your branches today.
+              {isBranchSession
+                ? "Here's what's happening at your branch today."
+                : "Here's what's happening across your branches today."}
             </Text>
             <div style={{ marginTop: 12 }}>
               <Space size="middle" wrap>
@@ -590,7 +609,7 @@ export default function AdminDashboardPage() {
                 Last 6 months · Target dashed
               </Text>
             }>
-            <ReactECharts option={revenueChart} style={{ height: 320 }} />
+            <ReactECharts option={revenueChart} style={{ height: 320 }} opts={{ renderer: 'svg' }} />
           </Card>
         </Col>
         <Col xs={24} xl={9}>
@@ -603,7 +622,7 @@ export default function AdminDashboardPage() {
               </Space>
             }
             extra={<Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Enquiry → Paid</Text>}>
-            <ReactECharts option={funnelChart} style={{ height: 320 }} />
+            <ReactECharts option={funnelChart} style={{ height: 320 }} opts={{ renderer: 'svg' }} />
           </Card>
         </Col>
       </Row>
@@ -612,19 +631,22 @@ export default function AdminDashboardPage() {
       {/* Branch performance + Category + Weekday                             */}
       {/* ------------------------------------------------------------------ */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
+        {/* Cross-branch comparison is meaningless for a single-branch session. */}
+        {!isBranchSession && (
         <Col xs={24} xl={9}>
           <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}`, height: '100%' }}
             styles={{ body: { padding: 18 } }}
             title={<Text strong style={{ color: colors.text.primary }}>Branch Performance</Text>}
             extra={<Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Revenue vs Expenses</Text>}>
-            <ReactECharts option={branchChart} style={{ height: 360 }} />
+            <ReactECharts option={branchChart} style={{ height: 360 }} opts={{ renderer: 'svg' }} />
           </Card>
         </Col>
+        )}
         <Col xs={24} xl={9}>
           <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}`, height: '100%' }}
             styles={{ body: { padding: 18 } }}
             title={<Text strong style={{ color: colors.text.primary }}>Revenue Mix by Category</Text>}>
-            <ReactECharts option={categoryChart} style={{ height: 360 }} />
+            <ReactECharts option={categoryChart} style={{ height: 360 }} opts={{ renderer: 'svg' }} />
           </Card>
         </Col>
         <Col xs={24} xl={6}>
@@ -632,7 +654,7 @@ export default function AdminDashboardPage() {
             styles={{ body: { padding: 18 } }}
             title={<Text strong style={{ color: colors.text.primary }}>Weekday Bookings</Text>}
             extra={<Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Which day works best</Text>}>
-            <ReactECharts option={weekdayChart} style={{ height: 360 }} />
+            <ReactECharts option={weekdayChart} style={{ height: 360 }} opts={{ renderer: 'svg' }} />
           </Card>
         </Col>
       </Row>

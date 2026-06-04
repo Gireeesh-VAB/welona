@@ -19,8 +19,9 @@ export function middleware(request: NextRequest) {
   const isAuthenticated = Boolean(request.cookies.get(AUTH_COOKIE)?.value);
 
   const isAdminLogin = pathname === '/admin/login';
+  const isBranchLogin = pathname === '/admin/branch-login';
   const isEmployeeLogin = pathname === '/login';
-  const isLoginPage = isAdminLogin || isEmployeeLogin;
+  const isLoginPage = isAdminLogin || isBranchLogin || isEmployeeLogin;
   const isAdminArea = pathname === '/admin' || pathname.startsWith('/admin/');
 
   if (!isAuthenticated && !isLoginPage) {
@@ -33,7 +34,8 @@ export function middleware(request: NextRequest) {
 
   if (isAuthenticated && isLoginPage) {
     const url = request.nextUrl.clone();
-    url.pathname = isAdminLogin ? '/admin' : '/';
+    // Branch logins land on the branch dashboard; admin → /admin; employee → /.
+    url.pathname = isBranchLogin ? '/admin' : isAdminLogin ? '/admin' : '/';
     return NextResponse.redirect(url);
   }
 

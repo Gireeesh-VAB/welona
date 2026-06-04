@@ -73,14 +73,34 @@ async function rawRequest(path: string, options: RequestOptions): Promise<Respon
 const refreshInFlight = new Map<string, Promise<boolean>>();
 
 /**
- * Pick the right refresh endpoint based on the path that just 401'd.
- *
- * Admin-side paths (`/admin/*`, `/auth/admin/*`) rotate against the
- * AdminRefreshToken pool; everything else uses the staff pool. Using the
- * wrong endpoint would clear cookies on the live session, so this routing
- * matters — see `src/app/api/v1/auth/admin/refresh-token/route.ts`.
+ * Which auth pool the current browser session belongs to. `/admin/*` API
+ * paths are shared by admin AND branch sessions, so the path alone can't tell
+ * the pools apart — the login flow records the kind here (persisted so it
+ * survives reloads) and `refreshPathFor` uses it to rotate the right token.
+ */
+export type SessionKind = 'staff' | 'admin' | 'branch';
+const SESSION_KIND_KEY = 'welona-session-kind';
+
+export function setSessionKind(kind: SessionKind | null): void {
+  if (typeof window === 'undefined') return;
+  if (kind) window.localStorage.setItem(SESSION_KIND_KEY, kind);
+  else window.localStorage.removeItem(SESSION_KIND_KEY);
+}
+
+export function getSessionKind(): SessionKind | null {
+  if (typeof window === 'undefined') return null;
+  return (window.localStorage.getItem(SESSION_KIND_KEY) as SessionKind) || null;
+}
+
+/**
+ * Pick the right refresh endpoint based on the path that just 401'd and the
+ * recorded session kind. Using the wrong endpoint would clear cookies on the
+ * live session, so this routing matters — branch and admin sessions share the
+ * `/admin/*` API surface and are disambiguated by the stored session kind.
  */
 function refreshPathFor(path: string): string {
+  const kind = getSessionKind();
+  if (kind === 'branch') return '/auth/branch/refresh-token';
   return path.startsWith('/admin/') || path.startsWith('/auth/admin/')
     ? '/auth/admin/refresh-token'
     : '/auth/refresh-token';

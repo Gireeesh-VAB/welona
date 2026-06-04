@@ -64,6 +64,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
         ...(body.pf !== undefined && { pf: body.pf }),
         ...(body.esi !== undefined && { esi: body.esi }),
         ...(body.weeklyOff !== undefined && { weeklyOff: body.weeklyOff ?? null }),
+        ...(body.photoUrl !== undefined && { photoUrl: body.photoUrl }),
       },
       include: fullInclude,
     });

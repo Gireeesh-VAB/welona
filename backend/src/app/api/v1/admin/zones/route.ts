@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import { zoneCreateSchema, zoneListQuerySchema } from '@shared/schemas/zones';
 
 /**
@@ -13,7 +13,8 @@ import { zoneCreateSchema, zoneListQuerySchema } from '@shared/schemas/zones';
  * POST /api/v1/admin/zones                      — create a new zone.
  */
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
+  // Org-wide reference data; branch sessions read it (filters/forms). Writes stay admin-only.
+  requireAdminOrBranchAuth(req);
   const { search, page, limit } = parseQuery(req, zoneListQuerySchema);
 
   const where: Prisma.ZoneWhereInput = search

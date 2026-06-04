@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import {
   adminDepartmentCreateSchema,
   adminDepartmentListQuerySchema,
@@ -18,7 +18,8 @@ import { readClientIp } from '@/lib/client-ip';
  * POST /api/v1/admin/departments
  */
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
+  // Org-wide reference data; branch sessions read it (filters/forms). Writes stay admin-only.
+  requireAdminOrBranchAuth(req);
   const { search, page, limit } = parseQuery(req, adminDepartmentListQuerySchema);
 
   const where: Prisma.DepartmentWhereInput = search

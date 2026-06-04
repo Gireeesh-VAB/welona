@@ -387,13 +387,21 @@ export function useCreateDelivery() {
   });
 }
 
-/** Advance a delivery: dispatch | complete. */
+/**
+ * Advance a delivery: dispatch | complete | return.
+ * `complete` auto-deducts product stock; `return` reverses it (Phase L).
+ */
 export function useDeliveryAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, action }: { id: string; action: 'dispatch' | 'complete' }) =>
+    mutationFn: ({ id, action }: { id: string; action: 'dispatch' | 'complete' | 'return' }) =>
       api.post<Delivery>(`/sales/deliveries/${id}/${action}`),
-    onSuccess: () => invalidateSales(qc),
+    onSuccess: () => {
+      invalidateSales(qc);
+      // Completing/returning a delivery moves stock — refresh inventory views.
+      qc.invalidateQueries({ queryKey: ['admin-inventory-stock'] });
+      qc.invalidateQueries({ queryKey: ['admin-inventory-movements'] });
+    },
   });
 }
 

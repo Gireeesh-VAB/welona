@@ -1,9 +1,11 @@
 import { z } from 'zod';
+import { BRANCH_TYPES } from '../enums';
+import { adminBranchAddressCreateSchema } from './admin-branch-addresses';
 
 /**
  * Validation schemas for the admin-side branches CRUD (master data).
  * Mirrors the field list requested by the admin UI:
- *   branchName, branchCode, zone, address, phone, email, ipAddress.
+ *   branchName, branchCode, branchType, zone, address, phone, email, ipAddress.
  */
 
 const optionalText = (max: number) =>
@@ -32,6 +34,16 @@ export const adminBranchCreateSchema = z.object({
     // Codes are short identifiers — letters, digits, dash, underscore.
     .regex(/^[A-Za-z0-9_-]+$/, 'Use letters, digits, dash or underscore only'),
   zoneId: z.string().min(1, 'Zone is required'),
+  branchType: z.enum(BRANCH_TYPES).optional(),
+  // The parent branch in the hierarchy. Omitted = unchanged; null / empty
+  // string = clear (top-level). A non-empty string sets the parent.
+  parentBranchId: z
+    .string()
+    .trim()
+    .min(1)
+    .nullable()
+    .optional()
+    .or(z.literal('').transform(() => null)),
   address: optionalText(300),
   phone: optionalText(40),
   email: z
@@ -41,14 +53,19 @@ export const adminBranchCreateSchema = z.object({
     .optional()
     .or(z.literal('').transform(() => undefined)),
   ipAddress: ipv4.optional().or(z.literal('').transform(() => undefined)),
+  isActive: z.boolean().optional(),
+  additionalAddresses: z.array(adminBranchAddressCreateSchema).max(20).optional(),
 });
 
-export const adminBranchUpdateSchema = adminBranchCreateSchema.partial();
+export const adminBranchUpdateSchema = adminBranchCreateSchema
+  .omit({ additionalAddresses: true })
+  .partial();
 
 export const adminBranchListQuerySchema = z.object({
   search: z.string().trim().optional(),
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  // Callers fetch up to 200 for branch dropdowns; keep headroom like other lists.
+  limit: z.coerce.number().int().positive().max(500).default(20),
 });
 
 export type AdminBranchCreateInput = z.infer<typeof adminBranchCreateSchema>;

@@ -44,6 +44,14 @@ export const adminEmployeeCreateSchema = z.object({
   esi: z.boolean().default(false),
   // --- Shift ---
   weeklyOff: optionalText(20),
+  // --- Photo (data URL or external URL) ---
+  photoUrl: z
+    .string()
+    .trim()
+    .max(2_000_000)
+    .nullable()
+    .optional()
+    .or(z.literal('').transform(() => null)),
 });
 
 export const adminEmployeeUpdateSchema = adminEmployeeCreateSchema.partial();

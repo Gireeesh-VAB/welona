@@ -228,7 +228,7 @@ export default function BulkUploadButton({
       : [columns.map((c) => c.hint ?? '')];
     const csv = rowsToCsv([header, ...samples]);
     downloadFile(`${entityName.toLowerCase().replace(/\s+/g, '-')}-template.csv`, csv);
-    message.success('Template downloaded — fill it in and upload below.');
+    message.success(`Template downloaded — fill it in and use Bulk Upload to import.`);
   };
 
   // ---- File upload & parse -----------------------------------------------
@@ -366,9 +366,16 @@ export default function BulkUploadButton({
   // ---- Render ------------------------------------------------------------
   return (
     <>
-      <Button icon={<CloudUploadOutlined />} onClick={() => setOpen(true)} {...buttonProps}>
-        {buttonLabel}
-      </Button>
+      <Space.Compact>
+        <Tooltip title={`Download a ready-made CSV template for ${entityName.toLowerCase()}`}>
+          <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+            Template
+          </Button>
+        </Tooltip>
+        <Button icon={<CloudUploadOutlined />} onClick={() => setOpen(true)} {...buttonProps}>
+          {buttonLabel}
+        </Button>
+      </Space.Compact>
 
       <Modal
         title={

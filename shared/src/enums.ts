@@ -83,6 +83,10 @@ export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 export const CUSTOMER_TYPES = ['individual', 'business'] as const;
 export type CustomerType = (typeof CUSTOMER_TYPES)[number];
 
+/** Whether a branch is company-owned or a franchise outlet. */
+export const BRANCH_TYPES = ['company', 'franchise'] as const;
+export type BranchType = (typeof BRANCH_TYPES)[number];
+
 /** Follow-up task status for an enquiry. */
 export const FOLLOWUP_STATUSES = ['pending', 'completed', 'cancelled'] as const;
 export type FollowUpStatus = (typeof FOLLOWUP_STATUSES)[number];
@@ -143,3 +147,84 @@ export type OfferStatus = (typeof OFFER_STATUSES)[number];
 /** How an offer's discount is expressed. */
 export const DISCOUNT_TYPES = ['percent', 'flat'] as const;
 export type DiscountType = (typeof DISCOUNT_TYPES)[number];
+
+// --- HR (Phase 1) -----------------------------------------------------------
+
+/** Daily attendance status. `holiday` is auto-derived from the Holiday table. */
+export const ATTENDANCE_STATUSES = [
+  'present',
+  'absent',
+  'half_day',
+  'wfh',
+  'leave',
+  'holiday',
+] as const;
+export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
+
+/** Leave application lifecycle. */
+export const LEAVE_APPLICATION_STATUSES = [
+  'pending',
+  'approved',
+  'rejected',
+  'cancelled',
+] as const;
+export type LeaveApplicationStatus = (typeof LEAVE_APPLICATION_STATUSES)[number];
+
+/** Holiday kind — used for filtering / colouring in the calendar. */
+export const HOLIDAY_TYPES = ['public', 'regional', 'optional'] as const;
+export type HolidayType = (typeof HOLIDAY_TYPES)[number];
+
+// --- Inventory --------------------------------------------------------------
+
+/**
+ * Inventory ledger movement kind. `opening` is a one-time setup write,
+ * `purchase` adds stock, `sale` removes stock, `adjustment` corrects either
+ * direction (sign on `delta` controls in/out).
+ */
+export const INVENTORY_MOVEMENT_TYPES = [
+  'opening',
+  'purchase',
+  'sale',
+  'adjustment',
+  'transfer_in',
+  'transfer_out',
+] as const;
+export type InventoryMovementType = (typeof INVENTORY_MOVEMENT_TYPES)[number];
+
+/** Lifecycle states of a Purchase Order. */
+export const PURCHASE_ORDER_STATUSES = [
+  'draft',
+  'sent',
+  'partially_received',
+  'received',
+  'cancelled',
+] as const;
+export type PurchaseOrderStatus = (typeof PURCHASE_ORDER_STATUSES)[number];
+
+/** Lifecycle states of an inter-branch Stock Transfer. */
+export const STOCK_TRANSFER_STATUSES = [
+  'requested',
+  'dispatched',
+  'received',
+  'cancelled',
+] as const;
+export type StockTransferStatus = (typeof STOCK_TRANSFER_STATUSES)[number];
+
+/** Stages of a tracked shipment. The first five form the linear pipeline;
+ * `cancelled` is a terminal off-ramp reachable from any active stage. */
+export const SHIPMENT_PIPELINE = ['ordered', 'in_transit', 'received', 'qc', 'stocked'] as const;
+export const SHIPMENT_STAGES = [...SHIPMENT_PIPELINE, 'cancelled'] as const;
+export type ShipmentStage = (typeof SHIPMENT_STAGES)[number];
+
+/** UOM (unit of measure) options for a product. */
+export const PRODUCT_UOMS = [
+  'unit',
+  'pack',
+  'box',
+  'bottle',
+  'ml',
+  'litre',
+  'gm',
+  'kg',
+] as const;
+export type ProductUom = (typeof PRODUCT_UOMS)[number];

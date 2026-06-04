@@ -54,3 +54,23 @@ export interface AdminSessionResult {
   user: AdminAuthUser;
   accessToken: string;
 }
+
+/**
+ * The signed-in branch user (a `SystemUser`), as exposed to the panel.
+ * Branch sessions are scoped to a single branch — every list they see is
+ * filtered to `branchId`.
+ */
+export interface BranchAuthUser {
+  id: string;
+  userName: string;
+  branchId: string;
+  branchName: string | null;
+  /** Discriminator so the client can tell branch sessions from admin/staff. */
+  type: 'branch';
+}
+
+/** Result of a completed branch sign-in. */
+export interface BranchSessionResult {
+  user: BranchAuthUser;
+  accessToken: string;
+}

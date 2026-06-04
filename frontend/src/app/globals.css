@@ -46,14 +46,20 @@ body {
     visibility: hidden;
   }
   #receipt-paper,
-  #receipt-paper * {
+  #receipt-paper *,
+  .print-area,
+  .print-area * {
     visibility: visible;
   }
-  #receipt-paper {
+  #receipt-paper,
+  .print-area {
     position: absolute;
     left: 0;
     top: 0;
     width: 100%;
+  }
+  .no-print {
+    display: none !important;
   }
 }
 

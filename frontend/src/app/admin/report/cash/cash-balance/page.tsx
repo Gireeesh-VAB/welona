@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Button, Card, Col, DatePicker, Empty, Row, Select, Space, Table, Tag, Typography,
 } from 'antd';
@@ -8,6 +8,7 @@ import { DownloadOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/ic
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
+import { useBranchLock } from '@/hooks/useBranchLock';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import { formatMoney } from '@shared/format';
@@ -38,6 +39,7 @@ function downloadCsv(filename: string, csv: string) {
 
 export default function AdminCashBalancePage() {
   const colors = useBrandColors();
+  const { isBranchSession, lockedBranchId } = useBranchLock();
   const navItem = getAdminNavItem('report-cash-balance')!;
 
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
@@ -46,6 +48,10 @@ export default function AdminCashBalancePage() {
   const [format, setFormat] = useState<ReportFormat>('detailed');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(15);
+
+  useEffect(() => {
+    if (isBranchSession && lockedBranchId) setBranchId(lockedBranchId);
+  }, [isBranchSession, lockedBranchId]);
 
   const { data: branchesData, isLoading: branchesLoading } = useAdminBranches({ limit: 200 });
   const branchOptions = useMemo(() => (branchesData?.items ?? []).map((b) => ({
@@ -66,7 +72,7 @@ export default function AdminCashBalancePage() {
   }, [branchId, dateRange, reconciledOnly, branchOptions]);
 
   const resetFilters = () => {
-    setDateRange(null); setBranchId(undefined);
+    setDateRange(null); setBranchId(isBranchSession ? lockedBranchId : undefined);
     setReconciledOnly('all'); setFormat('detailed'); setPage(1);
   };
 
@@ -224,7 +230,7 @@ export default function AdminCashBalancePage() {
             <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Branch</Text>
             <Select style={{ width: '100%', marginTop: 4 }} placeholder={branchesLoading ? 'Loading…' : 'All branches'}
               loading={branchesLoading} value={branchId} onChange={(v) => { setBranchId(v); setPage(1); }}
-              options={branchOptions} allowClear showSearch optionFilterProp="label" />
+              options={branchOptions} allowClear={!isBranchSession} disabled={isBranchSession} showSearch optionFilterProp="label" />
           </Col>
           <Col xs={24} sm={12} md={8} lg={6} xl={5}>
             <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Reconciliation</Text>

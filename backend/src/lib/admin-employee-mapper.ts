@@ -45,6 +45,7 @@ export function toAdminEmployee(row: EmployeeWithRelations): AdminEmployee {
     pf: row.pf,
     esi: row.esi,
     weeklyOff: row.weeklyOff,
+    photoUrl: row.photoUrl,
     ipAddress: row.ipAddress,
     isActive: row.isActive,
     createdBy: row.createdByAdmin

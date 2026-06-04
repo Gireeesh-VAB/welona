@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import {
   adminLedgerCreateSchema,
   adminLedgerListQuerySchema,
@@ -17,7 +17,8 @@ import { toAdminLedger } from '@/lib/admin-ledger-mapper';
  * POST /api/v1/admin/ledgers
  */
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
+  // Org-wide reference data; branch sessions read it. Writes stay admin-only.
+  requireAdminOrBranchAuth(req);
   const { search, group, active, page, limit } = parseQuery(
     req,
     adminLedgerListQuerySchema,

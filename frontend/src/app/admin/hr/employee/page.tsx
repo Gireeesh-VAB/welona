@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import {
   App,
+  Avatar,
   Button,
   Card,
   Col,
@@ -20,15 +21,19 @@ import {
   Tabs,
   Tooltip,
   Typography,
+  Upload,
 } from 'antd';
 import {
   DeleteOutlined,
   EditOutlined,
+  EyeOutlined,
   PlusOutlined,
   SearchOutlined,
+  UploadOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
+import Link from 'next/link';
 import {
   useAdminEmployees,
   useCreateAdminEmployee,
@@ -38,6 +43,7 @@ import {
 import { useAdminDesignations } from '@/hooks/useAdminDesignations';
 import { useAdminDepartments } from '@/hooks/useAdminDepartments';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
+import { getSessionKind } from '@/lib/api-client';
 import { useZones } from '@/hooks/useZones';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
@@ -119,6 +125,7 @@ interface EmployeeFormValues {
   esi: boolean;
   // Shift
   weeklyOff?: string;
+  photoUrl?: string | null;
 }
 
 const rupeesToPaise = (rupees: number) => Math.round((rupees || 0) * 100);
@@ -145,6 +152,11 @@ export default function AdminHrEmployeePage() {
   const colors = useBrandColors();
   const navItem = getAdminNavItem('hr-employee')!;
   const { message } = App.useApp();
+
+  // Branch (SystemUser) sessions get a read-only, branch-scoped view: the list
+  // is auto-scoped server-side and all write affordances are hidden (HR writes
+  // remain admin-only on the backend).
+  const isBranchSession = getSessionKind() === 'branch';
 
   // --- Table state ---
   const [search, setSearch] = useState('');
@@ -192,6 +204,19 @@ export default function AdminHrEmployeePage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AdminEmployee | null>(null);
   const [form] = Form.useForm<EmployeeFormValues>();
+  const photoUrl = Form.useWatch('photoUrl', form);
+
+  /** Read a picked photo into a data URL on the form. */
+  const onPickPhoto = (file: File) => {
+    if (file.size > 1_500_000) {
+      message.error('Photo too large — keep it under ~1.5 MB.');
+      return false;
+    }
+    const reader = new FileReader();
+    reader.onload = () => form.setFieldsValue({ photoUrl: String(reader.result) });
+    reader.readAsDataURL(file);
+    return false;
+  };
 
   const create = useCreateAdminEmployee();
   const update = useUpdateAdminEmployee();
@@ -241,6 +266,7 @@ export default function AdminHrEmployeePage() {
       pf: row.pf,
       esi: row.esi,
       weeklyOff: row.weeklyOff ?? undefined,
+      photoUrl: row.photoUrl ?? null,
     });
     setModalOpen(true);
   };
@@ -281,6 +307,7 @@ export default function AdminHrEmployeePage() {
       pf: values.pf,
       esi: values.esi,
       weeklyOff: values.weeklyOff?.trim() || undefined,
+      photoUrl: values.photoUrl ?? null,
     };
     try {
       if (editing) {
@@ -317,38 +344,51 @@ export default function AdminHrEmployeePage() {
       {
         title: 'Manage',
         key: 'actions',
-        width: 110,
+        width: 140,
         fixed: 'left',
         render: (_, row) => (
           <Space size={6}>
-            <Tooltip title="Edit">
-              <Button
-                type="primary"
-                size="small"
-                icon={<EditOutlined />}
-                onClick={() => openEdit(row)}
-                style={{ background: '#5B2C8B', borderColor: '#5B2C8B' }}
-              />
-            </Tooltip>
-            <Popconfirm
-              title={`Delete ${row.name}?`}
-              okText="Delete"
-              okButtonProps={{ danger: true }}
-              cancelText="Cancel"
-              onConfirm={() => onDelete(row)}
-            >
-              <Tooltip title="Delete">
+            <Tooltip title="View profile">
+              <Link href={`/admin/hr/employee/${row.id}`}>
                 <Button
                   size="small"
-                  icon={<DeleteOutlined />}
-                  style={{
-                    background: colors.status.error,
-                    borderColor: colors.status.error,
-                    color: '#FFFFFF',
-                  }}
+                  icon={<EyeOutlined />}
+                  style={{ background: colors.gold.primary, borderColor: colors.gold.primary, color: colors.text.onGold }}
+                />
+              </Link>
+            </Tooltip>
+            {!isBranchSession && (
+              <Tooltip title="Edit">
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<EditOutlined />}
+                  onClick={() => openEdit(row)}
+                  style={{ background: '#5B2C8B', borderColor: '#5B2C8B' }}
                 />
               </Tooltip>
-            </Popconfirm>
+            )}
+            {!isBranchSession && (
+              <Popconfirm
+                title={`Delete ${row.name}?`}
+                okText="Delete"
+                okButtonProps={{ danger: true }}
+                cancelText="Cancel"
+                onConfirm={() => onDelete(row)}
+              >
+                <Tooltip title="Delete">
+                  <Button
+                    size="small"
+                    icon={<DeleteOutlined />}
+                    style={{
+                      background: colors.status.error,
+                      borderColor: colors.status.error,
+                      color: '#FFFFFF',
+                    }}
+                  />
+                </Tooltip>
+              </Popconfirm>
+            )}
           </Space>
         ),
       },
@@ -498,7 +538,7 @@ export default function AdminHrEmployeePage() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [colors.text.primary, colors.text.placeholder, colors.status.error],
+    [colors.text.primary, colors.text.placeholder, colors.status.error, isBranchSession],
   );
 
   const pagination: TablePaginationConfig = {
@@ -719,6 +759,24 @@ export default function AdminHrEmployeePage() {
           />
         </Form.Item>
       </Col>
+      <Col span={12}>
+        <Form.Item label="Photo" tooltip="Used on the employee ID card.">
+          <Space align="center">
+            <Avatar shape="square" size={56} src={photoUrl || undefined}>
+              {form.getFieldValue('name')?.charAt(0)?.toUpperCase()}
+            </Avatar>
+            <Upload accept="image/*" showUploadList={false} beforeUpload={onPickPhoto}>
+              <Button size="small" icon={<UploadOutlined />}>Upload photo</Button>
+            </Upload>
+            {photoUrl && (
+              <Button size="small" danger onClick={() => form.setFieldsValue({ photoUrl: null })}>
+                Remove
+              </Button>
+            )}
+          </Space>
+        </Form.Item>
+        <Form.Item name="photoUrl" hidden><Input /></Form.Item>
+      </Col>
     </Row>
   );
 
@@ -738,6 +796,7 @@ export default function AdminHrEmployeePage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
+        {!isBranchSession && (
         <Space>
           <BulkUploadButton
             entityName="Employees"
@@ -790,6 +849,7 @@ export default function AdminHrEmployeePage() {
             Add Employee
           </Button>
         </Space>
+        )}
       </div>
 
       <Card

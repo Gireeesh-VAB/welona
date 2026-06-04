@@ -3,6 +3,11 @@
 import { Card, Col, Row, Typography } from 'antd';
 import {
   ApartmentOutlined,
+  CalendarOutlined,
+  CarryOutOutlined,
+  ClockCircleOutlined,
+  DashboardOutlined,
+  ScheduleOutlined,
   SolutionOutlined,
   TeamOutlined,
   UserOutlined,
@@ -11,13 +16,31 @@ import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import { useBrandColors } from '@/hooks/useBrandColors';
+import { getSessionKind } from '@/lib/api-client';
 
 const { Title, Text } = Typography;
 
+/**
+ * HR sub-modules a branch (SystemUser) session may open. Branch sessions get the
+ * operational, branch-scoped views; org-wide configuration (leave types,
+ * holidays, departments, designations, system users) stays admin-only.
+ */
+const BRANCH_HR_KEYS = new Set([
+  'hr-dashboard',
+  'hr-employee',
+  'hr-attendance',
+  'hr-leaves',
+]);
+
 const childIcons: Record<string, ReactNode> = {
-  'hr-designations': <SolutionOutlined />,
-  'hr-departments': <ApartmentOutlined />,
+  'hr-dashboard': <DashboardOutlined />,
   'hr-employee': <TeamOutlined />,
+  'hr-attendance': <ClockCircleOutlined />,
+  'hr-leaves': <CarryOutOutlined />,
+  'hr-leave-types': <ScheduleOutlined />,
+  'hr-holidays': <CalendarOutlined />,
+  'hr-departments': <ApartmentOutlined />,
+  'hr-designations': <SolutionOutlined />,
   'hr-user': <UserOutlined />,
 };
 
@@ -26,7 +49,10 @@ export default function AdminHrPage() {
   const router = useRouter();
   const colors = useBrandColors();
   const hr = getAdminNavItem('hr')!;
-  const children = hr.children ?? [];
+  const isBranchSession = getSessionKind() === 'branch';
+  const children = (hr.children ?? []).filter(
+    (item) => !isBranchSession || BRANCH_HR_KEYS.has(item.key),
+  );
 
   return (
     <div>

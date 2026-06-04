@@ -32,8 +32,19 @@ export interface AdminAuthClaims {
   email: string;
 }
 
-/** Either kind of session — discriminated on `type`. */
-export type AuthClaims = StaffAuthClaims | AdminAuthClaims;
+/** Decoded access-token payload — branch (SystemUser) session. */
+export interface BranchAuthClaims {
+  /** SystemUser id. */
+  sub: string;
+  type: 'branch';
+  /** The single branch this account is scoped to. */
+  branchId: string;
+  branchName: string | null;
+  userName: string;
+}
+
+/** Any kind of session — discriminated on `type`. */
+export type AuthClaims = StaffAuthClaims | AdminAuthClaims | BranchAuthClaims;
 
 const ACCESS_SECRET = process.env.JWT_SECRET ?? 'welona-dev-access-secret';
 const ACCESS_EXPIRY = process.env.JWT_EXPIRY ?? '1h';

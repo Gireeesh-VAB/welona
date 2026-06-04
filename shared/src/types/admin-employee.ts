@@ -28,6 +28,7 @@ export interface AdminEmployee {
   esi: boolean;
   // Shift
   weeklyOff: string | null;
+  photoUrl: string | null;
   // Audit
   ipAddress: string | null;
   isActive: boolean;

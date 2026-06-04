@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import {
   adminServiceCreateSchema,
   adminServiceListQuerySchema,
@@ -17,7 +17,8 @@ import { toAdminService } from '@/lib/admin-service-mapper';
  * POST /api/v1/admin/services
  */
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
+  // Org-wide reference data; branch sessions read it. Writes stay admin-only.
+  requireAdminOrBranchAuth(req);
   const { search, categoryId, active, page, limit } = parseQuery(
     req,
     adminServiceListQuerySchema,

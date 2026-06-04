@@ -3,9 +3,10 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth } from '@/lib/auth/service';
+import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
 import { adminBranchCreateSchema, adminBranchListQuerySchema } from '@shared/schemas/admin-branches';
-import { toAdminBranch } from '@/lib/admin-branch-mapper';
+import { toAdminBranch, branchAdminInclude } from '@/lib/admin-branch-mapper';
+import { assertValidParent } from '@/lib/admin-branch-hierarchy';
 
 /**
  * Admin master-data: branches.
@@ -23,7 +24,9 @@ async function resolveOrgId(): Promise<string> {
 }
 
 export const GET = route(async (req) => {
-  requireAdminAuth(req);
+  // Branch sessions read the branch list (reference for filters/forms); only
+  // admins create/edit branches (POST/PUT/DELETE stay admin-only).
+  requireAdminOrBranchAuth(req);
   const { search, page, limit } = parseQuery(req, adminBranchListQuerySchema);
 
   const where: Prisma.BranchWhereInput = search
@@ -43,7 +46,7 @@ export const GET = route(async (req) => {
   const [items, total] = await Promise.all([
     db.branch.findMany({
       where,
-      include: { zone: true, createdByAdmin: true },
+      include: branchAdminInclude,
       orderBy: [{ createdAt: 'desc' }],
       skip: (page - 1) * limit,
       take: limit,
@@ -62,22 +65,63 @@ export const POST = route(async (req) => {
   const zone = await db.zone.findUnique({ where: { id: body.zoneId } });
   if (!zone) throw Errors.badRequest('Selected zone no longer exists.');
 
+  // Validate the parent branch (existence; cycles are impossible on create).
+  await assertValidParent(null, body.parentBranchId);
+
   const orgId = await resolveOrgId();
 
+  // Only the first primary in the submitted list wins; later "primary" flags
+  // are demoted so we never persist multiple primaries for the same branch.
+  const submittedAddresses = body.additionalAddresses ?? [];
+  let primarySeen = false;
+  const normalisedAddresses = submittedAddresses.map((addr) => {
+    const isPrimary = Boolean(addr.isPrimary) && !primarySeen;
+    if (isPrimary) primarySeen = true;
+    return { ...addr, isPrimary };
+  });
+
   try {
-    const branch = await db.branch.create({
-      data: {
-        orgId,
-        name: body.branchName,
-        code: body.branchCode,
-        address: body.address ?? null,
-        phone: body.phone ?? null,
-        email: body.email ?? null,
-        ipAddress: body.ipAddress ?? null,
-        zoneId: body.zoneId,
-        createdByAdminId: claims.sub,
-      },
-      include: { zone: true, createdByAdmin: true },
+    const branch = await db.$transaction(async (tx) => {
+      const created = await tx.branch.create({
+        data: {
+          orgId,
+          name: body.branchName,
+          code: body.branchCode,
+          branchType: body.branchType ?? 'company',
+          address: body.address ?? null,
+          phone: body.phone ?? null,
+          email: body.email ?? null,
+          ipAddress: body.ipAddress ?? null,
+          zoneId: body.zoneId,
+          parentBranchId: body.parentBranchId ?? null,
+          isActive: body.isActive ?? true,
+          createdByAdminId: claims.sub,
+        },
+      });
+
+      if (normalisedAddresses.length > 0) {
+        await tx.branchAddress.createMany({
+          data: normalisedAddresses.map((addr) => ({
+            branchId: created.id,
+            label: addr.label,
+            line1: addr.line1,
+            line2: addr.line2 ?? null,
+            city: addr.city ?? null,
+            state: addr.state ?? null,
+            pincode: addr.pincode ?? null,
+            country: addr.country ?? 'India',
+            phone: addr.phone ?? null,
+            email: addr.email ?? null,
+            isPrimary: addr.isPrimary,
+            isActive: addr.isActive,
+          })),
+        });
+      }
+
+      return tx.branch.findUniqueOrThrow({
+        where: { id: created.id },
+        include: branchAdminInclude,
+      });
     });
     return created(toAdminBranch(branch));
   } catch (error) {

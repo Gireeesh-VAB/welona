@@ -14,14 +14,18 @@ interface ListParams {
   search?: string;
   page?: number;
   limit?: number;
+  /** Set false to skip the query (e.g. branch sessions can't list branches). */
+  enabled?: boolean;
 }
 
 export function useAdminBranches(params: ListParams = {}) {
+  const { enabled = true, ...query } = params;
   return useQuery<Paginated<AdminBranch>>({
-    queryKey: [KEY, params],
+    queryKey: [KEY, query],
+    enabled,
     queryFn: () =>
       apiList<AdminBranch>('/admin/branches', {
-        query: { search: params.search, page: params.page, limit: params.limit },
+        query: { search: query.search, page: query.page, limit: query.limit },
       }),
   });
 }
