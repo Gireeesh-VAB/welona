@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { leadStatusSchema } from '@shared/schemas/sales';
 import { LEAD_TRANSITIONS, assertTransition } from '@/lib/sales/transitions';
@@ -14,12 +14,12 @@ type Ctx = { params: { id: string } };
  * stage (new → contacted → qualified → …). Illegal jumps are rejected.
  */
 export const POST = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const body = await parseBody(req, leadStatusSchema);
 
   const lead = await db.lead.findFirst({
-    where: { id: params.id, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: params.id, orgId },
   });
   if (!lead) throw Errors.notFound('Lead');
 

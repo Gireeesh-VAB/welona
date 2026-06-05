@@ -37,8 +37,9 @@ export const GET = route(async (req) => {
   const { month } = parseQuery(req, monthQuerySchema);
   const { start, end } = monthRange(month);
 
+  const staffBranchId = claims.branchIds[0] ?? null;
   const bookings = await db.booking.findMany({
-    where: { orgId: claims.orgId, scheduledAt: { gte: start, lt: end } },
+    where: { orgId: claims.orgId, scheduledAt: { gte: start, lt: end }, ...(staffBranchId ? { branchId: staffBranchId } : {}) },
     include: { customer: { select: { id: true, name: true } } },
     orderBy: { scheduledAt: 'asc' },
   });

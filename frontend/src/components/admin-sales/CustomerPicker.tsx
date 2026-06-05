@@ -1,11 +1,10 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { App, Button, Form, Input, Modal, Select } from 'antd';
 import { PlusOutlined } from '@ant-design/icons';
 import { useAdminCustomers, useCreateAdminCustomer } from '@/hooks/useAdminCustomers';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchLock } from '@/hooks/useBranchLock';
 import { ApiClientError } from '@/lib/api-client';
 
 interface Props {
@@ -28,7 +27,6 @@ export default function CustomerPicker({ value, onChange }: Props) {
 
   // Branch sessions auto-scope the new customer server-side; admins must pick a
   // branch so the customer (and any sale built on it) shows up for that branch.
-  const { isBranchSession } = useBranchLock();
   const { data: branchesData } = useAdminBranches({ limit: 200 });
   const branchOptions = (branchesData?.items ?? []).map((b) => ({
     value: b.id,
@@ -85,7 +83,6 @@ export default function CustomerPicker({ value, onChange }: Props) {
           <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
             <Input placeholder="Customer or company name" />
           </Form.Item>
-          {!isBranchSession && (
             <Form.Item
               name="branchId"
               label="Branch"
@@ -98,7 +95,6 @@ export default function CustomerPicker({ value, onChange }: Props) {
                 options={branchOptions}
               />
             </Form.Item>
-          )}
           <Form.Item name="phone" label="Phone">
             <Input placeholder="+91 …" />
           </Form.Item>

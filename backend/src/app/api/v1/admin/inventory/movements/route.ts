@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveWarehouseId } from '@/lib/warehouse';
 import { depleteBatchStockFEFO } from '@/lib/batch';
 import {
@@ -22,7 +22,7 @@ const include = { branch: true, product: true, createdByAdmin: true } as const;
  * (branch, product) quantity is always equal to the sum of its deltas.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const { branchId, warehouseId, productId, type, page, limit } = parseQuery(
     req,
     adminInventoryMovementListQuerySchema,
@@ -30,7 +30,7 @@ export const GET = route(async (req) => {
 
   const where: Prisma.InventoryMovementWhereInput = {
     // Branch sessions only ever see their own branch's movements.
-    ...((branchScope ?? branchId) && { branchId: branchScope ?? branchId }),
+    ...((branchId) && { branchId: branchId }),
     ...(warehouseId && { warehouseId }),
     ...(productId && { productId }),
     ...(type && { type }),
@@ -51,10 +51,10 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminInventoryMovementCreateSchema);
   // Branch sessions can only move stock in their own branch.
-  const branchId = branchScope ?? body.branchId;
+  const branchId = body.branchId;
   // Only admin sessions map to an AdminUser FK; branch sessions leave it null.
   const createdByAdminId = claims.type === 'admin' ? claims.sub : null;
 

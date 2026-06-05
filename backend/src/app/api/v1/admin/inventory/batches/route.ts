@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { route, parseQuery } from '@/lib/api/handler';
 import { ok, buildMeta } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import type { AdminBatchRow } from '@shared/types/admin-batch';
 
 const querySchema = z.object({
@@ -23,12 +23,12 @@ const querySchema = z.object({
  * optionally scoped to a branch) and expiry. Branch sessions are scoped.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { branchId: queryBranchId, productId, search, inStockOnly, page, limit } = parseQuery(
     req,
     querySchema,
   );
-  const branchId = branchScope ?? queryBranchId;
+  const branchId = queryBranchId;
 
   const where: Prisma.ProductBatchWhereInput = {
     ...(productId && { productId }),

@@ -11,7 +11,7 @@ export const GET = route(async (req) => {
   requirePermission(claims, 'finance:read');
 
   const rows = await db.voucher.findMany({
-    where: { orgId: claims.orgId },
+    where: { orgId: claims.orgId, ...(claims.branchIds[0] ? { branchId: claims.branchIds[0] } : {}) },
     orderBy: { voucherDate: 'desc' },
     take: 200,
   });

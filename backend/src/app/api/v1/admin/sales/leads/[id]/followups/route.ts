@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok, created } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { followUpCreateSchema } from '@shared/schemas/sales';
 
@@ -10,11 +10,11 @@ type Ctx = { params: { id: string } };
 
 /** GET /api/v1/admin/sales/leads/[id]/followups — follow-ups for an enquiry. */
 export const GET = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const lead = await db.lead.findFirst({
-    where: { id: params.id, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: params.id, orgId },
   });
   if (!lead) throw Errors.notFound('Enquiry');
 
@@ -27,11 +27,11 @@ export const GET = route<Ctx>(async (req, { params }) => {
 
 /** POST /api/v1/admin/sales/leads/[id]/followups — log a follow-up interaction. */
 export const POST = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const lead = await db.lead.findFirst({
-    where: { id: params.id, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: params.id, orgId },
   });
   if (!lead) throw Errors.notFound('Enquiry');
 

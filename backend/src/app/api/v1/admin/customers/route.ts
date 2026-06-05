@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { customerCreateSchema, listQuerySchema } from '@shared/schemas/sales';
 import { serializeCustomer } from '@/lib/sales/serializers';
@@ -13,18 +13,17 @@ import { serializeCustomer } from '@/lib/sales/serializers';
  * GET  /api/v1/admin/customers — paginated, searchable customer list.
  * POST /api/v1/admin/customers — create a customer.
  *
- * Branch sessions are hard-scoped to their own branch (`branchScope`); admins
  * see all branches and may pass an optional `branchId` filter. The employee
  * panel keeps its own `/api/v1/customers` routes (staff RBAC) untouched.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const query = parseQuery(req, listQuerySchema);
 
   const where: Prisma.CustomerWhereInput = { orgId };
   // Branch sessions are locked to their branch regardless of the query.
-  const branchId = branchScope ?? query.branchId;
+  const branchId = query.branchId;
   if (branchId) where.branchId = branchId;
   if (query.search) {
     where.OR = [
@@ -50,7 +49,7 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const body = await parseBody(req, customerCreateSchema);
 
@@ -58,7 +57,7 @@ export const POST = route(async (req) => {
     data: {
       orgId,
       // Branch sessions pin the new customer to their branch.
-      branchId: branchScope ?? body.branchId ?? null,
+      branchId: body.branchId ?? null,
       type: body.type,
       name: body.name,
       email: body.email || null,

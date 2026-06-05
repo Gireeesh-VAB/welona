@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { created } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { quickSaleSchema } from '@shared/schemas/sales';
 import { computeTotals, nextDocumentNumber } from '@/lib/sales/service';
@@ -16,7 +16,7 @@ import { serializeDelivery } from '@/lib/sales/serializers';
  * an issued invoice for it — all in a single transaction.
  */
 export const POST = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const body = await parseBody(req, quickSaleSchema);
 
@@ -27,11 +27,11 @@ export const POST = route(async (req) => {
 
   const [customer, owner] = await Promise.all([
     db.customer.findFirst({
-      where: { id: body.customerId, orgId, ...(branchScope && { branchId: branchScope }) },
+      where: { id: body.customerId, orgId },
     }),
     // Branch sessions may only assign a salesperson from their own branch.
     db.staff.findFirst({
-      where: { id: ownerStaffId, orgId, ...(branchScope && { branchId: branchScope }) },
+      where: { id: ownerStaffId, orgId },
     }),
   ]);
   if (!customer) throw Errors.badRequest('Selected customer does not exist');
@@ -39,7 +39,7 @@ export const POST = route(async (req) => {
 
   const totals = computeTotals(body.items);
   // Branch sessions pin everything to their branch.
-  const branchId = branchScope ?? body.branchId ?? customer.branchId;
+  const branchId = body.branchId ?? customer.branchId;
 
   const result = await db.$transaction(async (tx) => {
     const orderNumber = await nextDocumentNumber(tx, orgId, 'order', 'SO');

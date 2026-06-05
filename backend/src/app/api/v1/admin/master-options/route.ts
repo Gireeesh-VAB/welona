@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { route, parseQuery } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { masterOptionQuerySchema } from '@shared/schemas/sales';
 
@@ -13,7 +13,7 @@ import { masterOptionQuerySchema } from '@shared/schemas/sales';
  * options are managed on the employee side.
  */
 export const GET = route(async (req) => {
-  requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const { kind } = parseQuery(req, masterOptionQuerySchema);
 

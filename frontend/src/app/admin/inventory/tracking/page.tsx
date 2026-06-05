@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -29,9 +29,8 @@ import {
   useDeleteShipment,
 } from '@/hooks/useShipments';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchAuthStore } from '@/store/branchAuthStore';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { ApiClientError, getSessionKind } from '@/lib/api-client';
+import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminShipment } from '@shared/types/admin-shipment';
 import type { AdminShipmentCreateInput } from '@shared/schemas/admin-shipments';
@@ -73,10 +72,8 @@ export default function AdminTrackingPage() {
   const navItem = getAdminNavItem('inventory-tracking')!;
   const { message } = App.useApp();
 
-  const branchSession = useBranchAuthStore((s) => s.branch);
-  const isBranchSession = getSessionKind() === 'branch' && Boolean(branchSession);
 
-  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: !isBranchSession });
+  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: true });
   const branchOptions = useMemo(
     () => (branchesData?.items ?? []).map((b) => ({ value: b.id, label: `${b.branchName} (${b.branchCode})` })),
     [branchesData],

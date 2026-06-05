@@ -24,6 +24,8 @@ export const GET = route(async (req) => {
   const claims = requireAuth(req);
   requirePermission(claims, 'dashboard:read');
   const orgId = claims.orgId;
+  const staffBranchId = claims.branchIds[0] ?? null;
+  const branchFilter = staffBranchId ? { branchId: staffBranchId } : {};
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -32,20 +34,20 @@ export const GET = route(async (req) => {
 
   const [todayEnquiries, monthLeads, monthPayments, todayWalkIns, dueFollowups, staff, treatments] =
     await Promise.all([
-      db.lead.count({ where: { orgId, createdAt: { gte: startOfToday } } }),
+      db.lead.count({ where: { orgId, ...branchFilter, createdAt: { gte: startOfToday } } }),
       db.lead.findMany({
-        where: { orgId, createdAt: { gte: startOfMonth } },
+        where: { orgId, ...branchFilter, createdAt: { gte: startOfMonth } },
         select: { treatmentId: true },
       }),
       db.payment.findMany({
-        where: { orgId, receivedAt: { gte: startOfMonth } },
+        where: { orgId, ...branchFilter, receivedAt: { gte: startOfMonth } },
         select: { amount: true, method: true, receivedAt: true, recordedById: true },
       }),
       db.booking.count({
-        where: { orgId, scheduledAt: { gte: startOfToday, lt: startOfTomorrow } },
+        where: { orgId, ...branchFilter, scheduledAt: { gte: startOfToday, lt: startOfTomorrow } },
       }),
       db.followUp.findMany({
-        where: { orgId, status: 'pending', dueAt: { gte: startOfToday, lt: startOfTomorrow } },
+        where: { orgId, ...branchFilter, status: 'pending', dueAt: { gte: startOfToday, lt: startOfTomorrow } },
         include: { lead: { select: { contactName: true } } },
         orderBy: { dueAt: 'asc' },
       }),

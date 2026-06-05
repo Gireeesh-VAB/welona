@@ -24,8 +24,15 @@ export const GET = route(async (req) => {
   const claims = requireAuth(req);
   requirePermission(claims, 'staff:read');
 
+  // Branch-scoped: staff assigned to a branch see only their branch's
+  // employees. Org-wide staff (branchIds=[]) see everyone.
+  const staffBranchId = claims.branchIds[0] ?? null;
+
   const staff = await db.staff.findMany({
-    where: { orgId: claims.orgId },
+    where: {
+      orgId: claims.orgId,
+      ...(staffBranchId ? { branchId: staffBranchId } : {}),
+    },
     include: {
       role: { select: { name: true } },
       branch: { select: { name: true } },

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -39,8 +39,7 @@ import {
   useUpsertAttendance,
 } from '@/hooks/useAttendance';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { ApiClientError, getSessionKind } from '@/lib/api-client';
-import { useBranchAuthStore } from '@/store/branchAuthStore';
+import { ApiClientError } from '@/lib/api-client';
 import {
   ATTENDANCE_STATUSES,
   type AttendanceStatus,
@@ -72,12 +71,10 @@ export default function AdminHrAttendancePage() {
   // Branch (SystemUser) sessions get a read-only, branch-locked view: the data
   // is auto-scoped server-side, the branch filter is pinned, and attendance
   // marking stays admin-only on the backend.
-  const isBranchSession = getSessionKind() === 'branch';
-  const branchSession = useBranchAuthStore((s) => s.branch);
 
   const [date, setDate] = useState<Dayjs>(dayjs());
   const [branchId, setBranchId] = useState<string | undefined>(
-    isBranchSession ? branchSession?.branchId : undefined,
+    undefined,
   );
   const [departmentId, setDepartmentId] = useState<string | undefined>();
   const [search, setSearch] = useState('');
@@ -86,10 +83,6 @@ export default function AdminHrAttendancePage() {
 
   const dateIso = useMemo(() => date.startOf('day').toISOString(), [date]);
 
-  // Keep the branch filter pinned to the session branch once it loads.
-  useEffect(() => {
-    if (isBranchSession && branchSession?.branchId) setBranchId(branchSession.branchId);
-  }, [isBranchSession, branchSession?.branchId]);
 
   const { data: employeesPage, isLoading: employeesLoading } = useAdminEmployees({
     limit: 500,
@@ -257,7 +250,7 @@ export default function AdminHrAttendancePage() {
         const cur = rowState[row.id];
         return (
           <Segmented
-            disabled={isBranchSession}
+           
             value={cur?.status ?? undefined}
             onChange={(v) =>
               setRowState((prev) => ({
@@ -285,7 +278,7 @@ export default function AdminHrAttendancePage() {
         return (
           <Input
             size="small"
-            disabled={isBranchSession}
+           
             placeholder="Optional"
             value={cur?.remarks ?? ''}
             maxLength={300}
@@ -308,7 +301,6 @@ export default function AdminHrAttendancePage() {
       width: 120,
       fixed: 'right',
       render: (_, row) => {
-        if (isBranchSession) return null;
         const cur = rowState[row.id];
         return (
           <Button
@@ -344,7 +336,6 @@ export default function AdminHrAttendancePage() {
             Mark daily attendance. Approved leaves are painted automatically.
           </Text>
         </div>
-        {!isBranchSession && (
         <Space>
           <Dropdown
             menu={{
@@ -363,7 +354,6 @@ export default function AdminHrAttendancePage() {
             </Button>
           </Dropdown>
         </Space>
-        )}
       </div>
 
       <Card
@@ -383,21 +373,17 @@ export default function AdminHrAttendancePage() {
           </Col>
           <Col xs={24} sm={6}>
             <Select
-              allowClear={!isBranchSession}
+              allowClear
               showSearch
-              disabled={isBranchSession}
+             
               placeholder="All branches"
               value={branchId}
               onChange={setBranchId}
               style={{ width: '100%' }}
-              options={
-                isBranchSession && branchSession
-                  ? [{ value: branchSession.branchId, label: branchSession.branchName ?? 'My branch' }]
-                  : (branchesData?.items ?? []).map((b) => ({
-                      value: b.id,
-                      label: `${b.branchName} (${b.branchCode})`,
-                    }))
-              }
+              options={(branchesData?.items ?? []).map((b) => ({
+                value: b.id,
+                label: `${b.branchName} (${b.branchCode})`,
+              }))}
               filterOption={(input, option) =>
                 (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
               }

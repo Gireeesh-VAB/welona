@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseQuery } from '@/lib/api/handler';
 import { ok, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { adminInventoryStockQuerySchema } from '@shared/schemas/admin-inventory';
 import type { AdminInventoryStockRow } from '@shared/types/admin-inventory';
 import type { ProductUom } from '@shared/enums';
@@ -16,13 +16,13 @@ import type { ProductUom } from '@shared/enums';
  * opening movement without having to "register" a product first.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { branchId: queryBranchId, warehouseId, search, lowStockOnly, page, limit } = parseQuery(
     req,
     adminInventoryStockQuerySchema,
   );
   // Branch sessions are locked to their own branch regardless of the query.
-  const branchId = branchScope ?? queryBranchId;
+  const branchId = queryBranchId;
 
   const branch = await db.branch.findUnique({ where: { id: branchId }, select: { id: true } });
   if (!branch) throw Errors.notFound('Branch');

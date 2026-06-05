@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { leadCreateSchema, listQuerySchema } from '@shared/schemas/sales';
 
@@ -28,12 +28,12 @@ const leadInclude = {
  * may pass an optional `branchId` filter.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const query = parseQuery(req, listQuerySchema);
 
   const where: Prisma.LeadWhereInput = { orgId };
-  const branchId = branchScope ?? query.branchId;
+  const branchId = query.branchId;
   if (query.status) where.status = query.status;
   if (branchId) where.branchId = branchId;
   if (query.ownerStaffId) where.ownerStaffId = query.ownerStaffId;
@@ -60,7 +60,7 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const body = await parseBody(req, leadCreateSchema);
 
@@ -70,13 +70,13 @@ export const POST = route(async (req) => {
   if (!ownerStaffId) throw Errors.badRequest('Select a salesperson (owner) for the lead');
   // Branch sessions may only assign a salesperson from their own branch.
   const owner = await db.staff.findFirst({
-    where: { id: ownerStaffId, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: ownerStaffId, orgId },
   });
   if (!owner) throw Errors.badRequest('Selected salesperson does not exist');
 
   if (body.customerId) {
     const customer = await db.customer.findFirst({
-      where: { id: body.customerId, orgId, ...(branchScope && { branchId: branchScope }) },
+      where: { id: body.customerId, orgId },
     });
     if (!customer) throw Errors.badRequest('Selected customer does not exist');
   }
@@ -84,7 +84,7 @@ export const POST = route(async (req) => {
   const lead = await db.lead.create({
     data: {
       orgId,
-      branchId: branchScope ?? body.branchId ?? null,
+      branchId: body.branchId ?? null,
       customerId: body.customerId ?? null,
       contactName: body.contactName,
       contactPhone: body.contactPhone,

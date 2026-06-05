@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { invoiceCreateSchema, listQuerySchema } from '@shared/schemas/sales';
 import { computeTotals, nextDocumentNumber } from '@/lib/sales/service';
@@ -19,12 +19,12 @@ const listInclude = {
  * POST /api/v1/admin/sales/invoices — raise an invoice, from an order or line items.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const query = parseQuery(req, listQuerySchema);
 
   const where: Prisma.InvoiceWhereInput = { orgId };
-  const branchId = branchScope ?? query.branchId;
+  const branchId = query.branchId;
   if (query.status) where.status = query.status;
   if (branchId) where.branchId = branchId;
   if (query.search) {
@@ -49,12 +49,12 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const body = await parseBody(req, invoiceCreateSchema);
 
   const customer = await db.customer.findFirst({
-    where: { id: body.customerId, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: body.customerId, orgId },
   });
   if (!customer) throw Errors.badRequest('Selected customer does not exist');
 
@@ -70,7 +70,7 @@ export const POST = route(async (req) => {
     total = totals.total;
   } else if (body.orderId) {
     const order = await db.salesOrder.findFirst({
-      where: { id: body.orderId, orgId, ...(branchScope && { branchId: branchScope }) },
+      where: { id: body.orderId, orgId },
     });
     if (!order) throw Errors.badRequest('Selected order does not exist');
     subtotal = order.subtotal;
@@ -85,7 +85,7 @@ export const POST = route(async (req) => {
     return tx.invoice.create({
       data: {
         orgId,
-        branchId: branchScope ?? body.branchId ?? customer.branchId,
+        branchId: body.branchId ?? customer.branchId,
         number,
         customerId: body.customerId,
         orderId: body.orderId ?? null,

@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { created } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { QUOTATION_TRANSITIONS, assertTransition } from '@/lib/sales/transitions';
 import { nextDocumentNumber } from '@/lib/sales/service';
@@ -15,12 +15,12 @@ type Ctx = { params: { id: string } };
  * into a sales order, copying its line items, and mark the quote converted.
  */
 export const POST = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const order = await db.$transaction(async (tx) => {
     const quotation = await tx.quotation.findFirst({
-      where: { id: params.id, orgId, ...(branchScope && { branchId: branchScope }) },
+      where: { id: params.id, orgId },
       include: { items: { orderBy: { sortOrder: 'asc' } }, order: true },
     });
     if (!quotation) throw Errors.notFound('Quotation');
@@ -33,7 +33,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
     const newOrder = await tx.salesOrder.create({
       data: {
         orgId,
-        branchId: branchScope ?? quotation.branchId,
+        branchId: quotation.branchId,
         number,
         customerId: quotation.customerId,
         quotationId: quotation.id,

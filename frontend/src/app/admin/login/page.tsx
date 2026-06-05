@@ -14,6 +14,11 @@ interface CredentialsForm {
   password: string;
 }
 
+const TEST_CREDENTIALS = {
+  identifier: 'superadmin@welona.com',
+  password: 'Welona@123',
+};
+
 /**
  * Admin sign-in — separate from /login (employee). Posts to
  * /api/v1/auth/admin/login and lands at /admin on success.
@@ -27,9 +32,15 @@ export default function AdminLoginPage() {
   const { message } = App.useApp();
   const login = useAdminLogin();
   const colors = useBrandColors();
+  const [form] = Form.useForm<CredentialsForm>();
 
   const fail = (error: unknown, fallback: string) => {
     message.error(error instanceof ApiClientError ? error.message : fallback);
+  };
+
+  const handleAutoFill = () => {
+    form.setFieldsValue(TEST_CREDENTIALS);
+    message.success('Credentials auto-filled');
   };
 
   const onSubmit = async (values: CredentialsForm) => {
@@ -76,6 +87,7 @@ export default function AdminLoginPage() {
         </div>
 
         <Form<CredentialsForm>
+          form={form}
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
@@ -111,7 +123,18 @@ export default function AdminLoginPage() {
             </Button>
           </Form.Item>
 
-          <div style={{ textAlign: 'center', marginTop: 12 }}>
+          <Form.Item style={{ marginBottom: 12 }}>
+            <Button
+              type="dashed"
+              block
+              onClick={handleAutoFill}
+              style={{ color: colors.text.placeholder, borderColor: colors.border }}
+            >
+              Auto-fill credentials
+            </Button>
+          </Form.Item>
+
+          <div style={{ textAlign: 'center' }}>
             <Button
               type="link"
               onClick={() => router.push('/login')}

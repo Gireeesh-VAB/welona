@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -30,7 +30,6 @@ import SalesNav from '@/components/admin-sales/SalesNav';
 import StatusTag from '@/components/sales/StatusTag';
 import OwnerAssign from '@/components/admin-sales/OwnerAssign';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchLock } from '@/hooks/useBranchLock';
 import { ApiClientError } from '@/lib/api-client';
 import { GENDERS } from '@shared/enums';
 import { formatDate, titleCase } from '@shared/format';
@@ -75,7 +74,6 @@ export default function EnquiriesPage() {
 
   // Branch sessions auto-scope server-side; admins must assign a branch so the
   // enquiry shows up for that branch's team.
-  const { isBranchSession } = useBranchLock();
   const { data: branchesData } = useAdminBranches({ limit: 200 });
   const branchOptions = (branchesData?.items ?? []).map((b) => ({
     value: b.id,
@@ -242,7 +240,6 @@ export default function EnquiriesPage() {
             <Input placeholder="Customer name" />
           </Form.Item>
 
-          {!isBranchSession && (
             <Form.Item
               name="branchId"
               label="Branch"
@@ -255,7 +252,6 @@ export default function EnquiriesPage() {
                 options={branchOptions}
               />
             </Form.Item>
-          )}
 
           <Form.Item name="gender" label="Gender">
             <Radio.Group>

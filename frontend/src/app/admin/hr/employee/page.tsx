@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useMemo, useState } from 'react';
 import {
@@ -43,7 +43,7 @@ import {
 import { useAdminDesignations } from '@/hooks/useAdminDesignations';
 import { useAdminDepartments } from '@/hooks/useAdminDepartments';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { getSessionKind } from '@/lib/api-client';
+import {} from '@/lib/api-client';
 import { useZones } from '@/hooks/useZones';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
@@ -156,7 +156,6 @@ export default function AdminHrEmployeePage() {
   // Branch (SystemUser) sessions get a read-only, branch-scoped view: the list
   // is auto-scoped server-side and all write affordances are hidden (HR writes
   // remain admin-only on the backend).
-  const isBranchSession = getSessionKind() === 'branch';
 
   // --- Table state ---
   const [search, setSearch] = useState('');
@@ -357,7 +356,6 @@ export default function AdminHrEmployeePage() {
                 />
               </Link>
             </Tooltip>
-            {!isBranchSession && (
               <Tooltip title="Edit">
                 <Button
                   type="primary"
@@ -367,8 +365,6 @@ export default function AdminHrEmployeePage() {
                   style={{ background: '#5B2C8B', borderColor: '#5B2C8B' }}
                 />
               </Tooltip>
-            )}
-            {!isBranchSession && (
               <Popconfirm
                 title={`Delete ${row.name}?`}
                 okText="Delete"
@@ -388,7 +384,6 @@ export default function AdminHrEmployeePage() {
                   />
                 </Tooltip>
               </Popconfirm>
-            )}
           </Space>
         ),
       },
@@ -538,7 +533,7 @@ export default function AdminHrEmployeePage() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [colors.text.primary, colors.text.placeholder, colors.status.error, isBranchSession],
+    [colors.text.primary, colors.text.placeholder, colors.status.error],
   );
 
   const pagination: TablePaginationConfig = {
@@ -796,7 +791,6 @@ export default function AdminHrEmployeePage() {
           </Title>
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
-        {!isBranchSession && (
         <Space>
           <BulkUploadButton
             entityName="Employees"
@@ -849,7 +843,6 @@ export default function AdminHrEmployeePage() {
             Add Employee
           </Button>
         </Space>
-        )}
       </div>
 
       <Card

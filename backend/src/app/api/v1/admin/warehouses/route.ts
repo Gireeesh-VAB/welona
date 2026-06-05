@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import {
   adminWarehouseCreateSchema,
   adminWarehouseListQuerySchema,
@@ -22,11 +22,11 @@ import { recordAudit, actorFromClaims } from '@/lib/audit';
  * Branch sessions are scoped to their own branch.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const { branchId, search, active, page, limit } = parseQuery(req, adminWarehouseListQuerySchema);
 
   const where: Prisma.WarehouseWhereInput = {
-    ...((branchScope ?? branchId) && { branchId: branchScope ?? branchId }),
+    ...((branchId) && { branchId: branchId }),
     ...(active === 'active' && { isActive: true }),
     ...(active === 'inactive' && { isActive: false }),
     ...(search && {
@@ -50,9 +50,9 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminWarehouseCreateSchema);
-  const branchId = branchScope ?? body.branchId;
+  const branchId = body.branchId;
   const createdByAdminId = claims.type === 'admin' ? claims.sub : null;
 
   const branch = await db.branch.findUnique({ where: { id: branchId }, select: { id: true } });

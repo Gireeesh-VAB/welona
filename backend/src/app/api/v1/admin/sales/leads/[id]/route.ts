@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { leadUpdateSchema } from '@shared/schemas/sales';
 
@@ -17,9 +17,9 @@ const leadInclude = {
   quotations: { select: { id: true, number: true, status: true, total: true } },
 } satisfies Prisma.LeadInclude;
 
-async function loadLead(orgId: string, id: string, branchScope: string | null) {
+async function loadLead(orgId: string, id: string) {
   const lead = await db.lead.findFirst({
-    where: { id, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id, orgId },
     include: leadInclude,
   });
   if (!lead) throw Errors.notFound('Lead');
@@ -28,21 +28,21 @@ async function loadLead(orgId: string, id: string, branchScope: string | null) {
 
 /** GET /api/v1/admin/sales/leads/[id] — lead detail. */
 export const GET = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
-  return ok(await loadLead(orgId, params.id, branchScope));
+  return ok(await loadLead(orgId, params.id));
 });
 
 /** PATCH /api/v1/admin/sales/leads/[id] — update lead fields (not status). */
 export const PATCH = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
-  await loadLead(orgId, params.id, branchScope);
+  await loadLead(orgId, params.id);
   const body = await parseBody(req, leadUpdateSchema);
 
   if (body.ownerStaffId) {
     const owner = await db.staff.findFirst({
-      where: { id: body.ownerStaffId, orgId, ...(branchScope && { branchId: branchScope }) },
+      where: { id: body.ownerStaffId, orgId },
     });
     if (!owner) throw Errors.badRequest('Selected salesperson does not exist');
   }

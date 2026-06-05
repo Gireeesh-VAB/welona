@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -9,7 +9,6 @@ import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
 import { useAdminCategories } from '@/hooks/useAdminCategories';
-import { useBranchLock } from '@/hooks/useBranchLock';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import {
@@ -79,7 +78,6 @@ function downloadCsv(filename: string, csv: string) {
 
 export default function AdminEnquiryReportPage() {
   const colors = useBrandColors();
-  const { isBranchSession, lockedBranchId } = useBranchLock();
   const navItem = getAdminNavItem('report-cm-enquiry')!;
 
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
@@ -91,9 +89,6 @@ export default function AdminEnquiryReportPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(15);
 
-  useEffect(() => {
-    if (isBranchSession && lockedBranchId) setBranchId(lockedBranchId);
-  }, [isBranchSession, lockedBranchId]);
 
   const { data: branchesData, isLoading: branchesLoading } = useAdminBranches({ limit: 200 });
   const { data: categoriesData, isLoading: categoriesLoading } = useAdminCategories({ limit: 200 });
@@ -119,7 +114,7 @@ export default function AdminEnquiryReportPage() {
   }, [branchId, category, channel, status, dateRange, branchOptions]);
 
   const resetFilters = () => {
-    setDateRange(null); setBranchId(isBranchSession ? lockedBranchId : undefined); setCategory(undefined);
+    setDateRange(null); setBranchId(undefined); setCategory(undefined);
     setChannel(undefined); setStatus(undefined);
     setFormat('detailed'); setPage(1);
   };
@@ -303,7 +298,7 @@ export default function AdminEnquiryReportPage() {
             <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Branch</Text>
             <Select style={{ width: '100%', marginTop: 4 }} placeholder={branchesLoading ? 'Loading…' : 'All branches'}
               loading={branchesLoading} value={branchId} onChange={(v) => { setBranchId(v); setPage(1); }}
-              options={branchOptions} allowClear={!isBranchSession} disabled={isBranchSession} showSearch optionFilterProp="label" />
+              options={branchOptions} showSearch optionFilterProp="label" />
           </Col>
           <Col xs={24} sm={12} md={8} lg={6} xl={5}>
             <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Category</Text>

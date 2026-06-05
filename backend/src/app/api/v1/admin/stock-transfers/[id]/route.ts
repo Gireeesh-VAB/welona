@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { getDefaultWarehouseId } from '@/lib/warehouse';
 import { recordAudit, actorFromClaims } from '@/lib/audit';
 import { adminStockTransferActionSchema } from '@shared/schemas/admin-stock-transfers';
@@ -18,25 +18,22 @@ interface RouteContext {
 }
 
 /** Load a transfer visible to the caller (source or destination in scope). */
-async function loadScoped(id: string, branchScope: string | null) {
+async function loadScoped(id: string) {
   const t = await db.stockTransfer.findUnique({ where: { id }, include: stockTransferInclude });
   if (!t) throw Errors.notFound('Stock transfer');
-  if (branchScope && t.fromBranchId !== branchScope && t.toBranchId !== branchScope) {
-    throw Errors.notFound('Stock transfer');
-  }
   return t;
 }
 
 export const GET = route<RouteContext>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
-  const t = await loadScoped(params.id, branchScope);
+  const claims = requireAdminAuth(req);
+  const t = await loadScoped(params.id);
   return ok(toAdminStockTransfer(t as StockTransferWithRelations));
 });
 
 export const PUT = route<RouteContext>(async (req, { params }) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const { action } = await parseBody(req, adminStockTransferActionSchema);
-  const t = await loadScoped(params.id, branchScope);
+  const t = await loadScoped(params.id);
   const createdByAdminId = claims.type === 'admin' ? claims.sub : null;
 
   if (action === 'cancel') {
@@ -62,9 +59,6 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
   if (action === 'dispatch') {
     if (t.status !== 'requested') {
       throw Errors.badRequest('Only a requested transfer can be dispatched.');
-    }
-    if (branchScope && t.fromBranchId !== branchScope) {
-      throw Errors.forbidden('Only the source branch can dispatch this transfer.');
     }
     const fromWarehouseId = await getDefaultWarehouseId(db, t.fromBranchId);
     const updated = await db.$transaction(async (tx) => {
@@ -116,9 +110,6 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
   if (t.status !== 'dispatched') {
     throw Errors.badRequest('Only a dispatched transfer can be received.');
   }
-  if (branchScope && t.toBranchId !== branchScope) {
-    throw Errors.forbidden('Only the destination branch can receive this transfer.');
-  }
   const toWarehouseId = await getDefaultWarehouseId(db, t.toBranchId);
   const updated = await db.$transaction(async (tx) => {
     for (const it of t.items) {
@@ -154,8 +145,8 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
 });
 
 export const DELETE = route<RouteContext>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
-  const t = await loadScoped(params.id, branchScope);
+  const claims = requireAdminAuth(req);
+  const t = await loadScoped(params.id);
   if (t.status !== 'requested' && t.status !== 'cancelled') {
     throw Errors.conflict('Only a requested or cancelled transfer can be deleted.');
   }

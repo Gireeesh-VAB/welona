@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { nextDocumentNumber } from '@/lib/sales/service';
 import { recordAudit, actorFromClaims } from '@/lib/audit';
@@ -27,11 +27,11 @@ async function branchNameMap(rows: { branchId: string | null }[]): Promise<Map<s
  * Branch sessions are scoped to their own branch.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const { branchId, stage, search, page, limit } = parseQuery(req, adminShipmentListQuerySchema);
 
   const where: Prisma.TrackedShipmentWhereInput = {
-    ...((branchScope ?? branchId) && { branchId: branchScope ?? branchId }),
+    ...((branchId) && { branchId: branchId }),
     ...(stage && { stage }),
     ...(search && {
       OR: [
@@ -62,10 +62,10 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminShipmentCreateSchema);
   const actor = actorFromClaims(claims);
-  const branchId = branchScope ?? body.branchId ?? null;
+  const branchId = body.branchId ?? null;
 
   if (branchId) {
     const branch = await db.branch.findUnique({ where: { id: branchId }, select: { id: true } });

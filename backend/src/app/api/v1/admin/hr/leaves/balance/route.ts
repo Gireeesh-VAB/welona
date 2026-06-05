@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route, parseQuery } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { adminLeaveBalanceQuerySchema } from '@shared/schemas/admin-leaves';
 import type { AdminLeaveBalanceReport, AdminLeaveBalanceRow } from '@shared/types/admin-leave';
 
@@ -13,14 +13,14 @@ import type { AdminLeaveBalanceReport, AdminLeaveBalanceRow } from '@shared/type
  * defaults to the type's `daysPerYear`).
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { employeeId, year: yearInput } = parseQuery(req, adminLeaveBalanceQuerySchema);
   const year = yearInput ?? new Date().getUTCFullYear();
 
   // Branch sessions may only inspect employees in their own branch. Use a 404
   // (not 403) on a cross-branch id so existence isn't leaked.
   const employee = await db.employee.findFirst({
-    where: { id: employeeId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: employeeId },
   });
   if (!employee) throw Errors.notFound('Employee');
 

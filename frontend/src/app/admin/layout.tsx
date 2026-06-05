@@ -11,16 +11,14 @@ const { Content } = Layout;
 
 /**
  * Admin route group — separate side from the employee /dashboard layout.
- * The login pages (/admin/login for super-admins, /admin/branch-login for
- * branch users) are rendered bare so the guard never wraps them (which would
- * loop). Every other /admin/* route is gated by PanelAuthGuard, which accepts
- * both the admin and branch session pools.
+ * The login page is rendered bare so the guard never wraps it. Every other
+ * /admin/* route is gated by PanelAuthGuard.
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
 
-  if (pathname === '/admin/login' || pathname === '/admin/branch-login') {
+  if (pathname === '/admin/login') {
     return <>{children}</>;
   }
 

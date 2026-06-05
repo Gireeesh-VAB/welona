@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { bookingUpdateSchema } from '@shared/schemas/customer-modules';
 
@@ -11,7 +11,7 @@ type Ctx = { params: { id: string; itemId: string } };
 
 /** PATCH /api/v1/admin/customers/[id]/bookings/[itemId] — update a booking. */
 export const PATCH = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const booking = await db.booking.findFirst({
@@ -19,7 +19,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
       id: params.itemId,
       customerId: params.id,
       orgId,
-      ...(branchScope && { customer: { branchId: branchScope } }),
+      
     },
   });
   if (!booking) throw Errors.notFound('Booking');

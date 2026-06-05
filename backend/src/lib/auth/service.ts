@@ -1,15 +1,14 @@
 import { randomBytes } from 'crypto';
 import { type NextRequest, type NextResponse } from 'next/server';
-import type { AdminUser, Branch, Role, Staff, SystemUser } from '@prisma/client';
+import type { AdminUser, Branch, Role, Staff } from '@prisma/client';
 import { db } from '@/lib/db';
 import { Errors } from '@/lib/api/errors';
-import type { AdminAuthUser, AuthUser, BranchAuthUser } from '@shared/types/auth';
+import type { AdminAuthUser, AuthUser } from '@shared/types/auth';
 import {
   signAccessToken,
   verifyAccessToken,
   type AdminAuthClaims,
   type AuthClaims,
-  type BranchAuthClaims,
   type StaffAuthClaims,
 } from './jwt';
 import { ACCESS_COOKIE, REFRESH_COOKIE } from '@shared/auth-constants';
@@ -297,122 +296,3 @@ export async function rotateAdminSession(refreshToken: string) {
   return issueAdminSession(admin);
 }
 
-// ---------------------------------------------------------------------------
-// Branch session pool
-//
-// Branch logins are `SystemUser` records (already managed under HR / User).
-// They authenticate by `userName`, are scoped to a single `branchId`, and get
-// their own refresh-token table (`SystemRefreshToken`). The JWT `type`
-// discriminator (`'branch'`) keeps this pool distinct from staff and admin.
-// ---------------------------------------------------------------------------
-
-/** A SystemUser with the branch relation needed to build a session. */
-export type SystemUserWithRelations = SystemUser & { branch: Branch | null };
-
-/** Find a branch user by id or userName, or return null. */
-export function findSystemUser(where: { id: string } | { userName: string }) {
-  return db.systemUser.findUnique({ where, include: { branch: true } });
-}
-
-/** Build the JWT claims for a branch user. */
-export function buildBranchClaims(user: SystemUserWithRelations): BranchAuthClaims {
-  return {
-    sub: user.id,
-    type: 'branch',
-    branchId: user.branchId as string,
-    branchName: user.branch?.name ?? null,
-    userName: user.userName,
-  };
-}
-
-/** Map a branch user to the UI-facing `BranchAuthUser`. */
-export function toBranchAuthUser(user: SystemUserWithRelations): BranchAuthUser {
-  return {
-    id: user.id,
-    userName: user.userName,
-    branchId: user.branchId as string,
-    branchName: user.branch?.name ?? null,
-    type: 'branch',
-  };
-}
-
-/**
- * Issue a fresh branch session: a 1h access token plus a 7d refresh token
- * persisted in `SystemRefreshToken`. `lastLoginAt` is stamped on the user.
- */
-export async function issueBranchSession(user: SystemUserWithRelations) {
-  const accessToken = signAccessToken(buildBranchClaims(user));
-  const refreshToken = randomBytes(48).toString('hex');
-
-  await db.systemRefreshToken.create({
-    data: {
-      systemUserId: user.id,
-      token: refreshToken,
-      expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
-    },
-  });
-  await db.systemUser.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-
-  return { accessToken, refreshToken, user: toBranchAuthUser(user) };
-}
-
-/** Revoke a branch refresh token (logout). Silent if unknown. */
-export async function revokeBranchSession(refreshToken: string | undefined) {
-  if (!refreshToken) return;
-  await db.systemRefreshToken.updateMany({
-    where: { token: refreshToken, revokedAt: null },
-    data: { revokedAt: new Date() },
-  });
-}
-
-/**
- * Rotate a branch refresh token against the `SystemRefreshToken` pool, revoke
- * it, and issue a new branch session. Throws `UNAUTHORIZED` if the token is
- * unknown/expired/revoked or the account is inactive / unscoped.
- */
-export async function rotateBranchSession(refreshToken: string) {
-  const existing = await db.systemRefreshToken.findUnique({ where: { token: refreshToken } });
-  if (!existing || existing.revokedAt || existing.expiresAt < new Date()) {
-    throw Errors.unauthorized('Session expired, please sign in again');
-  }
-  await db.systemRefreshToken.update({
-    where: { id: existing.id },
-    data: { revokedAt: new Date() },
-  });
-
-  const user = await findSystemUser({ id: existing.systemUserId });
-  if (!user || !user.isActive || !user.branchId) {
-    throw Errors.unauthorized('Account is no longer active');
-  }
-  return issueBranchSession(user);
-}
-
-/**
- * Require a branch session. Returns the claims or throws `UNAUTHORIZED`.
- * Staff and admin tokens are rejected here.
- */
-export function requireBranchAuth(req: NextRequest): BranchAuthClaims {
-  const claims = readClaims(req);
-  if (claims.type !== 'branch') {
-    throw Errors.unauthorized('Branch session required');
-  }
-  return claims;
-}
-
-/**
- * Accept either an admin OR a branch session and report the branch scope.
- *
- * - Admin sessions return `branchScope: null` (see every branch).
- * - Branch sessions return `branchScope: <their branchId>` (single branch).
- *
- * Staff tokens are rejected. Use this on branch-operational admin routes
- * (inventory, catalog, ...) and apply `branchScope` as a hard filter when set.
- */
-export function requireAdminOrBranchAuth(
-  req: NextRequest,
-): { claims: AdminAuthClaims | BranchAuthClaims; branchScope: string | null } {
-  const claims = readClaims(req);
-  if (claims.type === 'admin') return { claims, branchScope: null };
-  if (claims.type === 'branch') return { claims, branchScope: claims.branchId };
-  throw Errors.unauthorized('Admin or branch session required');
-}

@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { followUpUpdateSchema } from '@shared/schemas/sales';
 
@@ -14,22 +14,13 @@ type Ctx = { params: { id: string } };
  * completed/cancelled, reschedule it, or edit the note/outcome.
  */
 export const PATCH = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   // FollowUp has no branchId column; scope through its parent Lead (or
   // Customer) so branch sessions only reach follow-ups in their branch.
   const followUp = await db.followUp.findFirst({
-    where: {
-      id: params.id,
-      orgId,
-      ...(branchScope && {
-        OR: [
-          { lead: { branchId: branchScope } },
-          { customer: { branchId: branchScope } },
-        ],
-      }),
-    },
+    where: { id: params.id, orgId },
   });
   if (!followUp) throw Errors.notFound('Follow-up');
 

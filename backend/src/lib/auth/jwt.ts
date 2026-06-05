@@ -3,48 +3,28 @@ import jwt, { type SignOptions } from 'jsonwebtoken';
 /**
  * JWT access-token signing and verification.
  * Source: Developer Reference Architecture v2.0, sections 7.1–7.2.
- *
- * Access tokens are short-lived (1h) JWTs. Refresh tokens are opaque random
- * strings persisted in the database (see auth/service.ts) so they can be
- * revoked — the production design keeps them in Redis instead.
  */
 
 /** Decoded access-token payload — staff session (section 7.2). */
 export interface StaffAuthClaims {
-  /** Staff id. */
   sub: string;
   type: 'staff';
   orgId: string;
-  /** Branch ids the staff member is scoped to; empty for org-wide roles. */
   branchIds: string[];
-  /** Role key, e.g. "branch_manager". */
   role: string;
-  /** `module:action` permission strings, or `["*"]`. */
   permissions: string[];
 }
 
 /** Decoded access-token payload — admin (super-admin) session. */
 export interface AdminAuthClaims {
-  /** AdminUser id. */
   sub: string;
   type: 'admin';
   name: string;
   email: string;
 }
 
-/** Decoded access-token payload — branch (SystemUser) session. */
-export interface BranchAuthClaims {
-  /** SystemUser id. */
-  sub: string;
-  type: 'branch';
-  /** The single branch this account is scoped to. */
-  branchId: string;
-  branchName: string | null;
-  userName: string;
-}
-
 /** Any kind of session — discriminated on `type`. */
-export type AuthClaims = StaffAuthClaims | AdminAuthClaims | BranchAuthClaims;
+export type AuthClaims = StaffAuthClaims | AdminAuthClaims;
 
 const ACCESS_SECRET = process.env.JWT_SECRET ?? 'welona-dev-access-secret';
 const ACCESS_EXPIRY = process.env.JWT_EXPIRY ?? '1h';

@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { toAdminEmployee } from '@/lib/admin-employee-mapper';
 import { toAdminAttendance } from '@/lib/admin-attendance-mapper';
 import { toAdminLeaveApplication } from '@/lib/admin-leave-mapper';
@@ -21,12 +21,12 @@ interface RouteContext {
  * summary + latest 30 entries, and current-year leave balances + recent apps.
  */
 export const GET = route<RouteContext>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
 
   // Branch sessions may only view employees in their own branch (404 on a
   // cross-branch id so existence isn't leaked).
   const employee = await db.employee.findFirst({
-    where: { id: params.id, ...(branchScope && { branchId: branchScope }) },
+    where: { id: params.id },
     include: {
       designation: true,
       department: true,

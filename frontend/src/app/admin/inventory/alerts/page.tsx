@@ -1,13 +1,12 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Col, Empty, Row, Select, Statistic, Table, Tag, Typography } from 'antd';
 import type { ColumnsType } from 'antd/es/table';
 import { useInventoryAlerts } from '@/hooks/useInventoryAlerts';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchAuthStore } from '@/store/branchAuthStore';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { getSessionKind } from '@/lib/api-client';
+import {} from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { ExpiryAlertRow, OverduePurchaseOrder, StockAlertRow } from '@shared/types/admin-inventory-alert';
 
@@ -17,10 +16,8 @@ export default function AdminInventoryAlertsPage() {
   const colors = useBrandColors();
   const navItem = getAdminNavItem('inventory-alerts')!;
 
-  const branchSession = useBranchAuthStore((s) => s.branch);
-  const isBranchSession = getSessionKind() === 'branch' && Boolean(branchSession);
 
-  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: !isBranchSession });
+  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: true });
   const branchOptions = useMemo(
     () => [
       { value: '', label: 'All branches' },
@@ -31,9 +28,7 @@ export default function AdminInventoryAlertsPage() {
 
   const [branchId, setBranchId] = useState('');
   useEffect(() => {
-    if (isBranchSession && branchSession?.branchId) setBranchId(branchSession.branchId);
-  }, [isBranchSession, branchSession]);
-
+  }, []);
   const { data, isLoading } = useInventoryAlerts({ branchId: branchId || undefined });
 
   const stockCols: ColumnsType<StockAlertRow> = [
@@ -103,7 +98,6 @@ export default function AdminInventoryAlertsPage() {
         <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
       </div>
 
-      {!isBranchSession && (
         <div style={{ marginBottom: 16 }}>
           <Select
             showSearch
@@ -114,7 +108,6 @@ export default function AdminInventoryAlertsPage() {
             filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())}
           />
         </div>
-      )}
 
       <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
         {[

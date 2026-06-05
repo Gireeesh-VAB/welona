@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { DELIVERY_TRANSITIONS, assertTransition } from '@/lib/sales/transitions';
 import { serializeDelivery } from '@/lib/sales/serializers';
@@ -11,7 +11,7 @@ type Ctx = { params: { id: string } };
 
 /** POST /api/v1/admin/sales/deliveries/[id]/dispatch — mark a delivery dispatched. */
 export const POST = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   // Deliveries have no branchId column, so we scope through the parent order.
@@ -19,7 +19,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
     where: {
       id: params.id,
       orgId,
-      ...(branchScope && { order: { branchId: branchScope } }),
+      
     },
   });
   if (!delivery) throw Errors.notFound('Delivery');

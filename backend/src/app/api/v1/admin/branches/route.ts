@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { adminBranchCreateSchema, adminBranchListQuerySchema } from '@shared/schemas/admin-branches';
 import { toAdminBranch, branchAdminInclude } from '@/lib/admin-branch-mapper';
 import { assertValidParent } from '@/lib/admin-branch-hierarchy';
@@ -26,7 +26,7 @@ async function resolveOrgId(): Promise<string> {
 export const GET = route(async (req) => {
   // Branch sessions read the branch list (reference for filters/forms); only
   // admins create/edit branches (POST/PUT/DELETE stay admin-only).
-  requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { search, page, limit } = parseQuery(req, adminBranchListQuerySchema);
 
   const where: Prisma.BranchWhereInput = search

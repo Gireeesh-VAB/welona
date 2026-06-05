@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { nextDocumentNumber } from '@/lib/sales/service';
 import {
@@ -25,10 +25,10 @@ import { recordAudit, actorFromClaims } from '@/lib/audit';
  * may only create transfers OUT of its own branch.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const { branchId, status, page, limit } = parseQuery(req, adminStockTransferListQuerySchema);
 
-  const scoped = branchScope ?? branchId;
+  const scoped = branchId;
   const where: Prisma.StockTransferWhereInput = {
     ...(scoped && { OR: [{ fromBranchId: scoped }, { toBranchId: scoped }] }),
     ...(status && { status }),
@@ -50,14 +50,11 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminStockTransferCreateSchema);
   const createdByAdminId = claims.type === 'admin' ? claims.sub : null;
 
   // Branch sessions can only send FROM their own branch.
-  if (branchScope && body.fromBranchId !== branchScope) {
-    throw Errors.forbidden('You can only transfer stock out of your own branch.');
-  }
 
   const [from, to, products] = await Promise.all([
     db.branch.findUnique({ where: { id: body.fromBranchId }, select: { id: true } }),

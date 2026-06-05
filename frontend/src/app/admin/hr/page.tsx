@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { Card, Col, Row, Typography } from 'antd';
 import {
@@ -16,7 +16,7 @@ import { useRouter } from 'next/navigation';
 import type { ReactNode } from 'react';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { getSessionKind } from '@/lib/api-client';
+import {} from '@/lib/api-client';
 
 const { Title, Text } = Typography;
 
@@ -25,13 +25,6 @@ const { Title, Text } = Typography;
  * operational, branch-scoped views; org-wide configuration (leave types,
  * holidays, departments, designations, system users) stays admin-only.
  */
-const BRANCH_HR_KEYS = new Set([
-  'hr-dashboard',
-  'hr-employee',
-  'hr-attendance',
-  'hr-leaves',
-]);
-
 const childIcons: Record<string, ReactNode> = {
   'hr-dashboard': <DashboardOutlined />,
   'hr-employee': <TeamOutlined />,
@@ -49,10 +42,7 @@ export default function AdminHrPage() {
   const router = useRouter();
   const colors = useBrandColors();
   const hr = getAdminNavItem('hr')!;
-  const isBranchSession = getSessionKind() === 'branch';
-  const children = (hr.children ?? []).filter(
-    (item) => !isBranchSession || BRANCH_HR_KEYS.has(item.key),
-  );
+  const children = hr.children ?? [];
 
   return (
     <div>

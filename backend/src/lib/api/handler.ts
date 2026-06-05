@@ -54,3 +54,17 @@ export function parseQuery<S extends z.ZodTypeAny>(req: NextRequest, schema: S):
   const params = Object.fromEntries(req.nextUrl.searchParams.entries());
   return schema.parse(params);
 }
+
+/**
+ * A boolean query-string parameter. `z.coerce.boolean()` is broken for query
+ * strings — it treats the literal string `"false"` as `true` (any non-empty
+ * string is truthy). This parses the canonical `"true"`/`"false"` strings
+ * correctly. Returns `undefined` when the param is absent (so `if (value)`
+ * and `?? fallback` behave as expected).
+ */
+export function booleanQueryParam() {
+  return z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true'));
+}

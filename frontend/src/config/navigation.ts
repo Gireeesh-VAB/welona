@@ -12,6 +12,8 @@ export interface NavItem {
   moduleId?: string;
   /** Short description shown on placeholder pages. */
   description: string;
+  /** Optional sub-items for hierarchical nav (e.g., Reports with children). */
+  children?: NavItem[];
 }
 
 export const navigation: NavItem[] = [
@@ -59,17 +61,42 @@ export const navigation: NavItem[] = [
   },
   {
     key: 'customers',
-    label: 'Customers',
+    label: 'Customer & History',
     path: '/customers',
     moduleId: 'M01',
     description: 'Customer list and 360-degree profile view.',
   },
   {
+    key: 'admin-assigned',
+    label: 'Admin Assigned',
+    path: '/admin-assigned',
+    description: 'All data assigned to this branch by the administrator.',
+  },
+  {
     key: 'staff',
-    label: 'Employees',
+    label: 'Branch Employees',
     path: '/staff',
     moduleId: 'M01',
-    description: 'Employee directory with roles, branches and account details.',
+    description: 'Branch employee directory with roles and account details.',
+  },
+  {
+    key: 'enquiry',
+    label: 'Enquiry & Followup',
+    path: '/sales/enquiries',
+    moduleId: 'M13',
+    description: 'Manage customer enquiries and follow-ups.',
+  },
+  {
+    key: 'duplicate-receipt',
+    label: 'Duplicate Receipt',
+    path: '/duplicate-receipt',
+    description: 'Generate duplicate receipts for customer records.',
+  },
+  {
+    key: 'bank-deposit',
+    label: 'BankDeposit',
+    path: '/bank-deposit',
+    description: 'Bank deposit management and reconciliation.',
   },
   {
     key: 'branches',
@@ -136,17 +163,25 @@ export const navigation: NavItem[] = [
   },
   {
     key: 'reports',
-    label: 'Reports',
+    label: 'Report',
     path: '/reports',
     moduleId: 'M10',
     description: 'Sales, customer, staff and inventory reports.',
-  },
-  {
-    key: 'analytics',
-    label: 'Analytics',
-    path: '/analytics',
-    moduleId: 'M09',
-    description: 'BI dashboards and AI-powered insights.',
+    children: [
+      {
+        key: 'reports-main',
+        label: 'Reports',
+        path: '/reports',
+        description: 'Sales, customer, staff and inventory reports.',
+      },
+      {
+        key: 'analytics',
+        label: 'Analytics',
+        path: '/analytics',
+        moduleId: 'M09',
+        description: 'BI dashboards and AI-powered insights.',
+      },
+    ],
   },
   {
     key: 'notifications',
@@ -175,22 +210,65 @@ export interface NavGroup {
 }
 
 export const navGroups: NavGroup[] = [
-  { key: 'overview', label: 'Overview', itemKeys: ['dashboard'] },
-  { key: 'sales', label: 'Sales & Appointments', itemKeys: ['sales', 'bookings'] },
-  { key: 'catalogue', label: 'Catalogue', itemKeys: ['services', 'products', 'inventory'] },
-  { key: 'people', label: 'People', itemKeys: ['customers', 'staff', 'branches'] },
   {
-    key: 'finance',
-    label: 'Finance',
-    itemKeys: ['finance', 'pending-payments', 'promotions'],
+    key: 'operations',
+    label: 'Operations',
+    itemKeys: [
+      'dashboard',
+      'customers',
+      'bookings',
+      'enquiry',
+    ],
   },
   {
-    key: 'cash',
-    label: 'Cash Management',
-    itemKeys: ['cash-denomination', 'petty-cash', 'voucher-entry', 'day-close'],
+    key: 'catalog',
+    label: 'Catalog',
+    itemKeys: [
+      'products',
+      'inventory',
+      'services',
+    ],
   },
-  { key: 'insights', label: 'Insights', itemKeys: ['reports', 'analytics'] },
-  { key: 'admin', label: 'Administration', itemKeys: ['support', 'notifications', 'settings'] },
+  {
+    key: 'sales-finance',
+    label: 'Sales & Finance',
+    itemKeys: [
+      'pending-payments',
+      'duplicate-receipt',
+      'bank-deposit',
+      'cash-denomination',
+      'petty-cash',
+      'voucher-entry',
+      'day-close',
+    ],
+  },
+  {
+    key: 'insights',
+    label: 'Insights',
+    itemKeys: [
+      'analytics',
+      'reports',
+      'promotions',
+    ],
+  },
+  {
+    key: 'branch',
+    label: 'Branch',
+    itemKeys: [
+      'admin-assigned',
+      'branches',
+      'staff',
+    ],
+  },
+  {
+    key: 'more',
+    label: 'More',
+    itemKeys: [
+      'notifications',
+      'support',
+      'settings',
+    ],
+  },
 ];
 
 /** Lookup a nav item by its key. */

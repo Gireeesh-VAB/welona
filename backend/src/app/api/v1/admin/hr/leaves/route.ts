@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import {
   adminLeaveApplicationCreateSchema,
   adminLeaveListQuerySchema,
@@ -19,11 +19,11 @@ const include = {
 } as const;
 
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { employeeId, branchId: queryBranchId, leaveTypeId, status, from, to, page, limit } =
     parseQuery(req, adminLeaveListQuerySchema);
   // Branch sessions are locked to their own branch regardless of the query.
-  const branchId = branchScope ?? queryBranchId;
+  const branchId = queryBranchId;
 
   const where: Prisma.LeaveApplicationWhereInput = {
     ...(employeeId && { employeeId }),

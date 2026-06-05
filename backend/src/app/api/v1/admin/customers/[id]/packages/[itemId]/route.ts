@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { packageUpdateSchema } from '@shared/schemas/customer-modules';
 
@@ -14,7 +14,7 @@ type Ctx = { params: { id: string; itemId: string } };
  * record a used session or change its status.
  */
 export const PATCH = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const pkg = await db.package.findFirst({
@@ -22,7 +22,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
       id: params.itemId,
       customerId: params.id,
       orgId: orgId,
-      ...(branchScope && { customer: { branchId: branchScope } }),
+      
     },
   });
   if (!pkg) throw Errors.notFound('Package');

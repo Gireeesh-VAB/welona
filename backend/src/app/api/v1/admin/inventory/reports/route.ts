@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { route, parseQuery } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { adminInventoryReportQuerySchema } from '@shared/schemas/admin-inventory-reports';
 import type {
   AdminInventoryProductReportRow,
@@ -20,12 +20,12 @@ import type {
  * omit it for an org-wide view.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { branchId: queryBranchId, days, fastThreshold } = parseQuery(
     req,
     adminInventoryReportQuerySchema,
   );
-  const branchId = branchScope ?? queryBranchId;
+  const branchId = queryBranchId;
   const windowStart = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
   const stockWhere: Prisma.InventoryStockWhereInput = branchId ? { branchId } : {};

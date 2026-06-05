@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok, created } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { deliveryCreateSchema } from '@shared/schemas/sales';
 import { serializeDelivery } from '@/lib/sales/serializers';
@@ -11,11 +11,11 @@ type Ctx = { params: { id: string } };
 
 /** GET /api/v1/admin/sales/orders/[id]/deliveries — deliveries for an order. */
 export const GET = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const order = await db.salesOrder.findFirst({
-    where: { id: params.id, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: params.id, orgId },
   });
   if (!order) throw Errors.notFound('Order');
 
@@ -31,12 +31,12 @@ export const GET = route<Ctx>(async (req, { params }) => {
  * some or all of the order's outstanding line quantities.
  */
 export const POST = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
   const body = await parseBody(req, deliveryCreateSchema);
 
   const order = await db.salesOrder.findFirst({
-    where: { id: params.id, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: params.id, orgId },
     include: { items: true },
   });
   if (!order) throw Errors.notFound('Order');

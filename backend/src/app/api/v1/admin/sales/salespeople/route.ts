@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 
 /**
@@ -13,11 +13,11 @@ import { resolveOrgId } from '@/lib/org';
  * validation in the create routes).
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const staff = await db.staff.findMany({
-    where: { orgId, status: 'active', ...(branchScope && { branchId: branchScope }) },
+    where: { orgId, status: 'active' },
     select: { id: true, name: true, role: { select: { name: true } } },
     orderBy: { name: 'asc' },
   });

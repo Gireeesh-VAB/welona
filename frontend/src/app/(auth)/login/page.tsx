@@ -23,6 +23,11 @@ interface PendingChallenge {
   devOtp?: string;
 }
 
+const TEST_CREDENTIALS = {
+  identifier: 'teststaff@welona.com',
+  password: 'Test@123',
+};
+
 /**
  * Staff sign-in (sections 6.1, 7.1).
  *
@@ -39,9 +44,15 @@ export default function LoginPage() {
   const login = useLogin();
   const verifyOtp = useVerifyOtp();
   const [challenge, setChallenge] = useState<PendingChallenge | null>(null);
+  const [form] = Form.useForm<CredentialsForm>();
 
   const fail = (error: unknown, fallback: string) => {
     message.error(error instanceof ApiClientError ? error.message : fallback);
+  };
+
+  const handleAutoFill = () => {
+    form.setFieldsValue(TEST_CREDENTIALS);
+    message.success('Credentials auto-filled');
   };
 
   const onSubmitCredentials = async (values: CredentialsForm) => {
@@ -85,7 +96,7 @@ export default function LoginPage() {
           WELONA
         </Title>
         <Text style={{ color: colors.text.secondary, fontSize: 12, letterSpacing: 2 }}>
-          HEALTH &amp; WELLNESS — ADMIN
+          BRANCH PORTAL
         </Text>
       </div>
 
@@ -138,6 +149,7 @@ export default function LoginPage() {
         </>
       ) : (
         <Form<CredentialsForm>
+          form={form}
           layout="vertical"
           onFinish={onSubmitCredentials}
           requiredMark={false}
@@ -169,6 +181,17 @@ export default function LoginPage() {
             </Button>
           </Form.Item>
 
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Button
+              type="dashed"
+              block
+              onClick={handleAutoFill}
+              style={{ color: colors.text.placeholder, borderColor: colors.border }}
+            >
+              Auto-fill credentials
+            </Button>
+          </Form.Item>
+
           <Text
             style={{
               color: colors.text.placeholder,
@@ -177,7 +200,7 @@ export default function LoginPage() {
               textAlign: 'center',
             }}
           >
-            Admin roles require 2FA verification after sign-in.
+            Roles with 2FA enabled will be prompted after sign-in.
           </Text>
         </Form>
       )}

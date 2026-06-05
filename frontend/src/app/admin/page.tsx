@@ -35,7 +35,6 @@ import { useRouter } from 'next/navigation';
 import dayjs from 'dayjs';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { useAdminAuthStore } from '@/store/adminAuthStore';
-import { useBranchLock } from '@/hooks/useBranchLock';
 import { formatMoney, formatMoneyShort } from '@shared/format';
 import {
   ALERTS,
@@ -158,14 +157,9 @@ export default function AdminDashboardPage() {
   const router = useRouter();
   const colors = useBrandColors();
   const admin = useAdminAuthStore((s) => s.admin);
-  const { isBranchSession, lockedBranchName } = useBranchLock();
-
   const [period, setPeriod] = useState<Period>('This Month');
 
-  // Branch sessions greet with the branch name; admins greet by first name.
-  const adminFirst = isBranchSession
-    ? lockedBranchName ?? 'Branch'
-    : (admin?.name ?? 'Admin').split(' ')[0];
+  const adminFirst = (admin?.name ?? 'Admin').split(' ')[0];
   const now = dayjs(`${TODAY}T09:30:00`);
   const greeting = now.hour() < 12 ? 'Good morning' : now.hour() < 17 ? 'Good afternoon' : 'Good evening';
 
@@ -490,9 +484,7 @@ export default function AdminDashboardPage() {
               {greeting}, {adminFirst}
             </Title>
             <Text style={{ color: 'rgba(255,255,255,0.85)', fontSize: 14 }}>
-              {isBranchSession
-                ? "Here's what's happening at your branch today."
-                : "Here's what's happening across your branches today."}
+              {"Here's what's happening across your branches today."}
             </Text>
             <div style={{ marginTop: 12 }}>
               <Space size="middle" wrap>
@@ -631,8 +623,6 @@ export default function AdminDashboardPage() {
       {/* Branch performance + Category + Weekday                             */}
       {/* ------------------------------------------------------------------ */}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
-        {/* Cross-branch comparison is meaningless for a single-branch session. */}
-        {!isBranchSession && (
         <Col xs={24} xl={9}>
           <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}`, height: '100%' }}
             styles={{ body: { padding: 18 } }}
@@ -641,7 +631,6 @@ export default function AdminDashboardPage() {
             <ReactECharts option={branchChart} style={{ height: 360 }} opts={{ renderer: 'svg' }} />
           </Card>
         </Col>
-        )}
         <Col xs={24} xl={9}>
           <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}`, height: '100%' }}
             styles={{ body: { padding: 18 } }}

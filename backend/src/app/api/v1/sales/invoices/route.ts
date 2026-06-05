@@ -24,7 +24,9 @@ export const GET = route(async (req) => {
 
   const where: Prisma.InvoiceWhereInput = { orgId: claims.orgId };
   if (query.status) where.status = query.status;
-  if (query.branchId) where.branchId = query.branchId;
+  const staffBranchId = claims.branchIds[0] ?? null;
+  const effectiveBranchId = query.branchId ?? staffBranchId;
+  if (effectiveBranchId) where.branchId = effectiveBranchId;
   if (query.search) {
     where.OR = [
       { number: { contains: query.search } },

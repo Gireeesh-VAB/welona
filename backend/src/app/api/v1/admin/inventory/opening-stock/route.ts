@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { created } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveWarehouseId } from '@/lib/warehouse';
 import { adminInventoryOpeningStockSchema } from '@shared/schemas/admin-inventory';
 
@@ -14,10 +14,10 @@ import { adminInventoryOpeningStockSchema } from '@shared/schemas/admin-inventor
  * adjust the delta so the recorded quantity matches what the caller supplied.
  */
 export const POST = route(async (req) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminInventoryOpeningStockSchema);
   // Branch sessions can only set opening stock for their own branch.
-  const branchId = branchScope ?? body.branchId;
+  const branchId = body.branchId;
   const createdByAdminId = claims.type === 'admin' ? claims.sub : null;
 
   const branch = await db.branch.findUnique({

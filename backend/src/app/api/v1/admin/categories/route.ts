@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import {
   adminCategoryCreateSchema,
   adminCategoryListQuerySchema,
@@ -46,7 +46,7 @@ function toDTO(row: CategoryWithRels): AdminCategory {
 
 export const GET = route(async (req) => {
   // Org-wide reference data; branch sessions read it. Writes stay admin-only.
-  requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { search, active, page, limit } = parseQuery(req, adminCategoryListQuerySchema);
 
   const where: Prisma.CategoryWhereInput = {

@@ -11,8 +11,9 @@ export const GET = route(async (req) => {
   const claims = requireAuth(req);
   requirePermission(claims, 'sales:read');
 
+  const staffBranchId = claims.branchIds[0] ?? null;
   const invoices = await db.invoice.findMany({
-    where: { orgId: claims.orgId, status: { in: ['issued', 'partially_paid'] } },
+    where: { orgId: claims.orgId, status: { in: ['issued', 'partially_paid'] }, ...(staffBranchId ? { branchId: staffBranchId } : {}) },
     include: { customer: { select: { id: true, name: true } } },
     orderBy: { dueAt: 'asc' },
   });

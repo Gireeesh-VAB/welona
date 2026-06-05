@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useMemo, useState } from 'react';
 import {
@@ -43,7 +43,7 @@ import {
 import { useLeaveTypes } from '@/hooks/useLeaveTypes';
 import { useAdminEmployees } from '@/hooks/useAdminEmployees';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { ApiClientError, getSessionKind } from '@/lib/api-client';
+import { ApiClientError } from '@/lib/api-client';
 import type {
   AdminLeaveApplication,
 } from '@shared/types/admin-leave';
@@ -105,7 +105,6 @@ export default function AdminHrLeavesPage() {
 
   // Branch (SystemUser) sessions get a read-only, branch-scoped view: the list
   // is auto-scoped server-side and leave writes stay admin-only on the backend.
-  const isBranchSession = getSessionKind() === 'branch';
 
   const apply = useApplyLeave();
   const approve = useApproveLeave();
@@ -298,7 +297,7 @@ export default function AdminHrLeavesPage() {
               onClick={() => setBalanceFor({ id: row.employee.id, name: row.employee.name })}
             />
           </Tooltip>
-          {!isBranchSession && row.status === 'pending' && (
+          {row.status === 'pending' && (
             <>
               <Tooltip title="Approve">
                 <Button
@@ -329,7 +328,7 @@ export default function AdminHrLeavesPage() {
               </Tooltip>
             </>
           )}
-          {!isBranchSession && (row.status === 'pending' || row.status === 'approved') && (
+          {(row.status === 'pending' || row.status === 'approved') && (
             <Popconfirm
               title={`Cancel ${row.employee.name}'s leave?`}
               okText="Cancel leave"
@@ -366,11 +365,9 @@ export default function AdminHrLeavesPage() {
             current balance.
           </Text>
         </div>
-        {!isBranchSession && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openApply}>
             Apply Leave
           </Button>
-        )}
       </div>
 
       <Card

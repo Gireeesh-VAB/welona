@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -20,7 +20,6 @@ import dayjs, { type Dayjs } from 'dayjs';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
 import { useAdminCategories } from '@/hooks/useAdminCategories';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { useBranchLock } from '@/hooks/useBranchLock';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import {
   CLIENT_MEDICAL_ROWS,
@@ -72,15 +71,11 @@ function downloadCsv(filename: string, csv: string) {
 
 export default function AdminClientMedicalPage() {
   const colors = useBrandColors();
-  const { isBranchSession, lockedBranchId } = useBranchLock();
   const navItem = getAdminNavItem('report-services-client-medical')!;
 
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [branchId, setBranchId] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    if (isBranchSession && lockedBranchId) setBranchId(lockedBranchId);
-  }, [isBranchSession, lockedBranchId]);
   const [category, setCategory] = useState<string | undefined>(undefined);
   const [format, setFormat] = useState<ReportFormat>('detailed');
   const [page, setPage] = useState(1);
@@ -121,7 +116,7 @@ export default function AdminClientMedicalPage() {
 
   const resetFilters = () => {
     setDateRange(null);
-    setBranchId(isBranchSession ? lockedBranchId : undefined);
+    setBranchId(undefined);
     setCategory(undefined);
     setFormat('detailed');
     setPage(1);
@@ -370,8 +365,6 @@ export default function AdminClientMedicalPage() {
                 setPage(1);
               }}
               options={branchOptions}
-              allowClear={!isBranchSession}
-              disabled={isBranchSession}
               showSearch
               optionFilterProp="label"
             />

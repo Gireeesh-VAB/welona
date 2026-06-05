@@ -73,34 +73,21 @@ async function rawRequest(path: string, options: RequestOptions): Promise<Respon
 const refreshInFlight = new Map<string, Promise<boolean>>();
 
 /**
- * Which auth pool the current browser session belongs to. `/admin/*` API
- * paths are shared by admin AND branch sessions, so the path alone can't tell
- * the pools apart — the login flow records the kind here (persisted so it
- * survives reloads) and `refreshPathFor` uses it to rotate the right token.
- */
-export type SessionKind = 'staff' | 'admin' | 'branch';
-const SESSION_KIND_KEY = 'welona-session-kind';
-
-export function setSessionKind(kind: SessionKind | null): void {
-  if (typeof window === 'undefined') return;
-  if (kind) window.localStorage.setItem(SESSION_KIND_KEY, kind);
-  else window.localStorage.removeItem(SESSION_KIND_KEY);
-}
-
-export function getSessionKind(): SessionKind | null {
-  if (typeof window === 'undefined') return null;
-  return (window.localStorage.getItem(SESSION_KIND_KEY) as SessionKind) || null;
-}
-
-/**
- * Pick the right refresh endpoint based on the path that just 401'd and the
- * recorded session kind. Using the wrong endpoint would clear cookies on the
- * live session, so this routing matters — branch and admin sessions share the
- * `/admin/*` API surface and are disambiguated by the stored session kind.
+ * Pick the right refresh endpoint.
+ *
+ * Routing by the CURRENT PAGE (not the API path) is deliberate: the admin and
+ * staff pools share the same session cookies, and the admin refresh route
+ * clears those cookies on failure. If a staff-portal page made a stray
+ * `/admin/*` API call, routing by API path would fire the admin refresh, which
+ * fails and wipes the live staff session (a phantom logout). The page location
+ * always reflects the real session pool, so route by that instead.
  */
 function refreshPathFor(path: string): string {
-  const kind = getSessionKind();
-  if (kind === 'branch') return '/auth/branch/refresh-token';
+  if (typeof window !== 'undefined') {
+    const onAdminPage = window.location.pathname.startsWith('/admin');
+    return onAdminPage ? '/auth/admin/refresh-token' : '/auth/refresh-token';
+  }
+  // SSR fallback: route by the API path.
   return path.startsWith('/admin/') || path.startsWith('/auth/admin/')
     ? '/auth/admin/refresh-token'
     : '/auth/refresh-token';

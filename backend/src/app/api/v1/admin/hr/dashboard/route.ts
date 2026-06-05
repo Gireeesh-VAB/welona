@@ -2,7 +2,7 @@ import type { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { shiftDay, startOfToday } from '@/lib/hr-dates';
 import type {
   HrAttendanceTrendDay,
@@ -16,18 +16,11 @@ import type {
  * loaded relative to the rest of the app.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
 
-  // Branch sessions see only their own branch. Employee queries filter on
-  // `branchId` directly; attendance/leave reach the branch via the employee
-  // relation. (Holiday/LeaveType/Department are org-wide — left unscoped.)
-  const empBranch: Prisma.EmployeeWhereInput = branchScope ? { branchId: branchScope } : {};
-  const attViaEmployee: Prisma.AttendanceWhereInput = branchScope
-    ? { employee: { branchId: branchScope } }
-    : {};
-  const leaveViaEmployee: Prisma.LeaveApplicationWhereInput = branchScope
-    ? { employee: { branchId: branchScope } }
-    : {};
+  const empBranch: Prisma.EmployeeWhereInput = {};
+  const attViaEmployee: Prisma.AttendanceWhereInput = {};
+  const leaveViaEmployee: Prisma.LeaveApplicationWhereInput = {};
 
   const today = startOfToday();
   const tomorrow = shiftDay(1, today);

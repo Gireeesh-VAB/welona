@@ -45,16 +45,7 @@ import {
   type AdminNavItem,
 } from '@/config/adminNavigation';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { useBranchAuthStore } from '@/store/branchAuthStore';
-import { getSessionKind } from '@/lib/api-client';
 import type { colors as colorsType } from '@/theme/colors';
-
-/**
- * Nav keys a branch (SystemUser) session may see. Branch sessions are scoped
- * to their own branch, so they only get the modules whose APIs enforce that
- * scope today (inventory). More are added as enforcement expands.
- */
-const BRANCH_NAV_KEYS = new Set(['dashboard', 'inventory', 'customers', 'sales', 'hr', 'report']);
 
 /**
  * Walk the nav tree and return the ancestor chain of `targetKey` (excluding
@@ -175,21 +166,8 @@ export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProp
   const router = useRouter();
   const pathname = usePathname();
   const colors = useBrandColors();
-  const branch = useBranchAuthStore((s) => s.branch);
-  const isBranchSession = getSessionKind() === 'branch';
 
-  // Branch sessions see a trimmed nav scoped to branch-enforced modules. Their
-  // allowed items are also flattened to leaves (admin-only children like
-  // Suppliers are hidden).
-  const navTree = useMemo(
-    () =>
-      isBranchSession
-        ? adminNavigation
-            .filter((item) => BRANCH_NAV_KEYS.has(item.key))
-            .map((item) => ({ ...item, children: undefined }))
-        : adminNavigation,
-    [isBranchSession],
-  );
+  const navTree = adminNavigation;
 
   const activeItem = getAdminNavItemByPath(pathname);
   const activeKey = activeItem?.key ?? 'dashboard';
@@ -290,15 +268,11 @@ export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProp
                 color: colors.text.placeholder,
                 fontWeight: 600,
                 fontSize: 10,
-                letterSpacing: isBranchSession ? 1 : 3,
+                letterSpacing: 3,
                 marginTop: 2,
-                maxWidth: 200,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
               }}
             >
-              {isBranchSession ? (branch?.branchName ?? 'BRANCH').toUpperCase() : 'ADMIN'}
+              ADMIN
             </span>
           )}
         </div>

@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 
 /** Count occurrences of each string value. */
@@ -20,13 +20,13 @@ function tally(values: string[]): Record<string, number> {
  * Branch sessions are hard-scoped to their branch; admins see all branches.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   // Branch filter applied to every record that carries a branchId. Records
   // without a branchId (Payment, FollowUp) are scoped through their related
   // invoice / lead.
-  const branchFilter = branchScope ? { branchId: branchScope } : {};
+  const branchFilter = { };
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -48,7 +48,7 @@ export const GET = route(async (req) => {
       }),
       db.payment.findMany({
         // Payment has no branchId — scope via the related invoice's branch.
-        where: { orgId, ...(branchScope && { invoice: { branchId: branchScope } }) },
+        where: { orgId },
         select: { amount: true, receivedAt: true },
       }),
       db.invoice.findMany({
@@ -71,7 +71,7 @@ export const GET = route(async (req) => {
           orgId,
           status: 'pending',
           dueAt: { gte: startOfToday, lt: startOfTomorrow },
-          ...(branchScope && { lead: { branchId: branchScope } }),
+          
         },
         include: { lead: { select: { id: true, contactName: true, status: true } } },
         orderBy: { dueAt: 'asc' },

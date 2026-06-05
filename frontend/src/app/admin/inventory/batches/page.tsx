@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Input, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
@@ -6,9 +6,8 @@ import { SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { useBatches } from '@/hooks/useBatches';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchAuthStore } from '@/store/branchAuthStore';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { getSessionKind } from '@/lib/api-client';
+import {} from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminBatchRow } from '@shared/types/admin-batch';
 
@@ -22,10 +21,8 @@ export default function AdminBatchesPage() {
   const colors = useBrandColors();
   const navItem = getAdminNavItem('inventory-batches')!;
 
-  const branchSession = useBranchAuthStore((s) => s.branch);
-  const isBranchSession = getSessionKind() === 'branch' && Boolean(branchSession);
 
-  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: !isBranchSession });
+  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: true });
   const branchOptions = useMemo(
     () => [
       { value: '', label: 'All branches' },
@@ -41,9 +38,7 @@ export default function AdminBatchesPage() {
   const [limit, setLimit] = useState(20);
 
   useEffect(() => {
-    if (isBranchSession && branchSession?.branchId) setBranchId(branchSession.branchId);
-  }, [isBranchSession, branchSession]);
-
+  }, []);
   const { data, isLoading } = useBatches({
     branchId: branchId || undefined,
     search: search || undefined,
@@ -95,10 +90,8 @@ export default function AdminBatchesPage() {
       </div>
       <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }} styles={{ body: { padding: 16 } }}>
         <Space style={{ marginBottom: 12 }} wrap>
-          {!isBranchSession && (
             <Select showSearch value={branchId} onChange={(v) => { setBranchId(v); setPage(1); }} options={branchOptions} style={{ width: 240 }}
               filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
-          )}
           <Input allowClear prefix={<SearchOutlined />} placeholder="Search batch, product or SKU" value={search} onChange={(e) => { setSearch(e.target.value); setPage(1); }} style={{ width: 300 }} />
           <Segmented
             value={inStockOnly ? 'instock' : 'all'}

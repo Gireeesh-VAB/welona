@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import {
   adminSupplierCreateSchema,
   adminSupplierListQuerySchema,
@@ -20,7 +20,7 @@ import { recordAudit, actorFromClaims } from '@/lib/audit';
  */
 export const GET = route(async (req) => {
   // Org-wide reference data; branch sessions read it. Writes stay admin-only.
-  requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { search, active, page, limit } = parseQuery(req, adminSupplierListQuerySchema);
 
   const where: Prisma.SupplierWhereInput = {

@@ -2,7 +2,7 @@ import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 
 type Ctx = { params: { id: string } };
@@ -12,11 +12,11 @@ type Ctx = { params: { id: string } };
  * every lead, quotation, order and invoice, plus a roll-up summary.
  */
 export const GET = route<Ctx>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const customer = await db.customer.findFirst({
-    where: { id: params.id, orgId, ...(branchScope && { branchId: branchScope }) },
+    where: { id: params.id, orgId },
   });
   if (!customer) throw Errors.notFound('Customer');
 

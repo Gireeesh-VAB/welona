@@ -1,8 +1,8 @@
 import { db } from '@/lib/db';
-import type { AdminAuthClaims, BranchAuthClaims, AuthClaims } from '@/lib/auth/jwt';
+import type { AdminAuthClaims, AuthClaims } from '@/lib/auth/jwt';
 
 export interface AuditActor {
-  actorType: 'admin' | 'branch' | 'staff' | 'system';
+  actorType: 'admin' | 'staff' | 'system';
   actorId: string | null;
   actorName: string | null;
 }
@@ -12,10 +12,6 @@ export function actorFromClaims(claims: AuthClaims): AuditActor {
   if (claims.type === 'admin') {
     const c = claims as AdminAuthClaims;
     return { actorType: 'admin', actorId: c.sub, actorName: c.name };
-  }
-  if (claims.type === 'branch') {
-    const c = claims as BranchAuthClaims;
-    return { actorType: 'branch', actorId: c.sub, actorName: c.userName };
   }
   return { actorType: 'staff', actorId: claims.sub, actorName: null };
 }

@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { getDefaultWarehouseId } from '@/lib/warehouse';
 import { receiveBatchStock } from '@/lib/batch';
@@ -36,11 +36,11 @@ const goodsReceiptInclude = {
  * PO status (partially_received / received). Branch sessions are scoped.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { branchId, poId, page, limit } = parseQuery(req, adminGoodsReceiptListQuerySchema);
 
   const where: Prisma.GoodsReceiptWhereInput = {
-    ...((branchScope ?? branchId) && { branchId: branchScope ?? branchId }),
+    ...((branchId) && { branchId: branchId }),
     ...(poId && { poId }),
   };
 
@@ -60,7 +60,7 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminGoodsReceiptCreateSchema);
   const createdByAdminId = claims.type === 'admin' ? claims.sub : null;
 
@@ -70,11 +70,8 @@ export const POST = route(async (req) => {
     : null;
   if (body.poId && !po) throw Errors.notFound('Purchase order');
 
-  const branchId = branchScope ?? po?.branchId ?? body.branchId;
+  const branchId = po?.branchId ?? body.branchId;
   if (!branchId) throw Errors.badRequest('Branch is required.');
-  if (branchScope && po && po.branchId !== branchScope) {
-    throw Errors.forbidden('This purchase order belongs to another branch.');
-  }
   const supplierId = po?.supplierId ?? body.supplierId ?? null;
 
   const [branch, products] = await Promise.all([

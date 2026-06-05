@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import { Card, Col, Input, Row, Segmented, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
@@ -6,9 +6,8 @@ import { SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useInventoryReports } from '@/hooks/useInventoryReports';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchAuthStore } from '@/store/branchAuthStore';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { getSessionKind } from '@/lib/api-client';
+import {} from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminInventoryProductReportRow, MovementClass } from '@shared/types/admin-inventory-report';
 
@@ -24,10 +23,8 @@ export default function AdminInventoryReportsPage() {
   const colors = useBrandColors();
   const navItem = getAdminNavItem('inventory-reports')!;
 
-  const branchSession = useBranchAuthStore((s) => s.branch);
-  const isBranchSession = getSessionKind() === 'branch' && Boolean(branchSession);
 
-  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: !isBranchSession });
+  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: true });
   const branchOptions = useMemo(
     () => [
       { value: '', label: 'All branches' },
@@ -42,9 +39,7 @@ export default function AdminInventoryReportsPage() {
   const [classFilter, setClassFilter] = useState<MovementClass | 'all'>('all');
 
   useEffect(() => {
-    if (isBranchSession && branchSession?.branchId) setBranchId(branchSession.branchId);
-  }, [isBranchSession, branchSession]);
-
+  }, []);
   const { data, isLoading } = useInventoryReports({ branchId: branchId || undefined, days });
   const summary = data?.summary;
 
@@ -111,7 +106,6 @@ export default function AdminInventoryReportsPage() {
       </div>
 
       <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
-        {!isBranchSession && (
           <Select
             showSearch
             value={branchId}
@@ -120,7 +114,6 @@ export default function AdminInventoryReportsPage() {
             style={{ width: 260 }}
             filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())}
           />
-        )}
         <Segmented
           value={days}
           onChange={(v) => setDays(v as number)}

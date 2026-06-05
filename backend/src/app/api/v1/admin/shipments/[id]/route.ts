@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { recordAudit, actorFromClaims } from '@/lib/audit';
 import { adminShipmentAdvanceSchema } from '@shared/schemas/admin-shipments';
 import { toAdminShipment, type ShipmentWithEvents } from '@/lib/admin-shipment-mapper';
@@ -12,9 +12,9 @@ interface RouteContext {
   params: { id: string };
 }
 
-async function loadScoped(id: string, branchScope: string | null) {
+async function loadScoped(id: string) {
   const s = await db.trackedShipment.findUnique({ where: { id }, include: { events: true } });
-  if (!s || (branchScope && s.branchId !== branchScope)) throw Errors.notFound('Shipment');
+  if (!s) throw Errors.notFound('Shipment');
   return s;
 }
 async function branchName(branchId: string | null): Promise<string | null> {
@@ -24,16 +24,16 @@ async function branchName(branchId: string | null): Promise<string | null> {
 }
 
 export const GET = route<RouteContext>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
-  const s = await loadScoped(params.id, branchScope);
+  const claims = requireAdminAuth(req);
+  const s = await loadScoped(params.id);
   return ok(toAdminShipment(s as ShipmentWithEvents, await branchName(s.branchId)));
 });
 
 /** PUT advances the shipment to a new stage and appends a stage event. */
 export const PUT = route<RouteContext>(async (req, { params }) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminShipmentAdvanceSchema);
-  const existing = await loadScoped(params.id, branchScope);
+  const existing = await loadScoped(params.id);
   const actor = actorFromClaims(claims);
 
   if (existing.stage === 'stocked' || existing.stage === 'cancelled') {
@@ -67,8 +67,8 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
 });
 
 export const DELETE = route<RouteContext>(async (req, { params }) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
-  const existing = await loadScoped(params.id, branchScope);
+  const claims = requireAdminAuth(req);
+  const existing = await loadScoped(params.id);
   try {
     await db.trackedShipment.delete({ where: { id: existing.id } });
     await recordAudit({

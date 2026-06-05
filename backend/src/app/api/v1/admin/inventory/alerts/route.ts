@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { route, parseQuery } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { z } from 'zod';
 import type {
   AdminInventoryAlerts,
@@ -27,9 +27,9 @@ const querySchema = z.object({
  * batch tracking in a later phase.)
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { branchId: queryBranchId, expiryDays } = parseQuery(req, querySchema);
-  const branchId = branchScope ?? queryBranchId;
+  const branchId = queryBranchId;
 
   const stockWhere: Prisma.InventoryStockWhereInput = branchId ? { branchId } : {};
   const [stocks, products, branches, overduePOs] = await Promise.all([

@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -19,7 +19,6 @@ import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useAdminCustomers, useCreateAdminCustomer } from '@/hooks/useAdminCustomers';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchLock } from '@/hooks/useBranchLock';
 import { ApiClientError } from '@/lib/api-client';
 import { formatDate } from '@shared/format';
 import type { Customer } from '@shared/types/sales';
@@ -43,7 +42,6 @@ export default function CustomersPage() {
 
   // Branch sessions are auto-scoped server-side, so they don't pick a branch.
   // Admins MUST choose one so the new customer is visible to that branch.
-  const { isBranchSession } = useBranchLock();
   const { data: branchesData } = useAdminBranches({ limit: 200 });
   const branchOptions = (branchesData?.items ?? []).map((b) => ({
     value: b.id,
@@ -185,7 +183,6 @@ export default function CustomersPage() {
           <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
             <Input placeholder="Customer or company name" />
           </Form.Item>
-          {!isBranchSession && (
             <Form.Item
               name="branchId"
               label="Branch"
@@ -199,7 +196,6 @@ export default function CustomersPage() {
                 options={branchOptions}
               />
             </Form.Item>
-          )}
           <div style={{ display: 'flex', gap: 12 }}>
             <Form.Item name="phone" label="Phone" style={{ flex: 1 }}>
               <Input placeholder="+91 …" />

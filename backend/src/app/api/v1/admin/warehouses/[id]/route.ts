@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { adminWarehouseUpdateSchema } from '@shared/schemas/admin-warehouses';
 import { toAdminWarehouse, warehouseInclude, type WarehouseWithRelations } from '@/lib/admin-warehouse-mapper';
 import { recordAudit, actorFromClaims } from '@/lib/audit';
@@ -12,16 +12,16 @@ interface RouteContext {
   params: { id: string };
 }
 
-async function loadScoped(id: string, branchScope: string | null) {
+async function loadScoped(id: string) {
   const wh = await db.warehouse.findUnique({ where: { id }, include: warehouseInclude });
-  if (!wh || (branchScope && wh.branchId !== branchScope)) throw Errors.notFound('Warehouse');
+  if (!wh) throw Errors.notFound('Warehouse');
   return wh;
 }
 
 export const PUT = route<RouteContext>(async (req, { params }) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminWarehouseUpdateSchema);
-  const existing = await loadScoped(params.id, branchScope);
+  const existing = await loadScoped(params.id);
 
   // Prevent removing the branch's only default by un-setting it directly.
   if (body.isDefault === false && existing.isDefault) {
@@ -66,8 +66,8 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
 });
 
 export const DELETE = route<RouteContext>(async (req, { params }) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
-  const existing = await loadScoped(params.id, branchScope);
+  const claims = requireAdminAuth(req);
+  const existing = await loadScoped(params.id);
   if (existing.isDefault) {
     throw Errors.conflict('The default warehouse cannot be deleted. Make another one default first.');
   }

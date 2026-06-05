@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { adminPurchaseOrderUpdateSchema } from '@shared/schemas/admin-purchase-orders';
 import {
   toAdminPurchaseOrder,
@@ -16,27 +16,27 @@ interface RouteContext {
 }
 
 /** Load a PO and enforce branch scope; throws 404 if absent/out-of-scope. */
-async function loadScoped(id: string, branchScope: string | null) {
+async function loadScoped(id: string) {
   const po = await db.purchaseOrder.findUnique({
     where: { id },
     include: purchaseOrderInclude,
   });
-  if (!po || (branchScope && po.branchId !== branchScope)) {
+  if (!po) {
     throw Errors.notFound('Purchase order');
   }
   return po;
 }
 
 export const GET = route<RouteContext>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
-  const po = await loadScoped(params.id, branchScope);
+  requireAdminAuth(req);
+  const po = await loadScoped(params.id);
   return ok(toAdminPurchaseOrder(po as PurchaseOrderWithRelations));
 });
 
 export const PUT = route<RouteContext>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const body = await parseBody(req, adminPurchaseOrderUpdateSchema);
-  const existing = await loadScoped(params.id, branchScope);
+  const existing = await loadScoped(params.id);
 
   // Don't let a manual status edit override a received PO back to draft if
   // any stock has already been received — keep it simple: block re-opening a
@@ -64,8 +64,8 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
 });
 
 export const DELETE = route<RouteContext>(async (req, { params }) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
-  const existing = await loadScoped(params.id, branchScope);
+  requireAdminAuth(req);
+  const existing = await loadScoped(params.id);
   // A PO that has been (partly) received shouldn't be hard-deleted.
   if (existing.status !== 'draft' && existing.status !== 'cancelled') {
     throw Errors.conflict('Only draft or cancelled purchase orders can be deleted.');

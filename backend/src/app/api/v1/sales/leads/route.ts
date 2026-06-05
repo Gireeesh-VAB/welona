@@ -28,9 +28,11 @@ export const GET = route(async (req) => {
   requirePermission(claims, 'sales:read');
   const query = parseQuery(req, listQuerySchema);
 
+  const staffBranchId = claims.branchIds[0] ?? null;
   const where: Prisma.LeadWhereInput = { orgId: claims.orgId };
   if (query.status) where.status = query.status;
-  if (query.branchId) where.branchId = query.branchId;
+  const effectiveBranchId = query.branchId ?? staffBranchId;
+  if (effectiveBranchId) where.branchId = effectiveBranchId;
   if (query.ownerStaffId) where.ownerStaffId = query.ownerStaffId;
   if (query.search) {
     where.OR = [

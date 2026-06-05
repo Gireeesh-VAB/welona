@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import {
   adminLeaveTypeCreateSchema,
   adminLeaveTypeListQuerySchema,
@@ -13,7 +13,7 @@ import { toAdminLeaveType } from '@/lib/admin-leave-type-mapper';
 export const GET = route(async (req) => {
   // Leave types are org-wide reference data; branch sessions read them (e.g. on
   // the Leaves page) but only admins manage them (POST/PUT/DELETE stay admin).
-  requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { search, page, limit } = parseQuery(req, adminLeaveTypeListQuerySchema);
 
   const where: Prisma.LeaveTypeWhereInput = search

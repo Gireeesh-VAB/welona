@@ -2,7 +2,7 @@ import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
-import { requireAdminAuth, requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import {
   adminAttendanceUpsertSchema,
   adminAttendanceListQuerySchema,
@@ -23,13 +23,13 @@ const includeRelations = {
  * absent days into an empty cell on the client.
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const { employeeId, branchId: queryBranchId, from, to, status, page, limit } = parseQuery(
     req,
     adminAttendanceListQuerySchema,
   );
   // Branch sessions are locked to their own branch regardless of the query.
-  const branchId = branchScope ?? queryBranchId;
+  const branchId = queryBranchId;
 
   const where: Prisma.AttendanceWhereInput = {
     ...(employeeId && { employeeId }),

@@ -3,7 +3,7 @@ import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 import { nextDocumentNumber } from '@/lib/sales/service';
 import {
@@ -21,17 +21,16 @@ import { recordAudit, actorFromClaims } from '@/lib/audit';
  * GET  /api/v1/admin/purchase-orders?search=&branchId=&supplierId=&status=
  * POST /api/v1/admin/purchase-orders
  *
- * Branch sessions are scoped to their own branch (`branchScope`).
  */
 export const GET = route(async (req) => {
-  const { branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const { search, branchId, supplierId, status, page, limit } = parseQuery(
     req,
     adminPurchaseOrderListQuerySchema,
   );
 
   const where: Prisma.PurchaseOrderWhereInput = {
-    ...((branchScope ?? branchId) && { branchId: branchScope ?? branchId }),
+    ...((branchId) && { branchId: branchId }),
     ...(supplierId && { supplierId }),
     ...(status && { status }),
     ...(search && {
@@ -59,9 +58,9 @@ export const GET = route(async (req) => {
 });
 
 export const POST = route(async (req) => {
-  const { claims, branchScope } = requireAdminOrBranchAuth(req);
+  const claims = requireAdminAuth(req);
   const body = await parseBody(req, adminPurchaseOrderCreateSchema);
-  const branchId = branchScope ?? body.branchId;
+  const branchId = body.branchId;
   const createdByAdminId = claims.type === 'admin' ? claims.sub : null;
 
   const [branch, supplier, products] = await Promise.all([

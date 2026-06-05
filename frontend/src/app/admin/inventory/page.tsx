@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -44,8 +44,7 @@ import {
 import { useWarehouses } from '@/hooks/useWarehouses';
 import { useProducts } from '@/hooks/useProducts';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { ApiClientError, getSessionKind } from '@/lib/api-client';
-import { useBranchAuthStore } from '@/store/branchAuthStore';
+import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type {
   AdminInventoryMovement,
@@ -92,27 +91,14 @@ export default function AdminInventoryPage() {
   const { message } = App.useApp();
 
   // Branch sessions are locked to their own branch; admins pick any branch.
-  // Guard against a stale `welona-session-kind` in localStorage: only treat
-  // this as a branch session if a branch user is actually loaded, otherwise an
-  // admin could be misclassified and the branch list would never load.
-  const branchSession = useBranchAuthStore((s) => s.branch);
-  const isBranchSession = getSessionKind() === 'branch' && Boolean(branchSession);
-
-  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: !isBranchSession });
+  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: true });
   const branchOptions = useMemo(
     () =>
-      isBranchSession && branchSession
-        ? [
-            {
-              value: branchSession.branchId,
-              label: branchSession.branchName ?? branchSession.userName,
-            },
-          ]
-        : (branchesData?.items ?? []).map((b) => ({
-            value: b.id,
-            label: `${b.branchName} (${b.branchCode})`,
-          })),
-    [isBranchSession, branchSession, branchesData],
+      (branchesData?.items ?? []).map((b) => ({
+        value: b.id,
+        label: `${b.branchName} (${b.branchCode})`,
+      })),
+    [branchesData],
   );
 
   const [branchId, setBranchId] = useState<string | undefined>();
@@ -145,15 +131,12 @@ export default function AdminInventoryPage() {
     [productsData],
   );
 
-  // Auto-pick the branch: the session's own branch for branch users, else the
-  // first branch in the list so the page doesn't feel empty.
+  // Auto-pick the first branch so the page doesn't feel empty on load.
   useEffect(() => {
-    if (isBranchSession) {
-      if (branchSession?.branchId) setBranchId(branchSession.branchId);
-    } else if (!branchId && branchesData?.items[0]) {
+    if (!branchId && branchesData?.items[0]) {
       setBranchId(branchesData.items[0].id);
     }
-  }, [isBranchSession, branchSession, branchId, branchesData]);
+  }, [branchId, branchesData]);
 
   const { data: stockData, isLoading: stockLoading } = useInventoryStock({
     branchId: branchId ?? null,
@@ -408,7 +391,7 @@ export default function AdminInventoryPage() {
                 value={branchId}
                 onChange={(v) => { setBranchId(v); setWarehouseId(undefined); }}
                 options={branchOptions}
-                disabled={isBranchSession}
+               
                 style={{ width: '60%' }}
                 filterOption={(input, option) =>
                   (option?.label ?? '').toLowerCase().includes(input.toLowerCase())

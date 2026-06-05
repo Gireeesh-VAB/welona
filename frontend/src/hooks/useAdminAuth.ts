@@ -1,7 +1,7 @@
 'use client';
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { api, setSessionKind } from '@/lib/api-client';
+import { api } from '@/lib/api-client';
 import { useAdminAuthStore } from '@/store/adminAuthStore';
 import type { AdminAuthUser, AdminSessionResult } from '@shared/types/auth';
 
@@ -12,7 +12,6 @@ export function useAdminLogin() {
     mutationFn: (credentials: { identifier: string; password: string }) =>
       api.post<AdminSessionResult>('/auth/admin/login', credentials),
     onSuccess: (data) => {
-      setSessionKind('admin');
       setAdminSession(data.user);
     },
   });
@@ -25,7 +24,6 @@ export function useAdminLogout() {
   return useMutation({
     mutationFn: () => api.post('/auth/admin/logout'),
     onSettled: () => {
-      setSessionKind(null);
       clearAdminSession();
       queryClient.clear();
     },

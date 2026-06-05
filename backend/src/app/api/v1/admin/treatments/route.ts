@@ -1,7 +1,7 @@
 import { db } from '@/lib/db';
 import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
-import { requireAdminOrBranchAuth } from '@/lib/auth/service';
+import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
 
 /**
@@ -11,7 +11,7 @@ import { resolveOrgId } from '@/lib/org';
  * admin sales forms. Read-only; treatments are managed on the employee side.
  */
 export const GET = route(async (req) => {
-  requireAdminOrBranchAuth(req);
+  requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const treatments = await db.treatment.findMany({

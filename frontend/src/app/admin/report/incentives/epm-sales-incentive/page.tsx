@@ -1,4 +1,4 @@
-'use client';
+﻿'use client';
 
 import { useEffect, useMemo, useState } from 'react';
 import {
@@ -8,7 +8,6 @@ import { DownloadOutlined, FilterOutlined, ReloadOutlined } from '@ant-design/ic
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import dayjs, { type Dayjs } from 'dayjs';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useBranchLock } from '@/hooks/useBranchLock';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import { formatMoney } from '@shared/format';
@@ -69,15 +68,11 @@ function downloadCsv(filename: string, csv: string) {
 
 export default function AdminSalesIncentivePage() {
   const colors = useBrandColors();
-  const { isBranchSession, lockedBranchId } = useBranchLock();
   const navItem = getAdminNavItem('report-inc-epm-sales')!;
 
   const [dateRange, setDateRange] = useState<[Dayjs, Dayjs] | null>(null);
   const [branchId, setBranchId] = useState<string | undefined>(undefined);
 
-  useEffect(() => {
-    if (isBranchSession && lockedBranchId) setBranchId(lockedBranchId);
-  }, [isBranchSession, lockedBranchId]);
   const [employee, setEmployee] = useState<string | undefined>(undefined);
   const [bookingType, setBookingType] = useState<BookingType | undefined>(undefined);
   const [incentivePct, setIncentivePct] = useState<number>(2);
@@ -108,7 +103,7 @@ export default function AdminSalesIncentivePage() {
   }, [branchId, employee, bookingType, dateRange, branchOptions]);
 
   const resetFilters = () => {
-    setDateRange(null); setBranchId(isBranchSession ? lockedBranchId : undefined); setEmployee(undefined);
+    setDateRange(null); setBranchId(undefined); setEmployee(undefined);
     setBookingType(undefined); setIncentivePct(2);
     setFormat('detailed'); setPage(1);
   };
@@ -282,7 +277,7 @@ export default function AdminSalesIncentivePage() {
             <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Branch</Text>
             <Select style={{ width: '100%', marginTop: 4 }} placeholder={branchesLoading ? 'Loading…' : 'All branches'}
               loading={branchesLoading} value={branchId} onChange={(v) => { setBranchId(v); setPage(1); }}
-              options={branchOptions} allowClear={!isBranchSession} disabled={isBranchSession} showSearch optionFilterProp="label" />
+              options={branchOptions} showSearch optionFilterProp="label" />
           </Col>
           <Col xs={24} sm={12} md={8} lg={6} xl={5}>
             <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Employee Name</Text>

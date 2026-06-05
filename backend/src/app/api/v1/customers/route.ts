@@ -9,15 +9,20 @@ import { serializeCustomer } from '@/lib/sales/serializers';
 /**
  * GET  /api/v1/customers — paginated, searchable customer list.
  * POST /api/v1/customers — create a customer.
- * Reference: section 6.1 (M01) + the Sales pipeline.
+ *
+ * Branch scoping: staff members assigned to a branch only see customers
+ * belonging to that branch. Org-wide staff (branchIds=[]) see all.
  */
 export const GET = route(async (req) => {
   const claims = requireAuth(req);
   requirePermission(claims, 'customers:read');
   const query = parseQuery(req, listQuerySchema);
 
+  const staffBranchId = claims.branchIds[0] ?? null;
   const where: Prisma.CustomerWhereInput = { orgId: claims.orgId };
-  if (query.branchId) where.branchId = query.branchId;
+  // Explicit query param takes precedence; otherwise auto-scope to staff's branch.
+  const effectiveBranchId = query.branchId ?? staffBranchId;
+  if (effectiveBranchId) where.branchId = effectiveBranchId;
   if (query.search) {
     where.OR = [
       { name: { contains: query.search } },
