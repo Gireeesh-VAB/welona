@@ -25,6 +25,8 @@ backend/prisma/migrations/
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+*-dev.log
+**/*-dev.log
 
 # Claude Code local session state
 /.claude/
