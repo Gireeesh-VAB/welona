@@ -69,13 +69,6 @@ export const POST = route(async (req) => {
   });
   if (!customer) throw Errors.notFound('Customer');
 
-  if (body.consultantStaffId) {
-    const consultant = await db.staff.findFirst({
-      where: { id: body.consultantStaffId, orgId: claims.orgId },
-    });
-    if (!consultant) throw Errors.notFound('Consultant');
-  }
-
   const items = body.items.map((it, i) => ({
     category: it.category || null,
     service: it.service,

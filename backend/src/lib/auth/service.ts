@@ -184,7 +184,7 @@ export function applySessionCookies(
   accessToken: string,
   refreshToken: string,
 ): void {
-  const secure = process.env.NODE_ENV === 'production';
+  const secure = process.env.NODE_ENV === 'production' && process.env.COOKIE_SECURE !== 'false';
   res.cookies.set(ACCESS_COOKIE, accessToken, {
     httpOnly: false, // middleware + client read this; the API still validates every call
     sameSite: 'lax',

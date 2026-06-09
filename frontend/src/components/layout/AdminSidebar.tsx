@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter, usePathname } from 'next/navigation';
-import { Layout, Menu } from 'antd';
+import { Drawer, Layout, Menu } from 'antd';
 import {
   ApartmentOutlined,
   AppstoreOutlined,
@@ -128,6 +128,9 @@ const icons: Record<string, ReactNode> = {
 interface AdminSidebarProps {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
+  isMobile?: boolean;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
 function toMenuItem(
@@ -162,7 +165,13 @@ function toMenuItem(
   };
 }
 
-export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProps) {
+export default function AdminSidebar({
+  collapsed,
+  onCollapse,
+  isMobile = false,
+  mobileOpen = false,
+  onMobileClose,
+}: AdminSidebarProps) {
   const router = useRouter();
   const pathname = usePathname();
   const colors = useBrandColors();
@@ -225,6 +234,63 @@ export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProp
 
   const menuItems = navTree.map((item) => toMenuItem(item, handleClick, colors));
 
+  const sidebarContent = (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div
+        style={{
+          height: 64,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <span style={{ color: colors.gold.primary, fontWeight: 700, fontSize: 20, letterSpacing: 4, lineHeight: 1.1 }}>
+          WELONA
+        </span>
+        <span style={{ color: colors.text.placeholder, fontWeight: 600, fontSize: 10, letterSpacing: 3, marginTop: 2 }}>
+          ADMIN
+        </span>
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 48 }}>
+        <Menu
+          theme="light"
+          mode="inline"
+          selectedKeys={[activeKey]}
+          openKeys={openKeys}
+          onOpenChange={onOpenChange}
+          onClick={({ key }) => { handleClick(String(key)); onMobileClose?.(); }}
+          items={menuItems}
+          expandIcon={({ isOpen }) => (
+            <RightOutlined
+              style={{ color: colors.text.primary, fontSize: 12, fontWeight: 700, marginRight: 0, transition: 'transform 0.2s ease-in-out', transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)' }}
+            />
+          )}
+        />
+      </div>
+    </div>
+  );
+
+  if (isMobile) {
+    return (
+      <Drawer
+        placement="left"
+        open={mobileOpen}
+        onClose={onMobileClose}
+        width={240}
+        styles={{
+          body: { padding: 0, background: colors.black.secondary },
+          header: { display: 'none' },
+        }}
+        style={{ zIndex: 1001 }}
+      >
+        {sidebarContent}
+      </Drawer>
+    );
+  }
+
   return (
     <Sider
       collapsible
@@ -239,71 +305,7 @@ export default function AdminSidebar({ collapsed, onCollapse }: AdminSidebarProp
         top: 0,
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div
-          style={{
-            height: 64,
-            flexShrink: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderBottom: `1px solid ${colors.border}`,
-          }}
-        >
-          <span
-            style={{
-              color: colors.gold.primary,
-              fontWeight: 700,
-              fontSize: collapsed ? 16 : 20,
-              letterSpacing: collapsed ? 1 : 4,
-              lineHeight: 1.1,
-            }}
-          >
-            {collapsed ? 'V' : 'WELONA'}
-          </span>
-          {!collapsed && (
-            <span
-              style={{
-                color: colors.text.placeholder,
-                fontWeight: 600,
-                fontSize: 10,
-                letterSpacing: 3,
-                marginTop: 2,
-              }}
-            >
-              ADMIN
-            </span>
-          )}
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 48 }}>
-          <Menu
-            theme="light"
-            mode="inline"
-            selectedKeys={[activeKey]}
-            openKeys={openKeys}
-            onOpenChange={onOpenChange}
-            onClick={({ key }) => handleClick(String(key))}
-            items={menuItems}
-            // Override the default submenu arrow with a high-contrast chevron
-            // that rotates on open — the AntD default blends into the light
-            // background on this theme and is barely visible.
-            expandIcon={({ isOpen }) => (
-              <RightOutlined
-                style={{
-                  color: colors.text.primary,
-                  fontSize: 12,
-                  fontWeight: 700,
-                  marginRight: 0,
-                  transition: 'transform 0.2s ease-in-out',
-                  transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                }}
-              />
-            )}
-          />
-        </div>
-      </div>
+      {sidebarContent}
     </Sider>
   );
 }

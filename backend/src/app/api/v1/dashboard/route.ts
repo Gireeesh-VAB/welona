@@ -40,14 +40,23 @@ export const GET = route(async (req) => {
         select: { treatmentId: true },
       }),
       db.payment.findMany({
-        where: { orgId, ...branchFilter, receivedAt: { gte: startOfMonth } },
+        where: {
+          orgId,
+          receivedAt: { gte: startOfMonth },
+          ...(staffBranchId ? { invoice: { branchId: staffBranchId } } : {}),
+        },
         select: { amount: true, method: true, receivedAt: true, recordedById: true },
       }),
       db.booking.count({
         where: { orgId, ...branchFilter, scheduledAt: { gte: startOfToday, lt: startOfTomorrow } },
       }),
       db.followUp.findMany({
-        where: { orgId, ...branchFilter, status: 'pending', dueAt: { gte: startOfToday, lt: startOfTomorrow } },
+        where: {
+          orgId,
+          status: 'pending',
+          dueAt: { gte: startOfToday, lt: startOfTomorrow },
+          ...(staffBranchId ? { lead: { branchId: staffBranchId } } : {}),
+        },
         include: { lead: { select: { contactName: true } } },
         orderBy: { dueAt: 'asc' },
       }),

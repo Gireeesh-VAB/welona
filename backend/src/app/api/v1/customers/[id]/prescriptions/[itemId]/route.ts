@@ -8,6 +8,20 @@ import { prescriptionUpdateSchema } from '@shared/schemas/customer-modules';
 
 type Ctx = { params: { id: string; itemId: string } };
 
+/** DELETE /api/v1/customers/[id]/prescriptions/[itemId] — delete a prescription. */
+export const DELETE = route<Ctx>(async (req, { params }) => {
+  const claims = requireAuth(req);
+  requirePermission(claims, 'customers:update');
+
+  const prescription = await db.prescription.findFirst({
+    where: { id: params.itemId, customerId: params.id, orgId: claims.orgId },
+  });
+  if (!prescription) throw Errors.notFound('Prescription');
+
+  await db.prescription.delete({ where: { id: params.itemId } });
+  return ok({ deleted: true });
+});
+
 /** PATCH /api/v1/customers/[id]/prescriptions/[itemId] — update a prescription. */
 export const PATCH = route<Ctx>(async (req, { params }) => {
   const claims = requireAuth(req);
