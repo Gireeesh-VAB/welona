@@ -130,12 +130,12 @@ jobs:
 
             echo "── Starting/Restarting PM2 processes ──"
             pm2 describe welona-prod-backend > /dev/null 2>&1 \
-              && pm2 restart welona-prod-backend \
-              || pm2 start "npm start" --name welona-prod-backend --cwd /var/www/html/welona-prod/backend
+              && PORT=3702 pm2 restart welona-prod-backend --update-env \
+              || PORT=3702 pm2 start "npm start" --name welona-prod-backend --cwd /var/www/html/welona-prod/backend
 
             pm2 describe welona-prod-frontend > /dev/null 2>&1 \
-              && pm2 restart welona-prod-frontend \
-              || pm2 start "npm start" --name welona-prod-frontend --cwd /var/www/html/welona-prod/frontend
+              && PORT=3701 pm2 restart welona-prod-frontend --update-env \
+              || PORT=3701 pm2 start "npm start" --name welona-prod-frontend --cwd /var/www/html/welona-prod/frontend
 
             pm2 save
 
