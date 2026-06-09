@@ -77,3 +77,141 @@ body {
 ::-webkit-scrollbar-thumb:hover {
   background: var(--brand-primary, #4f6f52);
 }
+
+/* ─── Mobile Responsiveness ──────────────────────────────────────────────── */
+
+/* Tables: horizontal scroll on all screens */
+.ant-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+@media (max-width: 767px) {
+  /* ── Layout ── */
+  .ant-layout-content {
+    padding: 12px !important;
+  }
+
+  /* ── Modals: cap to viewport width ── */
+  .ant-modal {
+    max-width: calc(100vw - 24px) !important;
+    margin: 12px auto !important;
+    padding: 0 !important;
+  }
+  .ant-modal-content {
+    border-radius: 8px !important;
+  }
+  .ant-modal-body {
+    padding: 16px !important;
+  }
+  .ant-modal-header {
+    padding: 14px 16px !important;
+  }
+  .ant-modal-footer {
+    padding: 10px 16px !important;
+  }
+
+  /* ── Drawers: full-width on mobile ── */
+  .ant-drawer-content-wrapper {
+    width: 100% !important;
+    max-width: 100vw !important;
+  }
+  .ant-drawer-body {
+    padding: 16px !important;
+  }
+  .ant-drawer-header {
+    padding: 14px 16px !important;
+  }
+
+  /* ── Tables: compact on mobile ── */
+  .ant-table {
+    font-size: 12px !important;
+  }
+  .ant-table-thead > tr > th,
+  .ant-table-tbody > tr > td {
+    padding: 8px 10px !important;
+    white-space: nowrap;
+  }
+
+  /* ── Forms ── */
+  .ant-form-item {
+    margin-bottom: 12px !important;
+  }
+  .ant-input,
+  .ant-input-affix-wrapper,
+  .ant-select,
+  .ant-picker {
+    width: 100% !important;
+  }
+
+  /* ── Buttons in toolbars ── */
+  .ant-space-horizontal {
+    flex-wrap: wrap;
+    gap: 8px !important;
+  }
+
+  /* ── Cards ── */
+  .ant-card-body {
+    padding: 14px !important;
+  }
+
+  /* ── Statistics ── */
+  .ant-statistic-title {
+    font-size: 12px !important;
+  }
+  .ant-statistic-content-value {
+    font-size: 20px !important;
+  }
+
+  /* ── Tabs ── */
+  .ant-tabs-nav {
+    overflow-x: auto;
+  }
+  .ant-tabs-tab {
+    padding: 8px 10px !important;
+    font-size: 13px !important;
+  }
+
+  /* ── Page header toolbars ── */
+  .welona-toolbar {
+    flex-direction: column !important;
+    align-items: stretch !important;
+    gap: 8px !important;
+  }
+  .welona-toolbar .ant-input-affix-wrapper,
+  .welona-toolbar .ant-select,
+  .welona-toolbar input {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  /* ── Descriptions ── */
+  .ant-descriptions-item-label,
+  .ant-descriptions-item-content {
+    padding: 8px 10px !important;
+  }
+
+  /* ── Breadcrumb ── */
+  .ant-breadcrumb {
+    font-size: 12px !important;
+  }
+
+  /* ── Typography ── */
+  h1.ant-typography, .ant-typography h1 { font-size: 20px !important; }
+  h2.ant-typography, .ant-typography h2 { font-size: 18px !important; }
+  h3.ant-typography, .ant-typography h3 { font-size: 16px !important; }
+}
+
+@media (max-width: 575px) {
+  /* Extra small phones */
+  .ant-layout-content {
+    padding: 8px !important;
+  }
+  .ant-card-body {
+    padding: 10px !important;
+  }
+  .ant-table-thead > tr > th,
+  .ant-table-tbody > tr > td {
+    padding: 6px 8px !important;
+  }
+}

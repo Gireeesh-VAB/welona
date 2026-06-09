@@ -58,6 +58,21 @@ export const useBookings = bookings.useList;
 export const useCreateBooking = bookings.useCreate;
 export const useUpdateBooking = bookings.useUpdate;
 
+export function useBookingAction(customerId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ bookingId, action, amount, notes }: { bookingId: string; action: 'cancel' | 'pay' | 'note'; amount?: number; notes?: string }) => {
+      const body = action === 'cancel'
+        ? { status: 'cancelled' }
+        : action === 'note'
+        ? { notes }
+        : { paidAmount: amount ?? 0 };
+      return api.patch(`/customers/${customerId}/bookings/${bookingId}`, body);
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['customer-bookings', customerId] }),
+  });
+}
+
 const packages = makeModuleHooks<Package>('packages', 'customer-packages');
 export const usePackages = packages.useList;
 export const useCreatePackage = packages.useCreate;
@@ -72,6 +87,15 @@ const prescriptions = makeModuleHooks<Prescription>('prescriptions', 'customer-p
 export const usePrescriptions = prescriptions.useList;
 export const useCreatePrescription = prescriptions.useCreate;
 export const useUpdatePrescription = prescriptions.useUpdate;
+
+export function useDeletePrescription(customerId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (prescriptionId: string) =>
+      api.delete(`/customers/${customerId}/prescriptions/${prescriptionId}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['customer-prescriptions', customerId] }),
+  });
+}
 
 const medicalReports = makeModuleHooks<MedicalReport>('medical-reports', 'customer-medical-reports');
 export const useMedicalReports = medicalReports.useList;

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { Layout } from 'antd';
 import AdminSidebar from '@/components/layout/AdminSidebar';
@@ -9,14 +9,22 @@ import PanelAuthGuard from '@/components/auth/PanelAuthGuard';
 
 const { Content } = Layout;
 
-/**
- * Admin route group — separate side from the employee /dashboard layout.
- * The login page is rendered bare so the guard never wraps it. Every other
- * /admin/* route is gated by PanelAuthGuard.
- */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const check = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (mobile) setCollapsed(true);
+    };
+    check();
+    window.addEventListener('resize', check);
+    return () => window.removeEventListener('resize', check);
+  }, []);
 
   if (pathname === '/admin/login') {
     return <>{children}</>;
@@ -25,10 +33,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <PanelAuthGuard>
       <Layout style={{ minHeight: '100vh' }}>
-        <AdminSidebar collapsed={collapsed} onCollapse={setCollapsed} />
+        <AdminSidebar
+          collapsed={collapsed}
+          onCollapse={setCollapsed}
+          isMobile={isMobile}
+          mobileOpen={mobileOpen}
+          onMobileClose={() => setMobileOpen(false)}
+        />
         <Layout>
-          <Header />
-          <Content style={{ padding: 24, overflow: 'auto' }}>{children}</Content>
+          <Header onMobileMenuClick={() => setMobileOpen(true)} isMobile={isMobile} />
+          <Content style={{ padding: isMobile ? 12 : 24, overflow: 'auto' }}>
+            {children}
+          </Content>
         </Layout>
       </Layout>
     </PanelAuthGuard>

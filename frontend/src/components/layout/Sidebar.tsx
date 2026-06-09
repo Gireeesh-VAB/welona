@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { Layout, Menu } from 'antd';
+import { Drawer, Layout, Menu } from 'antd';
 import type { ItemType } from 'antd/es/menu/interface';
 import {
   AppstoreOutlined,
@@ -36,7 +36,6 @@ import { useBrandColors } from '@/hooks/useBrandColors';
 
 const { Sider } = Layout;
 
-/** Icon per navigation key. */
 const icons: Record<string, ReactNode> = {
   dashboard: <DashboardOutlined />,
   sales: <FundProjectionScreenOutlined />,
@@ -69,36 +68,27 @@ const icons: Record<string, ReactNode> = {
 interface SidebarProps {
   collapsed: boolean;
   onCollapse: (collapsed: boolean) => void;
+  isMobile?: boolean;
+  mobileOpen?: boolean;
+  onMobileClose?: () => void;
 }
 
-export default function Sidebar({ collapsed, onCollapse }: SidebarProps) {
+function SidebarMenu({ collapsed, onNavigate }: { collapsed: boolean; onNavigate?: () => void }) {
   const router = useRouter();
   const pathname = usePathname();
   const colors = useBrandColors();
 
-  // Longest matching path wins so e.g. /sales/leads/123 keeps "sales" active.
   const activeKey =
     [...navigation]
       .filter((item) => (item.path === '/' ? pathname === '/' : pathname.startsWith(item.path)))
       .sort((a, b) => b.path.length - a.path.length)[0]?.key ?? 'dashboard';
 
-  // Group headers + their module items, with support for children (submenus).
   const buildMenuItems = (items: typeof navigation): ItemType[] =>
     items.map((item) => {
-      const baseItem = {
-        key: item.key,
-        icon: icons[item.key],
-        label: item.label,
-      };
-
-      // If item has children, render as a submenu
+      const baseItem = { key: item.key, icon: icons[item.key], label: item.label };
       if (item.children && item.children.length > 0) {
-        return {
-          ...baseItem,
-          children: buildMenuItems(item.children),
-        };
+        return { ...baseItem, children: buildMenuItems(item.children) };
       }
-
       return baseItem;
     });
 
@@ -108,6 +98,102 @@ export default function Sidebar({ collapsed, onCollapse }: SidebarProps) {
     label: group.label,
     children: buildMenuItems(items),
   }));
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+      <div
+        style={{
+          height: 64,
+          flexShrink: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          borderBottom: `1px solid ${colors.border}`,
+        }}
+      >
+        <span
+          style={{
+            color: colors.gold.primary,
+            fontWeight: 700,
+            fontSize: collapsed ? 16 : 20,
+            letterSpacing: collapsed ? 1 : 4,
+            lineHeight: 1.1,
+          }}
+        >
+          {collapsed ? 'V' : 'WELONA'}
+        </span>
+        {!collapsed && (
+          <span
+            style={{
+              color: colors.text.placeholder,
+              fontWeight: 600,
+              fontSize: 10,
+              letterSpacing: 3,
+              marginTop: 2,
+            }}
+          >
+            BRANCH PORTAL
+          </span>
+        )}
+      </div>
+
+      <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 48 }}>
+        <Menu
+          theme="light"
+          mode="inline"
+          selectedKeys={[activeKey]}
+          onClick={({ key }) => {
+            const findItem = (items: typeof navigation): (typeof navigation)[0] | undefined => {
+              for (const item of items) {
+                if (item.key === key) return item;
+                if (item.children) {
+                  const found = findItem(item.children);
+                  if (found) return found;
+                }
+              }
+              return undefined;
+            };
+            const target = findItem(navigation);
+            if (target) {
+              router.push(target.path);
+              onNavigate?.();
+            }
+          }}
+          items={menuItems}
+        />
+      </div>
+    </div>
+  );
+}
+
+export default function Sidebar({
+  collapsed,
+  onCollapse,
+  isMobile = false,
+  mobileOpen = false,
+  onMobileClose,
+}: SidebarProps) {
+  const colors = useBrandColors();
+
+  if (isMobile) {
+    return (
+      <Drawer
+        placement="left"
+        open={mobileOpen}
+        onClose={onMobileClose}
+        width={240}
+        styles={{
+          body: { padding: 0, background: colors.black.secondary },
+          header: { display: 'none' },
+          wrapper: { boxShadow: '4px 0 12px rgba(0,0,0,0.15)' },
+        }}
+        style={{ zIndex: 1001 }}
+      >
+        <SidebarMenu collapsed={false} onNavigate={onMobileClose} />
+      </Drawer>
+    );
+  }
 
   return (
     <Sider
@@ -123,69 +209,7 @@ export default function Sidebar({ collapsed, onCollapse }: SidebarProps) {
         top: 0,
       }}
     >
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        <div
-          style={{
-            height: 64,
-            flexShrink: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            borderBottom: `1px solid ${colors.border}`,
-          }}
-        >
-          <span
-            style={{
-              color: colors.gold.primary,
-              fontWeight: 700,
-              fontSize: collapsed ? 16 : 20,
-              letterSpacing: collapsed ? 1 : 4,
-              lineHeight: 1.1,
-            }}
-          >
-            {collapsed ? 'V' : 'WELONA'}
-          </span>
-          {!collapsed && (
-            <span
-              style={{
-                color: colors.text.placeholder,
-                fontWeight: 600,
-                fontSize: 10,
-                letterSpacing: 3,
-                marginTop: 2,
-              }}
-            >
-              BRANCH PORTAL
-            </span>
-          )}
-        </div>
-
-        <div style={{ flex: 1, overflowY: 'auto', paddingBottom: 48 }}>
-          <Menu
-            theme="light"
-            mode="inline"
-            selectedKeys={[activeKey]}
-            onClick={({ key }) => {
-              // Recursive search to find item in nested children
-              const findItem = (items: typeof navigation): (typeof navigation)[0] | undefined => {
-                for (const item of items) {
-                  if (item.key === key) return item;
-                  if (item.children) {
-                    const found = findItem(item.children);
-                    if (found) return found;
-                  }
-                }
-                return undefined;
-              };
-
-              const target = findItem(navigation);
-              if (target) router.push(target.path);
-            }}
-            items={menuItems}
-          />
-        </div>
-      </div>
+      <SidebarMenu collapsed={collapsed} />
     </Sider>
   );
 }

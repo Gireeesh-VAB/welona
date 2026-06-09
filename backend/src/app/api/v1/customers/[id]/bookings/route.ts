@@ -21,9 +21,47 @@ export const GET = route<Ctx>(async (req, { params }) => {
 
   const bookings = await db.booking.findMany({
     where: { customerId: params.id },
+    include: { items: { orderBy: { sortOrder: 'asc' } } },
     orderBy: { scheduledAt: 'desc' },
   });
-  return ok(bookings);
+
+  // Resolve consultant names from the Employee table (consultantStaffId stores an Employee.id)
+  const consultantIds = [...new Set(bookings.map(b => b.consultantStaffId).filter(Boolean))] as string[];
+  const employeeMap: Record<string, string> = {};
+  if (consultantIds.length) {
+    const employees = await db.employee.findMany({
+      where: { id: { in: consultantIds } },
+      select: { id: true, name: true },
+    });
+    employees.forEach(e => { employeeMap[e.id] = e.name; });
+  }
+
+  return ok(
+    bookings.map((b) => ({
+      id: b.id,
+      number: b.number,
+      status: b.status,
+      scheduledAt: b.scheduledAt.toISOString(),
+      createdAt: b.createdAt.toISOString(),
+      serviceName: b.serviceName,
+      totalAmount: b.totalAmount,
+      discount: b.discount,
+      roundOff: b.roundOff,
+      netAmount: b.netAmount,
+      paidAmount: b.paidAmount,
+      notes: b.notes,
+      consultantId: b.consultantStaffId,
+      consultantName: b.consultantStaffId ? (employeeMap[b.consultantStaffId] ?? null) : null,
+      items: b.items.map((it) => ({
+        id: it.id,
+        category: it.category,
+        service: it.service,
+        quantity: it.quantity,
+        amount: it.amount,
+        lineTotal: it.lineTotal,
+      })),
+    })),
+  );
 });
 
 /** POST /api/v1/customers/[id]/bookings — create a booking. */

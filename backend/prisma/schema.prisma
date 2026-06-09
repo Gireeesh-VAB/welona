@@ -147,9 +147,9 @@ model Staff {
   refreshTokens    RefreshToken[]
   loginChallenges  LoginChallenge[]
   // Sales pipeline ownership — a staff member is the "salesperson".
-  leadsOwned       Lead[]           @relation("LeadOwner")
-  quotationsOwned  Quotation[]      @relation("QuotationOwner")
-  ordersOwned      SalesOrder[]     @relation("OrderOwner")
+  leadsOwned        Lead[]           @relation("LeadOwner")
+  quotationsOwned   Quotation[]      @relation("QuotationOwner")
+  ordersOwned       SalesOrder[]     @relation("OrderOwner")
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 }
@@ -1029,7 +1029,7 @@ model Booking {
   customerId        String
   customer          Customer      @relation(fields: [customerId], references: [id], onDelete: Cascade)
   number            String? // e.g. BKG-0001
-  consultantStaffId String?
+  consultantStaffId String?       // stores an Employee.id from the branch HR system
   serviceName       String // summary of the booked services
   scheduledAt       DateTime
   status            String        @default("scheduled") // scheduled | completed | cancelled | no_show
@@ -1037,6 +1037,7 @@ model Booking {
   discount          Int           @default(0) // minor units
   roundOff          Int           @default(0) // minor units (may be negative)
   netAmount         Int           @default(0) // minor units
+  paidAmount        Int           @default(0) // minor units — cumulative payments recorded
   notes             String?
   items             BookingItem[]
   createdById       String?
