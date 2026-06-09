@@ -118,8 +118,8 @@ jobs:
             cd /var/www/html/welona-prod/backend
             npm install --legacy-peer-deps
 
-            echo "── Running database migrations ──"
-            npx prisma migrate deploy
+            echo "── Pushing database schema ──"
+            npx prisma db push --accept-data-loss
 
             echo "── Building backend ──"
             npm run build
