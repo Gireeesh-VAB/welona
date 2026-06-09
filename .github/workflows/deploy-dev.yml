@@ -102,8 +102,15 @@ jobs:
             cd /var/www/html/welona-dev/frontend
             npm install --legacy-peer-deps
 
-            echo "── Restarting PM2 processes ──"
-            pm2 restart welona-dev-backend welona-dev-frontend
+            echo "── Starting/Restarting PM2 processes ──"
+            pm2 describe welona-dev-backend > /dev/null 2>&1 \
+              && pm2 restart welona-dev-backend \
+              || pm2 start "npm start" --name welona-dev-backend --cwd /var/www/html/welona-dev/backend
+
+            pm2 describe welona-dev-frontend > /dev/null 2>&1 \
+              && pm2 restart welona-dev-frontend \
+              || pm2 start "npm start" --name welona-dev-frontend --cwd /var/www/html/welona-dev/frontend
+
             pm2 save
 
             echo "── Deploy complete ──"
