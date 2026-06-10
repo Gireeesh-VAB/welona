@@ -1,12 +1,16 @@
 #!/bin/bash
-# Sync local welona changes to production server
-# Usage: ./sync-to-welona.sh [--frontend] [--backend] [--config] [--all]
-# Default (no args): syncs all
+# Sync local welona changes to the DEV server and seed the database.
+# Usage: ./sync-to-dev.sh [--frontend] [--backend] [--all] [--reset-db]
+# Default (no args): syncs all + seeds
+#
+# --reset-db  wipes the dev DB before seeding (clean slate)
 
 SERVER_HOST="64.235.58.36"
 SERVER_USER="root"
 SERVER_PASS="CZDRdw7rxbEKxb8#f"
-SERVER_APP_DIR="/var/www/html/welona"
+SERVER_APP_DIR="/var/www/html/dev.welona"
+PM2_BACKEND="dev-welona-backend"
+PM2_FRONTEND="dev-welona-frontend"
 LOCAL_APP_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 SSH="sshpass -p '$SERVER_PASS' ssh -o StrictHostKeyChecking=no $SERVER_USER@$SERVER_HOST"
@@ -21,44 +25,31 @@ log()  { echo -e "${GREEN}[✔]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
 err()  { echo -e "${RED}[✘]${NC} $1"; exit 1; }
 
-# Parse args — default to all if none given
 SYNC_FRONTEND=false
 SYNC_BACKEND=false
-SYNC_CONFIG=false
-RUN_SEED=false
+RESET_DB=false
 
 if [[ $# -eq 0 ]]; then
   SYNC_FRONTEND=true
   SYNC_BACKEND=true
-  SYNC_CONFIG=true
 fi
 
 for arg in "$@"; do
   case $arg in
     --frontend) SYNC_FRONTEND=true ;;
     --backend)  SYNC_BACKEND=true  ;;
-    --config)   SYNC_CONFIG=true   ;;
-    --seed)     RUN_SEED=true      ;;
-    --all)      SYNC_FRONTEND=true; SYNC_BACKEND=true; SYNC_CONFIG=true ;;
-    *) err "Unknown option: $arg. Use --frontend, --backend, --config, --all, or --seed" ;;
+    --all)      SYNC_FRONTEND=true; SYNC_BACKEND=true ;;
+    --reset-db) RESET_DB=true ;;
+    *) err "Unknown option: $arg. Use --frontend, --backend, --all, --reset-db" ;;
   esac
 done
 
 echo ""
 echo "========================================"
-echo "   Welona Sync → $SERVER_HOST"
+echo "   Welona DEV Sync → $SERVER_HOST"
+echo "   Dir: $SERVER_APP_DIR"
 echo "========================================"
 echo ""
-
-# ── CONFIG ────────────────────────────────────────────────────────────────────
-if $SYNC_CONFIG; then
-  warn "Syncing nginx config..."
-  eval "$RSYNC $LOCAL_APP_DIR/deploy/nginx-welona.vabinformatics.com.conf \
-    $SERVER_USER@$SERVER_HOST:/etc/nginx/sites-available/welona.vabinformatics.com"
-
-  eval "$SSH 'nginx -t && systemctl reload nginx'"
-  log "Nginx config synced and reloaded"
-fi
 
 # ── BACKEND ───────────────────────────────────────────────────────────────────
 if $SYNC_BACKEND; then
@@ -78,25 +69,30 @@ if $SYNC_BACKEND; then
   eval "$SSH 'cd $SERVER_APP_DIR/shared && npm install --legacy-peer-deps'"
   eval "$SSH 'cd $SERVER_APP_DIR/backend && npm install --legacy-peer-deps'"
 
-  warn "Running Prisma migrations on server..."
-  eval "$SSH 'cd $SERVER_APP_DIR/backend && npx prisma db push'"
-  log "Prisma schema synced"
-
-  if $RUN_SEED; then
-    warn "Seeding database..."
-    eval "$SSH 'cd $SERVER_APP_DIR/backend && npm run db:seed-all'" \
-      || err "Seed failed"
-    log "Database seeded"
+  if $RESET_DB; then
+    warn "Resetting dev database (wipe + push schema)..."
+    eval "$SSH 'cd $SERVER_APP_DIR/backend && npx prisma db push --force-reset'"
+    log "Database wiped and schema applied"
+  else
+    warn "Pushing Prisma schema..."
+    eval "$SSH 'cd $SERVER_APP_DIR/backend && npx prisma db push'"
+    log "Prisma schema synced"
   fi
+
+  warn "Seeding dev database (categories, services, branches, employees, HR data, products)..."
+  eval "$SSH 'cd $SERVER_APP_DIR/backend && npm run db:seed-all'" \
+    || err "Seed failed — check server logs"
+  log "Database seeded"
 
   warn "Building backend on server..."
   eval "$SSH 'cd $SERVER_APP_DIR/backend && npm run build'" \
     || err "Backend build failed"
   log "Backend built successfully"
 
-  warn "Restarting welona-backend (PM2)..."
-  eval "$SSH 'pm2 restart welona-backend && pm2 save'"
-  log "welona-backend restarted"
+  warn "Restarting $PM2_BACKEND (PM2)..."
+  eval "$SSH 'pm2 restart $PM2_BACKEND && pm2 save'" \
+    || warn "PM2 process $PM2_BACKEND not found — start it manually with: pm2 start 'npm start' --name $PM2_BACKEND --cwd $SERVER_APP_DIR/backend"
+  log "$PM2_BACKEND restarted"
 fi
 
 # ── FRONTEND ──────────────────────────────────────────────────────────────────
@@ -128,13 +124,18 @@ if $SYNC_FRONTEND; then
   warn "Installing frontend dependencies on server..."
   eval "$SSH 'cd $SERVER_APP_DIR/frontend && npm install --legacy-peer-deps'"
 
-  warn "Restarting welona-frontend (PM2)..."
-  eval "$SSH 'pm2 restart welona-frontend && pm2 save'"
-  log "welona-frontend restarted"
+  warn "Restarting $PM2_FRONTEND (PM2)..."
+  eval "$SSH 'pm2 restart $PM2_FRONTEND && pm2 save'" \
+    || warn "PM2 process $PM2_FRONTEND not found — start it manually with: pm2 start 'npm start' --name $PM2_FRONTEND --cwd $SERVER_APP_DIR/frontend"
+  log "$PM2_FRONTEND restarted"
 fi
 
 echo ""
 echo "========================================"
-log "Sync complete! https://welona.vabinformatics.com"
+log "Dev sync complete! https://dev.welona.vabinformatics.com"
+echo ""
+echo "  Admin:  superadmin@welona.com  /  Welona@123"
+echo "  Staff:  admin@welona.com       /  Welona@123"
+echo "  Branch: rohit.sharma           /  welona@123"
 echo "========================================"
 echo ""
