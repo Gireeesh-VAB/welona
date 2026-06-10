@@ -428,8 +428,11 @@ export default function CustomerDetailPage() {
       if (row.id === id) {
         const updated = { ...row, [field]: value };
         if (field === 'category') {
-          updated.service = '';
-          updated.amount = 0;
+          const svc = (branchServices ?? []).find((s) => s.name === row.service);
+          if (svc && value && svc.categoryName !== value) {
+            updated.service = '';
+            updated.amount = 0;
+          }
         }
         if (field === 'service' && value) {
           const svc = (branchServices ?? []).find((s) => s.name === value);
@@ -3091,6 +3094,7 @@ export default function CustomerDetailPage() {
                           <thead>
                             <tr style={{ background: '#f5f5f5' }}>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', width: 52, color: '#e53935', fontWeight: 600 }}>&#x2193; S.No.</th>
+                              <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>&#x1F4C2; Category</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>&#x1F4CB; Service</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>Quantity</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>&#x20B9; Amount</th>
@@ -3105,7 +3109,7 @@ export default function CustomerDetailPage() {
                           <tbody>
                             {bookingRows.length === 0 ? (
                               <tr>
-                                <td colSpan={7} style={{ padding: 20, textAlign: 'center', color: colors.text.secondary, borderTop: `1px solid ${colors.border}` }}>
+                                <td colSpan={8} style={{ padding: 20, textAlign: 'center', color: colors.text.secondary, borderTop: `1px solid ${colors.border}` }}>
                                   No rows added. Click the button below to add a service.
                                 </td>
                               </tr>
@@ -3121,7 +3125,25 @@ export default function CustomerDetailPage() {
                                       fontWeight: 700, fontSize: 12,
                                     }}>{idx + 1}</div>
                                   </td>
-                                  {/* Service — shows all services directly */}
+                                  {/* Category */}
+                                  <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
+                                    {(() => {
+                                      const cats = [...new Map((branchServices ?? []).filter(s => s.categoryName).map(s => [s.categoryId, s.categoryName])).entries()];
+                                      return (
+                                        <select
+                                          value={row.category}
+                                          onChange={(e) => handleRowChange(row.id, 'category', e.target.value)}
+                                          style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, fontSize: 12 }}
+                                        >
+                                          <option value="">All Categories</option>
+                                          {cats.map(([catId, catName]) => (
+                                            <option key={catId} value={catName ?? ''}>{catName}</option>
+                                          ))}
+                                        </select>
+                                      );
+                                    })()}
+                                  </td>
+                                  {/* Service — filtered by selected category */}
                                   <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
                                     <select
                                       value={row.service}
@@ -3129,9 +3151,11 @@ export default function CustomerDetailPage() {
                                       style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, fontSize: 12 }}
                                     >
                                       <option value="">Select Service</option>
-                                      {(branchServices ?? []).map((svc) => (
-                                        <option key={svc.id} value={svc.name}>{svc.name}</option>
-                                      ))}
+                                      {(branchServices ?? [])
+                                        .filter(svc => !row.category || svc.categoryName === row.category)
+                                        .map((svc) => (
+                                          <option key={svc.id} value={svc.name}>{svc.name}</option>
+                                        ))}
                                     </select>
                                   </td>
                                   {/* Quantity */}

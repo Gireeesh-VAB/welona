@@ -50,6 +50,11 @@ export default function BookingsTab({ customerId }: { customerId: string }) {
       dataIndex: 'serviceName',
       render: (name: string, row) => (
         <div>
+          {row.categoryName && (
+            <Text type="secondary" style={{ fontSize: 11 }}>
+              {row.categoryName}
+            </Text>
+          )}
           <div style={{ fontWeight: 600 }}>{name}</div>
           {row.number ? (
             <Text type="secondary" style={{ fontSize: 12 }}>

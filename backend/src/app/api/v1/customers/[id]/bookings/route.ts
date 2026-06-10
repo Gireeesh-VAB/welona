@@ -44,6 +44,7 @@ export const GET = route<Ctx>(async (req, { params }) => {
       scheduledAt: b.scheduledAt.toISOString(),
       createdAt: b.createdAt.toISOString(),
       serviceName: b.serviceName,
+      categoryName: b.items[0]?.category ?? null,
       totalAmount: b.totalAmount,
       discount: b.discount,
       roundOff: b.roundOff,
