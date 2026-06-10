@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
 import { ok, created, buildMeta } from '@/lib/api/response';
@@ -92,12 +93,32 @@ export const POST = route(async (req) => {
           phone: body.phone ?? null,
           email: body.email ?? null,
           ipAddress: body.ipAddress ?? null,
+          loginPassword: body.loginPassword ?? null,
           zoneId: body.zoneId,
           parentBranchId: body.parentBranchId ?? null,
           isActive: body.isActive ?? true,
           createdByAdminId: claims.sub,
         },
       });
+
+      // Auto-create a SystemUser login account for the branch if a password was given.
+      if (body.loginPassword) {
+        const passwordHash = await bcrypt.hash(body.loginPassword, 10);
+        const userName = body.branchCode.toLowerCase();
+        const existing = await tx.systemUser.findUnique({ where: { userName } });
+        if (!existing) {
+          await tx.systemUser.create({
+            data: {
+              userName,
+              email: body.email ?? null,
+              passwordHash,
+              branchId: created.id,
+              isActive: true,
+              createdByAdminId: claims.sub,
+            },
+          });
+        }
+      }
 
       if (normalisedAddresses.length > 0) {
         await tx.branchAddress.createMany({

@@ -35,6 +35,8 @@ import {
   DeleteOutlined,
   EditOutlined,
   EnvironmentOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
   PlusOutlined,
   SearchOutlined,
   StarFilled,
@@ -131,6 +133,7 @@ interface BranchFormValues {
   phone?: string;
   email?: string;
   ipAddress?: string;
+  loginPassword?: string;
   isActive: boolean;
   additionalAddresses?: AdditionalAddressFormValues[];
 }
@@ -155,6 +158,24 @@ function formatDate(iso: string): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+function PasswordCell({ password }: { password: string }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+      <Text code style={{ fontSize: 11, letterSpacing: visible ? 0 : 2 }}>
+        {visible ? password : '••••••••'}
+      </Text>
+      <Button
+        type="text"
+        size="small"
+        icon={visible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+        onClick={(e) => { e.stopPropagation(); setVisible((v) => !v); }}
+        style={{ padding: 0, height: 16, width: 16, minWidth: 16, color: '#888' }}
+      />
+    </div>
+  );
 }
 
 export default function AdminMasterBranchesPage() {
@@ -285,6 +306,7 @@ export default function AdminMasterBranchesPage() {
       phone: branch.phone ?? undefined,
       email: branch.email ?? undefined,
       ipAddress: branch.ipAddress ?? undefined,
+      loginPassword: undefined,
       isActive: branch.isActive,
       additionalAddresses: branch.additionalAddresses.map((a) => ({
         id: a.id,
@@ -491,6 +513,7 @@ export default function AdminMasterBranchesPage() {
       phone: values.phone?.trim() ? values.phone.trim() : undefined,
       email: values.email?.trim() ? values.email.trim() : undefined,
       ipAddress: values.ipAddress?.trim() ? values.ipAddress.trim() : undefined,
+      loginPassword: values.loginPassword?.trim() ? values.loginPassword.trim() : undefined,
       isActive: values.isActive,
       additionalAddresses: cleanedAdditional.length > 0 ? cleanedAdditional : undefined,
     };
@@ -703,6 +726,20 @@ export default function AdminMasterBranchesPage() {
         width: 140,
         render: (value: string | null) =>
           value ? <Text code style={{ fontSize: 12 }}>{value}</Text> : emptyCell,
+      },
+      {
+        title: 'Login',
+        key: 'login',
+        width: 180,
+        render: (_, branch) => {
+          if (!branch.loginPassword) return emptyCell;
+          return (
+            <div style={{ lineHeight: 1.3 }}>
+              <Text code style={{ fontSize: 11 }}>{branch.branchCode.toLowerCase()}</Text>
+              <PasswordCell password={branch.loginPassword} />
+            </div>
+          );
+        },
       },
       {
         title: 'Addresses',
@@ -1135,6 +1172,21 @@ export default function AdminMasterBranchesPage() {
             ]}
           >
             <Input placeholder="e.g. 192.168.1.10" />
+          </Form.Item>
+
+          <Form.Item
+            label={editing ? 'Login Password (leave blank to keep existing)' : 'Login Password'}
+            name="loginPassword"
+            tooltip="Branch login password. Sets the username to the branch code (lowercase). Min 6 characters."
+            rules={[
+              { min: 6, message: 'Password must be at least 6 characters' },
+            ]}
+          >
+            <Input.Password
+              placeholder={editing ? 'Enter new password to change' : 'e.g. Welona@123'}
+              maxLength={100}
+              autoComplete="new-password"
+            />
           </Form.Item>
 
           <Form.Item

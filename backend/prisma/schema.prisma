@@ -50,6 +50,7 @@ model Branch {
   phone            String?
   email            String?
   ipAddress        String?
+  loginPassword    String?
   zoneId           String?
   zone             Zone?         @relation(fields: [zoneId], references: [id])
   /// Self-referential hierarchy: the branch this one sits under (Head Office ->

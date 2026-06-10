@@ -58,6 +58,7 @@ export function toAdminBranch(branch: BranchWithAdminRelations): AdminBranch {
     phone: branch.phone,
     email: branch.email,
     ipAddress: branch.ipAddress,
+    loginPassword: branch.loginPassword ?? null,
     isActive: branch.isActive,
     zone: branch.zone
       ? { id: branch.zone.id, country: branch.zone.country, stateName: branch.zone.stateName }
