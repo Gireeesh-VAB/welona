@@ -12,9 +12,22 @@ export interface Booking {
   categoryName: string | null;
   scheduledAt: string;
   status: string;
+  totalAmount: number;
+  discount: number;
+  roundOff: number;
   netAmount: number;
+  paidAmount: number;
   notes: string | null;
   createdAt: string;
+  gstRateId: string | null;
+  taxableAmt: number;
+  cgstPct: number;
+  cgstAmt: number;
+  sgstPct: number;
+  sgstAmt: number;
+  igstPct: number;
+  igstAmt: number;
+  taxType: string | null;
 }
 
 /** A service appointment in the calendar (a Booking with its customer name). */
@@ -61,6 +74,7 @@ export interface BookingDetail {
 export interface Package {
   id: string;
   customerId: string;
+  branchId: string | null;
   treatmentId: string | null;
   name: string;
   totalSessions: number;
@@ -71,6 +85,49 @@ export interface Package {
   status: string;
   notes: string | null;
   createdAt: string;
+}
+
+/** Package enriched with customer + branch data — returned by the sessions list endpoint. */
+export interface PackageSession {
+  id: string;
+  orgId: string;
+  customerId: string;
+  customerName: string;
+  customerPhone: string | null;
+  branchId: string | null;
+  branchName: string | null;
+  name: string;
+  totalSessions: number;
+  usedSessions: number;
+  remainingSessions: number;
+  price: number;
+  purchasedAt: string;
+  expiresAt: string | null;
+  status: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+/** Individual session history entry within a package. */
+export interface SessionEntry {
+  id: string;
+  packageId: string;
+  bookingId: string | null;
+  sessionNumber: number;
+  sessionDate: string;
+  staffName: string | null;
+  status: string;
+  remarks: string | null;
+  createdAt: string;
+}
+
+/** Aggregate stats for the Session Management dashboard. */
+export interface SessionStats {
+  activePackages: number;
+  totalSessions: number;
+  completedSessions: number;
+  remainingSessions: number;
+  todaySessions: number;
 }
 
 export interface Offer {

@@ -1,29 +1,13 @@
 import { z } from 'zod';
 
-const optionalText = (max: number) =>
-  z.string().trim().max(max).optional().or(z.literal('').transform(() => undefined));
-
-// ---------------------------------------------------------------------------
-// Assignment (product + quantity)
-// ---------------------------------------------------------------------------
-
-export const complimentaryAssignmentSchema = z.object({
-  productId: z.string().trim().min(1, 'Product is required'),
-  quantity: z.coerce.number().int().min(1, 'Quantity must be at least 1').default(1),
-});
-
-// ---------------------------------------------------------------------------
-// Rule CRUD
-// ---------------------------------------------------------------------------
+// ── Service Assignment Rule ──────────────────────────────────────────────────
 
 export const adminComplimentaryRuleCreateSchema = z.object({
-  name: z.string().trim().min(1, 'Rule name is required').max(120),
-  description: optionalText(500),
-  triggerServiceId: z.string().trim().min(1, 'Trigger service is required'),
+  name: z.string().trim().max(120).optional().or(z.literal('').transform(() => undefined)),
+  categoryId: z.string().trim().min(1, 'Category is required'),
+  serviceIds: z.array(z.string().trim().min(1)).min(1, 'Select at least one service'),
+  branchIds: z.array(z.string().trim().min(1)).min(1, 'Assign to at least one branch'),
   isActive: z.boolean().default(true),
-  assignments: z
-    .array(complimentaryAssignmentSchema)
-    .min(1, 'At least one complimentary product is required'),
 });
 
 export const adminComplimentaryRuleUpdateSchema =
@@ -31,18 +15,29 @@ export const adminComplimentaryRuleUpdateSchema =
 
 export const adminComplimentaryRuleListQuerySchema = z.object({
   search: z.string().trim().optional(),
-  triggerServiceId: z.string().optional(),
+  categoryId: z.string().optional(),
+  branchId: z.string().optional(),
   isActive: z.coerce.boolean().optional(),
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(200).default(20),
+  limit: z.coerce.number().int().positive().max(500).default(20),
 });
 
-export type AdminComplimentaryRuleCreateInput = z.infer<
-  typeof adminComplimentaryRuleCreateSchema
->;
-export type AdminComplimentaryRuleUpdateInput = z.infer<
-  typeof adminComplimentaryRuleUpdateSchema
->;
-export type AdminComplimentaryRuleListQuery = z.infer<
-  typeof adminComplimentaryRuleListQuerySchema
->;
+export type AdminComplimentaryRuleCreateInput = z.infer<typeof adminComplimentaryRuleCreateSchema>;
+export type AdminComplimentaryRuleUpdateInput = z.infer<typeof adminComplimentaryRuleUpdateSchema>;
+export type AdminComplimentaryRuleListQuery = z.infer<typeof adminComplimentaryRuleListQuerySchema>;
+
+// ── Branch Complimentary Limit ───────────────────────────────────────────────
+
+export const adminBranchComplimentaryLimitUpsertSchema = z.object({
+  branchId: z.string().trim().min(1, 'Branch is required'),
+  percentage: z.coerce.number().int().min(0).max(100),
+  isActive: z.boolean().default(true),
+});
+
+export const adminBranchComplimentaryLimitUpdateSchema = z.object({
+  percentage: z.coerce.number().int().min(0).max(100).optional(),
+  isActive: z.boolean().optional(),
+});
+
+export type AdminBranchComplimentaryLimitUpsertInput = z.infer<typeof adminBranchComplimentaryLimitUpsertSchema>;
+export type AdminBranchComplimentaryLimitUpdateInput = z.infer<typeof adminBranchComplimentaryLimitUpdateSchema>;

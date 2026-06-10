@@ -30,6 +30,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
         ...(body.minPrice !== undefined && { minPrice: body.minPrice }),
         ...(body.maxPrice !== undefined && { maxPrice: body.maxPrice }),
         ...(body.taxPercent !== undefined && { taxPercent: body.taxPercent }),
+        ...(body.taxType !== undefined && { taxType: body.taxType }),
         ...(body.hasMeasurements !== undefined && { hasMeasurements: body.hasMeasurements }),
         ...(body.hasComplementary !== undefined && { hasComplementary: body.hasComplementary }),
         ...(body.isActive !== undefined && { isActive: body.isActive }),

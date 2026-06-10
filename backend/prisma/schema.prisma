@@ -53,6 +53,8 @@ model Branch {
   loginPassword    String?
   zoneId           String?
   zone             Zone?         @relation(fields: [zoneId], references: [id])
+  stateId          String?
+  state            State?        @relation(fields: [stateId], references: [id])
   /// Self-referential hierarchy: the branch this one sits under (Head Office ->
   /// Region -> Outlet). Null for top-level branches. Cycle prevention is
   /// enforced in the route handlers, not the DB.
@@ -86,12 +88,40 @@ model Branch {
   goodsReceipts    GoodsReceipt[]
   transfersOut     StockTransfer[] @relation("TransferFrom")
   transfersIn      StockTransfer[] @relation("TransferTo")
-  warehouses       Warehouse[]
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  warehouses               Warehouse[]
+  complimentaryBranches    ComplimentaryServiceBranch[]
+  complimentaryLimit       BranchComplimentaryLimit?
+  couponBranches           CouponBranch[]
+  packages                 Package[]
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
 
   @@unique([orgId, code])
   @@index([parentBranchId])
+}
+
+/// An Indian state used for GST intra/inter-state determination.
+model State {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  code      String     @unique
+  isActive  Boolean    @default(true)
+  branches  Branch[]
+  customers Customer[]
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+}
+
+/// Tax Master — configurable GST slabs with inclusive/exclusive type.
+model GstRate {
+  id         String    @id @default(cuid())
+  name       String    // e.g. "GST 18%"
+  percentage Int       // whole percent: 5, 12, 18, 28
+  taxType    String    @default("exclusive") // "inclusive" | "exclusive"
+  isActive   Boolean   @default(true)
+  bookings   Booking[]
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 }
 
 /// An RBAC role (section 7.3). `permissions` is a JSON array of
@@ -212,13 +242,14 @@ model AdminUser {
   approvedLeaveApplications LeaveApplication[] @relation("LeaveApprovedBy")
   createdHolidays      Holiday[]
   createdProducts            Product[]
-  createdComplimentaryRules  ComplimentaryRule[]
+  createdComplimentaryRules  ComplimentaryServiceRule[]
   createdInventoryMovements  InventoryMovement[]
   createdSuppliers     Supplier[]
   createdPurchaseOrders PurchaseOrder[]
   createdGoodsReceipts GoodsReceipt[]
   createdStockTransfers StockTransfer[]
   createdWarehouses    Warehouse[]
+  createdCoupons       Coupon[]
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 }
@@ -609,10 +640,11 @@ model Category {
   targetWeightBased     Boolean              @default(false)
   hasMeasurement        Boolean              @default(false)
   // --- Relations ---
-  services              Service[]
-  products              Product[]
-  marketingOfferItems   MarketingOfferItem[]
-  branchCategories      BranchCategory[]
+  services                  Service[]
+  products                  Product[]
+  marketingOfferItems        MarketingOfferItem[]
+  branchCategories           BranchCategory[]
+  complimentaryRules         ComplimentaryServiceRule[]
   createdByAdminId      String?
   createdByAdmin        AdminUser?           @relation(fields: [createdByAdminId], references: [id])
   createdAt             DateTime             @default(now())
@@ -632,6 +664,7 @@ model Service {
   minPrice          Int         @default(0) // minor units
   maxPrice          Int         @default(0) // minor units
   taxPercent        Int         @default(0) // whole percent, 0..100
+  taxType           String      @default("exclusive") // "inclusive" | "exclusive"
   hasMeasurements   Boolean     @default(false)
   hasComplementary  Boolean     @default(false)
   isActive          Boolean     @default(true)
@@ -639,7 +672,7 @@ model Service {
   createdByAdmin       AdminUser?           @relation(fields: [createdByAdminId], references: [id])
   marketingOfferItems    MarketingOfferItem[]
   branchServices         BranchService[]
-  complimentaryRules     ComplimentaryRule[]
+  complimentaryItems     ComplimentaryServiceItem[]
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
 
@@ -727,6 +760,8 @@ model Customer {
   gstin       String?
   address     String?
   city        String?
+  stateId     String?
+  state       State?   @relation(fields: [stateId], references: [id])
   notes       String?
   avatarUrl   String? // profile photo (data URL)
   tags        String       @default("[]") // JSON string: string[]
@@ -1042,7 +1077,18 @@ model Booking {
   netAmount         Int           @default(0) // minor units
   paidAmount        Int           @default(0) // minor units — cumulative payments recorded
   notes             String?
+  gstRateId    String?
+  gstRate      GstRate?  @relation(fields: [gstRateId], references: [id])
+  taxableAmt   Int       @default(0) // paise — base before tax
+  cgstPct      Int       @default(0) // basis points e.g. 900 = 9%
+  cgstAmt      Int       @default(0) // paise
+  sgstPct      Int       @default(0)
+  sgstAmt      Int       @default(0)
+  igstPct      Int       @default(0)
+  igstAmt      Int       @default(0)
+  taxType      String?   // "inclusive" | "exclusive"
   items             BookingItem[]
+  sessionEntries    SessionEntry[]
   createdById       String?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
@@ -1072,6 +1118,8 @@ model Package {
   orgId         String
   customerId    String
   customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  branchId      String?
+  branch        Branch?   @relation(fields: [branchId], references: [id])
   treatmentId   String? // optional link to a Treatment (not enforced)
   name          String
   totalSessions Int
@@ -1084,9 +1132,32 @@ model Package {
   createdById   String?
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
+  sessionEntries SessionEntry[]
 
   @@index([orgId])
   @@index([customerId])
+  @@index([branchId])
+}
+
+/// Individual session log entry for a package.
+model SessionEntry {
+  id            String    @id @default(cuid())
+  orgId         String
+  packageId     String
+  package       Package   @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  bookingId     String?
+  booking       Booking?  @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  sessionNumber Int
+  sessionDate   DateTime
+  staffName     String?
+  status        String    // 'completed' | 'no_show' | 'cancelled' | 'rescheduled'
+  remarks       String?
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  @@index([packageId])
+  @@index([orgId])
 }
 
 /// A customer-specific promotional offer.
@@ -1594,7 +1665,8 @@ model Product {
   mrp              Int      @default(0) // paise
   salePrice        Int      @default(0) // paise
   purchasePrice    Int      @default(0) // paise
-  taxPercent       Int      @default(0) // e.g. 1800 = 18%
+  taxPercent       Int      @default(0) // basis points: 1800 = 18%
+  taxType          String   @default("exclusive") // "inclusive" | "exclusive"
   reorderLevel     Int      @default(0) // units — drives the low-stock flag
   /// Product photo — a data URL (no upload backend) or an external image URL.
   imageUrl         String?
@@ -1602,6 +1674,7 @@ model Product {
   trackBatches     Boolean  @default(false)
   /// When true, batches carry an expiry date (drives expiry alerts).
   trackExpiry      Boolean  @default(false)
+  hasComplementary Boolean  @default(false)
   isActive         Boolean  @default(true)
   ipAddress        String?
   createdByAdminId String?
@@ -1613,7 +1686,6 @@ model Product {
   goodsReceiptItems  GoodsReceiptItem[]
   stockTransferItems StockTransferItem[]
   batches                    ProductBatch[]
-  complimentaryAssignments   ComplimentaryProductAssignment[]
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 
@@ -1878,39 +1950,111 @@ model Holiday {
 // Complimentary Product Rules
 // =============================================================================
 
-/// A rule that grants complimentary products when a specific service is booked.
-/// Each rule has a trigger service and a list of products to give for free.
-model ComplimentaryRule {
+// =============================================================================
+// Complimentary Service Rules
+// =============================================================================
+
+/// Admin-configured rule: a set of services from one category that branches
+/// can offer as complimentary during billing, subject to a value cap.
+/// valueType = "percentage" → cap = (bill total × valueLimit) / 100
+/// valueType = "fixed"      → cap = valueLimit paise (absolute ceiling)
+model ComplimentaryServiceRule {
   id               String   @id @default(cuid())
   orgId            String
-  name             String
-  description      String?
-  /// The service that triggers this rule.
-  triggerServiceId String
-  triggerService   Service  @relation(fields: [triggerServiceId], references: [id])
+  name             String?
+  categoryId       String
+  category         Category @relation(fields: [categoryId], references: [id])
+  /// "percentage" or "fixed"
+  valueType        String   @default("percentage")
+  /// percentage: 0-100  |  fixed: paise
+  valueLimit       Int      @default(0)
   isActive         Boolean  @default(true)
   createdByAdminId String?
   createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
-  assignments      ComplimentaryProductAssignment[]
+  services         ComplimentaryServiceItem[]
+  branches         ComplimentaryServiceBranch[]
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
   @@index([orgId])
-  @@index([triggerServiceId])
+  @@index([categoryId])
   @@index([isActive])
 }
 
-/// A product (with quantity) assigned as complimentary under a `ComplimentaryRule`.
-model ComplimentaryProductAssignment {
-  id        String            @id @default(cuid())
+/// A service included in a ComplimentaryServiceRule.
+model ComplimentaryServiceItem {
+  id        String                  @id @default(cuid())
   ruleId    String
-  rule      ComplimentaryRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product           @relation(fields: [productId], references: [id])
-  quantity  Int               @default(1)
-  createdAt DateTime          @default(now())
-  updatedAt DateTime          @updatedAt
+  rule      ComplimentaryServiceRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  serviceId String
+  service   Service                  @relation(fields: [serviceId], references: [id])
+  createdAt DateTime                @default(now())
 
-  @@unique([ruleId, productId])
-  @@index([productId])
+  @@unique([ruleId, serviceId])
+  @@index([serviceId])
+}
+
+/// Discount coupon created by admin — percentage or fixed-amount, optionally branch-scoped.
+model Coupon {
+  id               String         @id @default(cuid())
+  orgId            String
+  couponName       String
+  couponCode       String
+  couponType       String         // 'percentage' | 'fixed'
+  couponValue      Int            // integer % (1–100) for percentage; paise for fixed
+  startDate        DateTime
+  endDate          DateTime
+  isActive         Boolean        @default(true)
+  allBranches      Boolean        @default(false)
+  createdByAdminId String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  createdBy AdminUser?     @relation(fields: [createdByAdminId], references: [id])
+  branches  CouponBranch[]
+
+  @@unique([orgId, couponCode])
+  @@index([orgId, isActive])
+}
+
+
+/// Branch assignment for a coupon (many-to-many join table).
+model CouponBranch {
+  id       String @id @default(cuid())
+  couponId String
+  branchId String
+
+  coupon Coupon @relation(fields: [couponId], references: [id], onDelete: Cascade)
+  branch Branch @relation(fields: [branchId], references: [id])
+
+  @@unique([couponId, branchId])
+  @@index([branchId])
+}
+
+/// Admin-configured complimentary percentage for a branch.
+/// The branch can give services as complimentary up to (billTotal × percentage / 100).
+model BranchComplimentaryLimit {
+  id         String   @id @default(cuid())
+  orgId      String
+  branchId   String   @unique
+  branch     Branch   @relation(fields: [branchId], references: [id])
+  percentage Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([orgId])
+}
+
+/// A branch to which a ComplimentaryServiceRule is assigned.
+model ComplimentaryServiceBranch {
+  id        String                  @id @default(cuid())
+  ruleId    String
+  rule      ComplimentaryServiceRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  branchId  String
+  branch    Branch                   @relation(fields: [branchId], references: [id])
+  createdAt DateTime                @default(now())
+
+  @@unique([ruleId, branchId])
+  @@index([branchId])
 }

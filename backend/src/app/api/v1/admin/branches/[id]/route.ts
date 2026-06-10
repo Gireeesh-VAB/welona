@@ -48,6 +48,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
           ...(body.email !== undefined && { email: body.email ?? null }),
           ...(body.ipAddress !== undefined && { ipAddress: body.ipAddress ?? null }),
           ...(body.loginPassword !== undefined && { loginPassword: body.loginPassword ?? null }),
+          ...(body.stateId !== undefined && { stateId: body.stateId ?? null }),
           ...(body.isActive !== undefined && { isActive: body.isActive }),
         },
         include: branchAdminInclude,

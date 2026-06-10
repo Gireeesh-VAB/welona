@@ -144,6 +144,10 @@ export type PackageStatus = (typeof PACKAGE_STATUSES)[number];
 export const OFFER_STATUSES = ['active', 'redeemed', 'expired', 'cancelled'] as const;
 export type OfferStatus = (typeof OFFER_STATUSES)[number];
 
+/** Individual session entry status within a package. */
+export const SESSION_STATUSES = ['completed', 'no_show', 'cancelled', 'rescheduled'] as const;
+export type SessionStatus = (typeof SESSION_STATUSES)[number];
+
 /** How an offer's discount is expressed. */
 export const DISCOUNT_TYPES = ['percent', 'flat'] as const;
 export type DiscountType = (typeof DISCOUNT_TYPES)[number];

@@ -11,6 +11,7 @@ export const adminBranchCatalogSchema = z.object({
   paymentModeIds: z.array(z.string().min(1)).default([]),
   categoryIds: z.array(z.string().min(1)).default([]),
   ledgerIds: z.array(z.string().min(1)).default([]),
+  complimentaryRuleIds: z.array(z.string().min(1)).default([]),
 });
 
 export type AdminBranchCatalogInput = z.infer<typeof adminBranchCatalogSchema>;

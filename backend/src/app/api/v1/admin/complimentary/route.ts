@@ -21,32 +21,32 @@ async function resolveOrgId(): Promise<string> {
 
 export const GET = route(async (req) => {
   requireAdminAuth(req);
-  const { search, triggerServiceId, isActive, page, limit } = parseQuery(
+  const { search, categoryId, branchId, isActive, page, limit } = parseQuery(
     req,
     adminComplimentaryRuleListQuerySchema,
   );
 
-  const where: Prisma.ComplimentaryRuleWhereInput = {
-    ...(triggerServiceId && { triggerServiceId }),
+  const where: Prisma.ComplimentaryServiceRuleWhereInput = {
+    ...(categoryId && { categoryId }),
     ...(isActive !== undefined && { isActive }),
+    ...(branchId && { branches: { some: { branchId } } }),
     ...(search && {
       OR: [
         { name: { contains: search } },
-        { description: { contains: search } },
-        { triggerService: { name: { contains: search } } },
+        { category: { name: { contains: search } } },
       ],
     }),
   };
 
   const [items, total] = await Promise.all([
-    db.complimentaryRule.findMany({
+    db.complimentaryServiceRule.findMany({
       where,
       include: complimentaryRuleInclude,
       orderBy: [{ createdAt: 'desc' }],
       skip: (page - 1) * limit,
       take: limit,
     }),
-    db.complimentaryRule.count({ where }),
+    db.complimentaryServiceRule.count({ where }),
   ]);
 
   return ok(items.map(toAdminComplimentaryRule), buildMeta(page, limit, total));
@@ -57,34 +57,24 @@ export const POST = route(async (req) => {
   const body = await parseBody(req, adminComplimentaryRuleCreateSchema);
   const orgId = await resolveOrgId();
 
-  const service = await db.service.findUnique({ where: { id: body.triggerServiceId } });
-  if (!service) throw Errors.badRequest('Selected service no longer exists.');
-
-  const productIds = body.assignments.map((a) => a.productId);
-  const productCount = await db.product.count({ where: { id: { in: productIds } } });
-  if (productCount !== productIds.length) {
-    throw Errors.badRequest('One or more selected products no longer exist.');
-  }
+  const category = await db.category.findUnique({ where: { id: body.categoryId } });
+  if (!category) throw Errors.badRequest('Selected category no longer exists.');
 
   const rule = await db.$transaction(async (tx) => {
-    const created = await tx.complimentaryRule.create({
+    return tx.complimentaryServiceRule.create({
       data: {
         orgId,
         name: body.name,
-        description: body.description ?? null,
-        triggerServiceId: body.triggerServiceId,
+        categoryId: body.categoryId,
+        valueType: 'percentage',
+        valueLimit: 0,
         isActive: body.isActive,
         createdByAdminId: claims.sub,
-        assignments: {
-          create: body.assignments.map((a) => ({
-            productId: a.productId,
-            quantity: a.quantity,
-          })),
-        },
+        services: { create: body.serviceIds.map((serviceId) => ({ serviceId })) },
+        branches: { create: body.branchIds.map((branchId) => ({ branchId })) },
       },
       include: complimentaryRuleInclude,
     });
-    return created;
   });
 
   return created(toAdminComplimentaryRule(rule));

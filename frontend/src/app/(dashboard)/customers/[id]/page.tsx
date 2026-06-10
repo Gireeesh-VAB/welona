@@ -33,7 +33,8 @@ import {
 } from '@ant-design/icons';
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useCustomers, useCustomer, useCustomerSales, useCustomerFollowUps, useCreateCustomer } from '@/hooks/useSales';
-import { useBranchServices, useBranchEmployees } from '@/hooks/useBranchPortal';
+import { useBranchServices, useBranchEmployees, useBranchComplimentaryConfig, useLookupCoupon } from '@/hooks/useBranchPortal';
+import type { CouponLookupResult } from '@/hooks/useBranchPortal';
 import { useCreateAppointment } from '@/hooks/useAppointments';
 import { ApiClientError } from '@/lib/api-client';
 import {
@@ -74,7 +75,10 @@ export default function CustomerDetailPage() {
   const [packageOfferStep, setPackageOfferStep] = useState<1 | 2 | 3 | 4>(1);
   const [savedBookingId, setSavedBookingId] = useState<string | null>(null);
   const [savedNetAmountPaise, setSavedNetAmountPaise] = useState<number>(0);
-  const [bookingRows, setBookingRows] = useState<any[]>([{ id: 1, category: '', service: '', quantity: 1, amount: 0, complementary: false }]);
+  const [bookingRows, setBookingRows] = useState<any[]>([{ id: 1, category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive' }]);
+  const [complimentaryRows, setComplimentaryRows] = useState<any[]>([]);
+  const [couponInput, setCouponInput] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<(CouponLookupResult & { discountPaise: number }) | null>(null);
   const [bookingData, setBookingData] = useState<any>({
     bookingDate: new Date().toISOString().split('T')[0],
     bookingId: `BK-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -113,7 +117,10 @@ export default function CustomerDetailPage() {
       setPackageOfferStep(1);
       setSavedBookingId(null);
       setSavedNetAmountPaise(0);
-      setBookingRows([{ id: Date.now(), category: '', service: '', quantity: 1, amount: 0, complementary: false }]);
+      setBookingRows([{ id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive' }]);
+      setComplimentaryRows([]);
+      setCouponInput('');
+      setAppliedCoupon(null);
       setBookingData({
         bookingDate: new Date().toISOString().split('T')[0],
         bookingId: `BK-${Math.floor(100000 + Math.random() * 900000)}`,
@@ -177,6 +184,10 @@ export default function CustomerDetailPage() {
 
   // Branch-assigned services (admin-assigned) drive the booking service picker.
   const { data: branchServices, isLoading: branchServicesLoading } = useBranchServices();
+  const { data: complimentaryConfig } = useBranchComplimentaryConfig();
+  const branchPercentage = complimentaryConfig?.branchPercentage ?? null;
+  const limitIsActive = complimentaryConfig?.limitIsActive ?? false;
+  const lookupCoupon = useLookupCoupon();
   const createBooking = useCreateAppointment();
   // Branch employees — used to populate the prescription "Doctor" dropdown.
   const { data: branchStaff, isLoading: branchStaffLoading } = useBranchEmployees();
@@ -327,7 +338,75 @@ export default function CustomerDetailPage() {
   const netTotal = subtotal - discountAmount;
 
   const handleAddRow = () => {
-    setBookingRows([...bookingRows, { id: Date.now(), category: '', service: '', quantity: 1, amount: 0, complementary: false }]);
+    setBookingRows([...bookingRows, { id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive' }]);
+  };
+
+  const handleAddComplementaryRow = () => {
+    setComplimentaryRows([...complimentaryRows, { id: Date.now(), service: '', quantity: 1, amount: 0 }]);
+  };
+
+  const handleRemoveComplementaryRow = (id: number) => {
+    setComplimentaryRows(complimentaryRows.filter(r => r.id !== id));
+  };
+
+  const handleComplementaryRowChange = (id: number, field: string, value: any) => {
+    if (field === 'service' && value) {
+      const svc = (branchServices ?? []).find(s => s.name === value);
+      const paidTotal = bookingRows.filter(r => r.service).reduce((s, r) => s + r.quantity * r.amount, 0);
+      const newAmount = svc ? svc.minPrice / 100 : 0;
+      const currentComp = complimentaryRows
+        .filter(r => r.id !== id)
+        .reduce((s, r) => s + r.quantity * r.amount, 0);
+      if (branchPercentage !== null && limitIsActive && branchPercentage > 0) {
+        const maxAllowed = (paidTotal * branchPercentage) / 100;
+        if (currentComp + newAmount > maxAllowed) {
+          const fmt = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+          message.error(`Complimentary limit exceeded. Max allowed: ₹${fmt(maxAllowed)} (${branchPercentage}% of ₹${fmt(paidTotal)}).`);
+          return;
+        }
+      }
+      setComplimentaryRows(complimentaryRows.map(r =>
+        r.id === id ? { ...r, service: value, amount: newAmount } : r
+      ));
+      return;
+    }
+    if (field === 'quantity') {
+      const row = complimentaryRows.find(r => r.id === id);
+      const newQty = Number(value) || 1;
+      const paidTotal = bookingRows.filter(r => r.service).reduce((s, r) => s + r.quantity * r.amount, 0);
+      const currentComp = complimentaryRows
+        .filter(r => r.id !== id)
+        .reduce((s, r) => s + r.quantity * r.amount, 0);
+      const thisAmt = (row?.amount ?? 0) * newQty;
+      if (branchPercentage !== null && limitIsActive && branchPercentage > 0) {
+        const maxAllowed = (paidTotal * branchPercentage) / 100;
+        if (currentComp + thisAmt > maxAllowed) {
+          const fmt = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+          message.error(`Complimentary limit exceeded. Max allowed: ₹${fmt(maxAllowed)} (${branchPercentage}% of ₹${fmt(paidTotal)}).`);
+          return;
+        }
+      }
+    }
+    setComplimentaryRows(complimentaryRows.map(r =>
+      r.id === id ? { ...r, [field]: value } : r
+    ));
+  };
+
+  const handleApplyCoupon = async () => {
+    try {
+      const result = await lookupCoupon.mutateAsync(couponInput.trim());
+      const paidSubtotalPaise = bookingRows
+        .filter((r) => r.service)
+        .reduce((s, r) => s + Math.round(r.quantity * r.amount * 100), 0);
+      const discountPaise =
+        result.couponType === 'percentage'
+          ? Math.round(paidSubtotalPaise * result.couponValue / 100)
+          : result.couponValue;
+      setAppliedCoupon({ ...result, discountPaise });
+      message.success(`Coupon "${result.couponName}" applied`);
+    } catch (err) {
+      message.error(err instanceof ApiClientError ? err.message : 'Invalid or Expired Coupon');
+    }
   };
 
   const handleRemoveRow = (id: number) => {
@@ -343,16 +422,25 @@ export default function CustomerDetailPage() {
 
     try {
       // Build the booking line items. Amounts are entered in rupees → paise.
-      const items = validRows.map((r) => ({
-        category: r.category || undefined,
-        service: r.service,
-        quantity: Math.max(1, Number(r.quantity) || 1),
-        amount: Math.round((Number(r.complementary ? 0 : r.amount) || 0) * 100),
-      }));
+      const items = [
+        ...validRows.map((r) => ({
+          category: r.category || undefined,
+          service: r.service,
+          quantity: Math.max(1, Number(r.quantity) || 1),
+          amount: Math.round((Number(r.amount) || 0) * 100),
+        })),
+        ...complimentaryRows.filter(r => r.service?.trim()).map((r) => ({
+          category: undefined,
+          service: r.service,
+          quantity: Math.max(1, Number(r.quantity) || 1),
+          amount: 0,
+        })),
+      ];
 
-      // discount is a percentage in the UI → convert to an absolute paise amount.
+      // discount is a percentage in the UI → convert to an absolute paise amount; add coupon discount.
       const subtotalPaise = items.reduce((s, it) => s + it.amount * it.quantity, 0);
-      const discountPaise = Math.round((subtotalPaise * (Number(bookingData.discount) || 0)) / 100);
+      const couponDiscountPaise = appliedCoupon?.discountPaise ?? 0;
+      const discountPaise = Math.round((subtotalPaise * (Number(bookingData.discount) || 0)) / 100) + couponDiscountPaise;
       const roundOffPaise = Math.round((Number(bookingData.roundOff) || 0) * 100);
       const netPaise = subtotalPaise - discountPaise + roundOffPaise;
 
@@ -437,16 +525,10 @@ export default function CustomerDetailPage() {
         if (field === 'service' && value) {
           const svc = (branchServices ?? []).find((s) => s.name === value);
           if (svc) {
-            if (!row.complementary) updated.amount = svc.minPrice / 100;
+            updated.amount = svc.minPrice / 100;
             updated.category = svc.categoryName ?? '';
-          }
-        }
-        if (field === 'complementary') {
-          if (value) {
-            updated.amount = 0;
-          } else if (row.service) {
-            const svc = (branchServices ?? []).find((s) => s.name === row.service);
-            if (svc) updated.amount = svc.minPrice / 100;
+            updated.taxPercent = (svc as any).taxPercent ?? 0;
+            updated.taxType = (svc as any).taxType ?? 'exclusive';
           }
         }
         return updated;
@@ -1323,12 +1405,13 @@ export default function CustomerDetailPage() {
                                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Amount</th>
                                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Paid Amount</th>
                                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Balance Amount</th>
+                                <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>GST</th>
                                 <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Manage</th>
                               </tr>
                             </thead>
                             <tbody>
                               {paged.length === 0 && (
-                                <tr><td colSpan={9} style={{ textAlign: 'center', padding: '32px 0', color: '#aaa' }}>No bookings found</td></tr>
+                                <tr><td colSpan={10} style={{ textAlign: 'center', padding: '32px 0', color: '#aaa' }}>No bookings found</td></tr>
                               )}
                               {paged.map((b: any, idx: number) => {
                                 const categories = [...new Set((b.items ?? []).map((it: any) => it.category).filter(Boolean))];
@@ -1354,6 +1437,25 @@ export default function CustomerDetailPage() {
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(netAmt / 100).toLocaleString('en-IN')}</td>
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(paidAmt / 100).toLocaleString('en-IN')}</td>
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(balAmt / 100).toLocaleString('en-IN')}</td>
+                                    <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap', fontSize: 12 }}>
+                                      {b.gstRate ? (
+                                        <div>
+                                          {b.gstRate.taxType === 'IGST' ? (
+                                            <span style={{ color: '#7b1fa2' }}>
+                                              IGST {b.gstRate.percentage}%
+                                              {b.gstTaxAmount ? <><br />₹{Math.round(b.gstTaxAmount / 100).toLocaleString('en-IN')}</> : null}
+                                            </span>
+                                          ) : (
+                                            <span style={{ color: '#1565c0' }}>
+                                              CGST+SGST {b.gstRate.percentage}%
+                                              {b.gstTaxAmount ? <><br />₹{Math.round(b.gstTaxAmount / 100).toLocaleString('en-IN')}</> : null}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <span style={{ color: '#bbb' }}>—</span>
+                                      )}
+                                    </td>
                                     <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                                       {isCancelled ? (
                                         <Tag color="red">Cancelled</Tag>
@@ -3099,9 +3201,9 @@ export default function CustomerDetailPage() {
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>Quantity</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>&#x20B9; Amount</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#333', fontWeight: 600 }}>&#x2295; Total</th>
-                              <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#2e7d32', fontWeight: 600 }}>
-                                🎁 Complimentary
-                                <div style={{ fontSize: 10, fontWeight: 400, color: '#888', marginTop: 2 }}>Mark as Free</div>
+                              <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#7b1fa2', fontWeight: 600 }}>
+                                GST %
+                                <div style={{ fontSize: 10, fontWeight: 400, color: '#888', marginTop: 2 }}>from service</div>
                               </th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, textAlign: 'center', color: '#333', fontWeight: 600 }}>Remove</th>
                             </tr>
@@ -3115,7 +3217,7 @@ export default function CustomerDetailPage() {
                               </tr>
                             ) : bookingRows.map((row, idx) => {
                               return (
-                                <tr key={row.id} style={{ borderTop: `1px solid ${colors.border}`, background: row.complementary ? '#f1f8e9' : undefined, transition: 'background 0.2s' }}>
+                                <tr key={row.id} style={{ borderTop: `1px solid ${colors.border}` }}>
                                   {/* S.No */}
                                   <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}` }}>
                                     <div style={{
@@ -3171,42 +3273,37 @@ export default function CustomerDetailPage() {
                                   <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
                                     <input
                                       type="number" min="0"
-                                      value={row.complementary ? 0 : row.amount}
-                                      disabled={row.complementary}
+                                      value={row.amount}
                                       onChange={(e) => handleRowChange(row.id, 'amount', parseFloat(e.target.value) || 0)}
-                                      style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12, background: row.complementary ? '#f5f5f5' : undefined, color: row.complementary ? '#aaa' : undefined }}
+                                      style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12 }}
                                     />
                                   </td>
                                   {/* Total */}
-                                  <td style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 600, color: row.complementary ? '#2e7d32' : '#e53935', borderRight: `1px solid ${colors.border}` }}>
-                                    {row.complementary
-                                      ? <span style={{ fontSize: 11, background: '#2e7d32', color: '#fff', padding: '3px 8px', borderRadius: 10, fontWeight: 700, letterSpacing: 0.5 }}>₹0 — FREE</span>
-                                      : (row.quantity * row.amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                  <td style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 600, color: '#e53935', borderRight: `1px solid ${colors.border}` }}>
+                                    {(row.quantity * row.amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                                   </td>
-                                  {/* Complementary toggle */}
+                                  {/* GST % — read-only from service config */}
                                   <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}` }}>
-                                    <button
-                                      onClick={() => handleRowChange(row.id, 'complementary', !row.complementary)}
-                                      title={row.complementary ? 'Click to remove complimentary' : 'Click to mark this service as complimentary (given free of charge)'}
-                                      style={{
-                                        padding: '4px 10px',
-                                        borderRadius: 12,
-                                        border: row.complementary ? '1.5px solid #2e7d32' : '1.5px dashed #aaa',
-                                        background: row.complementary ? '#e8f5e9' : '#fafafa',
-                                        color: row.complementary ? '#2e7d32' : '#999',
+                                    {row.service && row.taxPercent ? (
+                                      <span style={{
+                                        display: 'inline-block',
+                                        background: row.taxType === 'inclusive' ? '#f3e5f5' : '#e8eaf6',
+                                        color: row.taxType === 'inclusive' ? '#7b1fa2' : '#3949ab',
+                                        border: `1px solid ${row.taxType === 'inclusive' ? '#ce93d8' : '#9fa8da'}`,
+                                        borderRadius: 10,
+                                        padding: '2px 8px',
                                         fontSize: 11,
-                                        fontWeight: row.complementary ? 700 : 400,
-                                        cursor: 'pointer',
+                                        fontWeight: 700,
                                         whiteSpace: 'nowrap',
-                                        transition: 'all 0.2s',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        gap: 4,
-                                        margin: '0 auto',
-                                      }}
-                                    >
-                                      {row.complementary ? <>✓ &nbsp;Given Free</> : <>🎁 &nbsp;Give Free</>}
-                                    </button>
+                                      }}>
+                                        {row.taxPercent}%&nbsp;
+                                        <span style={{ fontWeight: 400, fontSize: 10 }}>
+                                          {row.taxType === 'inclusive' ? 'Incl.' : 'Excl.'}
+                                        </span>
+                                      </span>
+                                    ) : (
+                                      <span style={{ fontSize: 11, color: '#ccc' }}>—</span>
+                                    )}
                                   </td>
                                   {/* Remove */}
                                   <td style={{ padding: '6px 10px', textAlign: 'center' }}>
@@ -3227,18 +3324,109 @@ export default function CustomerDetailPage() {
                         </table>
                       </div>
 
-                      {/* Add row + legend */}
-                      <div style={{ padding: '8px 16px', borderBottom: `1px dashed ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      {/* Add row */}
+                      <div style={{ padding: '8px 16px', borderBottom: `1px dashed ${colors.border}` }}>
                         <button
                           onClick={handleAddRow}
                           style={{ fontSize: 12, color: '#1890ff', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
                         >
                           + Add Row
                         </button>
-                        <span style={{ fontSize: 11, color: '#888' }}>
-                          🎁 <strong>Give Free</strong> = service provided complimentary (no charge to customer)
-                        </span>
                       </div>
+
+                      {/* ── Complimentary Section ── */}
+                      {(() => {
+                        const compServices = (branchServices ?? []).filter(s => s.hasComplementary && s.isActive);
+                        const paidTotal = bookingRows.filter(r => r.service).reduce((s, r) => s + r.quantity * r.amount, 0);
+                        const usedComp = complimentaryRows.reduce((s, r) => s + r.quantity * r.amount, 0);
+                        const maxAllowed = branchPercentage !== null && limitIsActive ? (paidTotal * branchPercentage) / 100 : null;
+                        const pct = maxAllowed && maxAllowed > 0 ? Math.min(100, (usedComp / maxAllowed) * 100) : 0;
+                        const fmt = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                        return (
+                          <div style={{ borderBottom: `1px dashed ${colors.border}`, background: '#f9fbe7' }}>
+                            {/* Header */}
+                            <div style={{ padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid #dcedc8` }}>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: '#33691e' }}>🎁 Complimentary Items</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                {maxAllowed !== null && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 260 }}>
+                                    <div style={{ flex: 1, background: '#c5e1a5', borderRadius: 4, height: 7, overflow: 'hidden' }}>
+                                      <div style={{ height: '100%', width: `${pct}%`, background: pct >= 100 ? '#e53935' : '#558b2f', transition: 'width 0.3s' }} />
+                                    </div>
+                                    <span style={{ fontSize: 11, color: pct >= 100 ? '#e53935' : '#33691e', whiteSpace: 'nowrap' }}>
+                                      ₹{fmt(usedComp)} / ₹{fmt(maxAllowed)} ({branchPercentage}%)
+                                    </span>
+                                  </div>
+                                )}
+                                <button
+                                  onClick={handleAddComplementaryRow}
+                                  disabled={compServices.length === 0}
+                                  style={{ fontSize: 12, color: compServices.length === 0 ? '#aaa' : '#33691e', background: 'none', border: '1px dashed #aed581', borderRadius: 4, cursor: compServices.length === 0 ? 'not-allowed' : 'pointer', padding: '3px 10px', fontWeight: 600 }}
+                                >
+                                  + Add Complimentary Item
+                                </button>
+                              </div>
+                            </div>
+
+                            {complimentaryRows.length === 0 ? (
+                              <div style={{ padding: '10px 16px', fontSize: 12, color: '#888' }}>
+                                {compServices.length === 0
+                                  ? 'No complimentary-enabled services available. Admin must enable Complimentary on services.'
+                                  : 'No complimentary items added. Click "+ Add Complimentary Item" above.'}
+                              </div>
+                            ) : (
+                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                <thead>
+                                  <tr style={{ background: '#f1f8e9' }}>
+                                    <th style={{ padding: '6px 10px', borderBottom: `1px solid #dcedc8`, borderRight: `1px solid #dcedc8`, textAlign: 'center', width: 40, color: '#558b2f' }}>#</th>
+                                    <th style={{ padding: '6px 10px', borderBottom: `1px solid #dcedc8`, borderRight: `1px solid #dcedc8`, color: '#558b2f' }}>Service</th>
+                                    <th style={{ padding: '6px 10px', borderBottom: `1px solid #dcedc8`, borderRight: `1px solid #dcedc8`, textAlign: 'center', width: 80, color: '#558b2f' }}>Qty</th>
+                                    <th style={{ padding: '6px 10px', borderBottom: `1px solid #dcedc8`, borderRight: `1px solid #dcedc8`, textAlign: 'right', width: 110, color: '#558b2f' }}>Value (₹)</th>
+                                    <th style={{ padding: '6px 10px', borderBottom: `1px solid #dcedc8`, borderRight: `1px solid #dcedc8`, textAlign: 'center', width: 90, color: '#558b2f' }}>Bill Amount</th>
+                                    <th style={{ padding: '6px 10px', borderBottom: `1px solid #dcedc8`, textAlign: 'center', width: 50, color: '#558b2f' }}>✕</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {complimentaryRows.map((cr, idx) => (
+                                    <tr key={cr.id} style={{ borderTop: `1px solid #dcedc8`, background: '#fff' }}>
+                                      <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid #dcedc8`, color: '#558b2f', fontWeight: 700 }}>{idx + 1}</td>
+                                      <td style={{ padding: '6px 8px', borderRight: `1px solid #dcedc8` }}>
+                                        <select
+                                          value={cr.service}
+                                          onChange={(e) => handleComplementaryRowChange(cr.id, 'service', e.target.value)}
+                                          style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, fontSize: 12, background: '#fff' }}
+                                        >
+                                          <option value="">— Select service —</option>
+                                          {compServices.map(s => (
+                                            <option key={s.id} value={s.name}>{s.name}</option>
+                                          ))}
+                                        </select>
+                                      </td>
+                                      <td style={{ padding: '6px 8px', borderRight: `1px solid #dcedc8` }}>
+                                        <input
+                                          type="number" min="1"
+                                          value={cr.quantity}
+                                          onChange={(e) => handleComplementaryRowChange(cr.id, 'quantity', parseInt(e.target.value) || 1)}
+                                          style={{ width: 55, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }}
+                                        />
+                                      </td>
+                                      <td style={{ padding: '6px 10px', textAlign: 'right', borderRight: `1px solid #dcedc8`, color: '#555' }}>
+                                        {cr.amount > 0 ? `₹${(cr.quantity * cr.amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
+                                      </td>
+                                      <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid #dcedc8` }}>
+                                        <span style={{ fontSize: 11, background: '#2e7d32', color: '#fff', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>FREE</span>
+                                      </td>
+                                      <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                        <div onClick={() => handleRemoveComplementaryRow(cr.id)} style={{ width: 20, height: 20, borderRadius: '50%', background: '#f44336', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>✕</div>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            )}
+                          </div>
+                        );
+                      })()}
 
                       {/* Footer: Refresh + Totals */}
                       <div style={{ padding: '12px 16px', borderBottom: `1px dashed ${colors.border}`, display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -3253,30 +3441,112 @@ export default function CustomerDetailPage() {
                           Refresh
                         </button>
 
-                        {/* Totals block */}
-                        <div style={{ textAlign: 'right', fontSize: 13, lineHeight: 2 }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                            <span style={{ color: colors.text.secondary }}>Total Amount :</span>
-                            <span style={{ minWidth: 60, textAlign: 'right' }}>{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                            <span style={{ color: colors.text.secondary }}>PP Token Discount:</span>
-                            <span style={{ minWidth: 60, textAlign: 'right' }}>0</span>
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, alignItems: 'center' }}>
-                            <span style={{ color: colors.text.secondary }}>Round Off :</span>
-                            <input
-                              type="number"
-                              value={bookingData.roundOff}
-                              onChange={(e) => setBookingData({ ...bookingData, roundOff: parseFloat(e.target.value) || 0 })}
-                              style={{ width: 80, padding: '2px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12 }}
-                            />
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `1px dashed ${colors.border}`, paddingTop: 4 }}>
-                            <span style={{ color: colors.text.secondary }}>Net Amount :</span>
-                            <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 700 }}>{netAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                          </div>
-                        </div>
+                        {/* Totals block with auto GST */}
+                        {(() => {
+                          const filledRows = bookingRows.filter(r => r.service);
+                          let aggTaxable = 0, aggTax = 0;
+                          for (const row of filledRows) {
+                            const linePaise = Math.round(row.quantity * row.amount * 100);
+                            const pct = row.taxPercent ?? 0;
+                            if (!pct) { aggTaxable += linePaise; continue; }
+                            const isInclusive = row.taxType === 'inclusive';
+                            const taxableAmt = isInclusive
+                              ? Math.round((linePaise * 100) / (100 + pct))
+                              : linePaise;
+                            const taxAmt = isInclusive
+                              ? linePaise - taxableAmt
+                              : Math.round((linePaise * pct) / 100);
+                            aggTaxable += taxableAmt;
+                            aggTax += taxAmt;
+                          }
+                          const hasGst = aggTax > 0;
+                          const fmt = (p: number) => (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                          return (
+                            <div style={{ textAlign: 'right', fontSize: 13, lineHeight: 2 }}>
+                              {hasGst && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                  <span style={{ color: colors.text.secondary }}>Taxable Amount :</span>
+                                  <span style={{ minWidth: 60, textAlign: 'right' }}>{fmt(aggTaxable)}</span>
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                <span style={{ color: colors.text.secondary }}>Total Amount :</span>
+                                <span style={{ minWidth: 60, textAlign: 'right' }}>{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                              </div>
+                              {hasGst && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                  <span style={{ color: '#7b1fa2', fontWeight: 500 }}>
+                                    GST (auto) :
+                                  </span>
+                                  <span style={{ minWidth: 60, textAlign: 'right', color: '#7b1fa2' }}>+{fmt(aggTax)}</span>
+                                </div>
+                              )}
+                              {/* Coupon Code Input */}
+                              <div style={{ display: 'flex', gap: 6, alignItems: 'center', margin: '4px 0' }}>
+                                <input
+                                  placeholder="Coupon code"
+                                  value={couponInput}
+                                  onChange={(e) => { setCouponInput(e.target.value.toUpperCase()); setAppliedCoupon(null); }}
+                                  style={{ flex: 1, padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12 }}
+                                />
+                                <button
+                                  onClick={handleApplyCoupon}
+                                  disabled={!couponInput.trim() || lookupCoupon.isPending}
+                                  style={{ padding: '4px 12px', background: '#1890ff', color: '#fff', border: 'none', borderRadius: 4, cursor: !couponInput.trim() || lookupCoupon.isPending ? 'not-allowed' : 'pointer', fontSize: 12, opacity: !couponInput.trim() ? 0.6 : 1 }}
+                                >
+                                  {lookupCoupon.isPending ? '…' : 'Apply'}
+                                </button>
+                                {appliedCoupon && (
+                                  <button
+                                    onClick={() => { setAppliedCoupon(null); setCouponInput(''); }}
+                                    style={{ fontSize: 11, color: '#999', background: 'none', border: 'none', cursor: 'pointer', padding: '0 4px' }}
+                                  >✕</button>
+                                )}
+                              </div>
+                              {appliedCoupon && (
+                                <div style={{ fontSize: 11, color: '#2e7d32', marginBottom: 2 }}>
+                                  ✓ {appliedCoupon.couponName} applied
+                                </div>
+                              )}
+                              {/* Coupon discount row */}
+                              {appliedCoupon && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, color: '#2e7d32', fontWeight: 600 }}>
+                                  <span>Coupon ({appliedCoupon.couponCode}) :</span>
+                                  <span style={{ minWidth: 60, textAlign: 'right' }}>
+                                    -{(appliedCoupon.discountPaise / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              )}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                <span style={{ color: colors.text.secondary }}>PP Token Discount:</span>
+                                <span style={{ minWidth: 60, textAlign: 'right' }}>0</span>
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, alignItems: 'center' }}>
+                                <span style={{ color: colors.text.secondary }}>Round Off :</span>
+                                <input
+                                  type="number"
+                                  value={bookingData.roundOff}
+                                  onChange={(e) => setBookingData({ ...bookingData, roundOff: parseFloat(e.target.value) || 0 })}
+                                  style={{ width: 80, padding: '2px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12 }}
+                                />
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `1px dashed ${colors.border}`, paddingTop: 4 }}>
+                                <span style={{ color: colors.text.secondary }}>Net Amount :</span>
+                                <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 700 }}>
+                                  {(totalAmount + (bookingData.roundOff || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                </span>
+                              </div>
+                              {hasGst && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `2px solid #7b1fa2`, paddingTop: 4 }}>
+                                  <span style={{ color: '#7b1fa2', fontWeight: 700 }}>Final Bill Amount :</span>
+                                  <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 700, color: '#7b1fa2' }}>
+                                    {(totalAmount + (bookingData.roundOff || 0) + aggTax / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
 
                       {/* Remarks */}
@@ -3294,6 +3564,7 @@ export default function CustomerDetailPage() {
                           }}
                         />
                       </div>
+
 
                       {/* Save and go to Receipt */}
                       <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'flex-end' }}>
@@ -3315,7 +3586,7 @@ export default function CustomerDetailPage() {
                   {packageOfferStep === 2 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
                     const filledRows = bookingRows.filter(r => r.service);
-                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * (r.complementary ? 0 : r.amount), 0);
+                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * r.amount, 0);
                     return (
                       <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 6 }}>
                         <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 14, color: colors.text.primary }}>
@@ -3334,7 +3605,7 @@ export default function CustomerDetailPage() {
                             <div style={{ fontSize: 11, color: '#888', marginBottom: 4, textTransform: 'uppercase', letterSpacing: 1 }}>Consulted By</div>
                             {consultantObj
                               ? <><div style={{ fontWeight: 700, fontSize: 15 }}>{consultantObj.name}</div>
-                                  <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{consultantObj.role || consultantObj.designation || 'Consultant'}</div></>
+                                  <div style={{ fontSize: 12, color: '#555', marginTop: 2 }}>{consultantObj.designation || 'Consultant'}</div></>
                               : <div style={{ color: '#aaa', fontSize: 13 }}>Not assigned</div>
                             }
                           </div>
@@ -3427,7 +3698,7 @@ export default function CustomerDetailPage() {
                   {packageOfferStep === 3 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
                     const filledRows = bookingRows.filter(r => r.service);
-                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * (r.complementary ? 0 : r.amount), 0);
+                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * r.amount, 0);
                     const netAmt = totalAmt + (bookingData.roundOff || 0);
                     return (
                       <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 6 }}>
@@ -3535,7 +3806,7 @@ export default function CustomerDetailPage() {
                   {packageOfferStep === 4 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
                     const filledRows = bookingRows.filter(r => r.service);
-                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * (r.complementary ? 0 : r.amount), 0);
+                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * r.amount, 0);
                     const netAmt = totalAmt + (bookingData.roundOff || 0);
                     return (
                       <div>
@@ -3600,7 +3871,7 @@ export default function CustomerDetailPage() {
                               <div>
                                 <div style={{ color: '#888', marginBottom: 3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Consulted By</div>
                                 <div style={{ fontWeight: 700, fontSize: 14 }}>{consultantObj.name}</div>
-                                <div style={{ color: '#555' }}>{consultantObj.role || consultantObj.designation || 'Consultant'}</div>
+                                <div style={{ color: '#555' }}>{consultantObj.designation || 'Consultant'}</div>
                               </div>
                             )}
                           </div>

@@ -54,6 +54,7 @@ export const adminBranchCreateSchema = z.object({
     .or(z.literal('').transform(() => undefined)),
   ipAddress: ipv4.optional().or(z.literal('').transform(() => undefined)),
   loginPassword: z.string().trim().min(6, 'Password must be at least 6 characters').max(100).optional().or(z.literal('').transform(() => undefined)),
+  stateId: z.string().optional(),
   isActive: z.boolean().optional(),
   additionalAddresses: z.array(adminBranchAddressCreateSchema).max(20).optional(),
 });

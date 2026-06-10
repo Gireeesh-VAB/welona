@@ -2,17 +2,24 @@
 
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiList, type Paginated } from '@/lib/api-client';
-import type { AdminComplimentaryRule } from '@shared/types/admin-complimentary';
+import type {
+  AdminComplimentaryRule,
+  AdminBranchComplimentaryLimit,
+} from '@shared/types/admin-complimentary';
 import type {
   AdminComplimentaryRuleCreateInput,
   AdminComplimentaryRuleUpdateInput,
+  AdminBranchComplimentaryLimitUpsertInput,
+  AdminBranchComplimentaryLimitUpdateInput,
 } from '@shared/schemas/admin-complimentary';
 
 const KEY = 'admin-complimentary';
+const LIMIT_KEY = 'admin-complimentary-limits';
 
 interface ListParams {
   search?: string;
-  triggerServiceId?: string;
+  categoryId?: string;
+  branchId?: string;
   isActive?: boolean;
   page?: number;
   limit?: number;
@@ -25,20 +32,13 @@ export function useAdminComplimentaryRules(params: ListParams = {}) {
       apiList<AdminComplimentaryRule>('/admin/complimentary', {
         query: {
           search: params.search,
-          triggerServiceId: params.triggerServiceId,
+          categoryId: params.categoryId,
+          branchId: params.branchId,
           isActive: params.isActive,
           page: params.page,
           limit: params.limit,
         },
       }),
-  });
-}
-
-export function useAdminComplimentaryRule(id: string) {
-  return useQuery<AdminComplimentaryRule>({
-    queryKey: [KEY, id],
-    queryFn: () => api.get<AdminComplimentaryRule>(`/admin/complimentary/${id}`),
-    enabled: !!id,
   });
 }
 
@@ -65,5 +65,40 @@ export function useDeleteAdminComplimentaryRule() {
   return useMutation({
     mutationFn: (id: string) => api.delete(`/admin/complimentary/${id}`),
     onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
+  });
+}
+
+// ── Branch Complimentary Limits ──────────────────────────────────────────────
+
+export function useAdminBranchComplimentaryLimits() {
+  return useQuery<AdminBranchComplimentaryLimit[]>({
+    queryKey: [LIMIT_KEY],
+    queryFn: () => api.get<AdminBranchComplimentaryLimit[]>('/admin/complimentary-limits'),
+  });
+}
+
+export function useUpsertBranchComplimentaryLimit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: AdminBranchComplimentaryLimitUpsertInput) =>
+      api.post<AdminBranchComplimentaryLimit>('/admin/complimentary-limits', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [LIMIT_KEY] }),
+  });
+}
+
+export function useUpdateBranchComplimentaryLimit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: AdminBranchComplimentaryLimitUpdateInput }) =>
+      api.put<AdminBranchComplimentaryLimit>(`/admin/complimentary-limits/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [LIMIT_KEY] }),
+  });
+}
+
+export function useDeleteBranchComplimentaryLimit() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/complimentary-limits/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [LIMIT_KEY] }),
   });
 }

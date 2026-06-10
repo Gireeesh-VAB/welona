@@ -17,9 +17,16 @@ export function parseStringArray(value: string): string[] {
   }
 }
 
-/** Customer with `tags` decoded to an array. */
-export function serializeCustomer(customer: Customer) {
-  return { ...customer, tags: parseStringArray(customer.tags) };
+/** Customer with `tags` decoded to an array and `state` relation flattened. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function serializeCustomer(customer: Customer & { state?: { id: string; name: string } | null; [key: string]: any }) {
+  const { state, ...rest } = customer as any;
+  return {
+    ...rest,
+    tags: parseStringArray(customer.tags),
+    stateId: state?.id ?? customer.stateId ?? null,
+    stateName: state?.name ?? null,
+  };
 }
 
 /** A per-line delivered-quantity entry. */

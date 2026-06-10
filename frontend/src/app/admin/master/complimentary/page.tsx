@@ -19,218 +19,119 @@ import {
   Tag,
   Typography,
 } from 'antd';
+import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons';
+import type { ColumnsType } from 'antd/es/table';
 import {
-  DeleteOutlined,
-  EditOutlined,
-  MinusCircleOutlined,
-  PlusOutlined,
-  SearchOutlined,
-} from '@ant-design/icons';
-import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
-import {
-  useAdminComplimentaryRules,
-  useCreateAdminComplimentaryRule,
-  useDeleteAdminComplimentaryRule,
-  useUpdateAdminComplimentaryRule,
+  useAdminBranchComplimentaryLimits,
+  useUpsertBranchComplimentaryLimit,
+  useUpdateBranchComplimentaryLimit,
+  useDeleteBranchComplimentaryLimit,
 } from '@/hooks/useAdminComplimentary';
-import { useAdminServices } from '@/hooks/useAdminServices';
-import { useProducts } from '@/hooks/useProducts';
+import { useAdminBranches } from '@/hooks/useAdminBranches';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
-import type { AdminComplimentaryRule } from '@shared/types/admin-complimentary';
+import type { AdminBranchComplimentaryLimit } from '@shared/types/admin-complimentary';
 
 const { Title, Text } = Typography;
 
-interface AssignmentRow {
-  productId: string;
-  quantity: number;
-}
-
-interface RuleFormValues {
-  name: string;
-  description?: string;
-  triggerServiceId: string;
+interface LimitFormValues {
+  branchId: string;
+  percentage: number;
   isActive: boolean;
-  assignments: AssignmentRow[];
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-IN', {
-    day: '2-digit',
-    month: 'short',
-    year: 'numeric',
-  });
 }
 
 export default function AdminMasterComplimentaryPage() {
   const colors = useBrandColors();
-  const navItem = getAdminNavItem('master-complimentary')!;
+  const navItem = getAdminNavItem('master-complimentary');
   const { message } = App.useApp();
 
-  const [search, setSearch] = useState('');
-  const [page, setPage] = useState(1);
-  const PAGE_SIZE = 20;
-
-  const { data, isLoading } = useAdminComplimentaryRules({
-    search: search || undefined,
-    page,
-    limit: PAGE_SIZE,
-  });
-  const rules = data?.items ?? [];
-  const total = data?.meta?.total ?? 0;
-
-  // Load full list of services and products for the form selects
-  const { data: servicesData } = useAdminServices({ limit: 500 });
-  const { data: productsData } = useProducts({ isActive: true, limit: 500 });
-  const serviceOptions = (servicesData?.items ?? []).map((s) => ({
-    value: s.id,
-    label: `${s.category?.name ? s.category.name + ' · ' : ''}${s.name}`,
-  }));
-  const productOptions = (productsData?.items ?? []).map((p) => ({
-    value: p.id,
-    label: `${p.name} (${p.sku})`,
-  }));
-
-  const createRule = useCreateAdminComplimentaryRule();
-  const updateRule = useUpdateAdminComplimentaryRule();
-  const deleteRule = useDeleteAdminComplimentaryRule();
+  const { data: limits, isLoading } = useAdminBranchComplimentaryLimits();
+  const { data: branchesData } = useAdminBranches({ limit: 500 });
+  const upsert = useUpsertBranchComplimentaryLimit();
+  const update = useUpdateBranchComplimentaryLimit();
+  const remove = useDeleteBranchComplimentaryLimit();
 
   const [modalOpen, setModalOpen] = useState(false);
-  const [editing, setEditing] = useState<AdminComplimentaryRule | null>(null);
-  const [form] = Form.useForm<RuleFormValues>();
+  const [editing, setEditing] = useState<AdminBranchComplimentaryLimit | null>(null);
+  const [form] = Form.useForm<LimitFormValues>();
+
+  const configuredBranchIds = new Set((limits ?? []).map((l) => l.branchId));
+  const branchOptions = (branchesData?.items ?? [])
+    .filter((b) => !configuredBranchIds.has(b.id) || editing?.branchId === b.id)
+    .map((b) => ({ value: b.id, label: `${b.branchName} (${b.branchCode})` }));
 
   function openCreate() {
     setEditing(null);
     form.resetFields();
-    form.setFieldsValue({
-      isActive: true,
-      assignments: [{ productId: '', quantity: 1 }],
-    });
+    form.setFieldsValue({ percentage: 10, isActive: true });
     setModalOpen(true);
   }
 
-  function openEdit(rule: AdminComplimentaryRule) {
-    setEditing(rule);
-    form.setFieldsValue({
-      name: rule.name,
-      description: rule.description ?? '',
-      triggerServiceId: rule.triggerServiceId,
-      isActive: rule.isActive,
-      assignments: rule.assignments.map((a) => ({
-        productId: a.productId,
-        quantity: a.quantity,
-      })),
-    });
+  function openEdit(limit: AdminBranchComplimentaryLimit) {
+    setEditing(limit);
+    form.setFieldsValue({ branchId: limit.branchId, percentage: limit.percentage, isActive: limit.isActive });
     setModalOpen(true);
   }
 
-  async function handleSubmit(values: RuleFormValues) {
-    const payload = {
-      name: values.name,
-      description: values.description || undefined,
-      triggerServiceId: values.triggerServiceId,
-      isActive: values.isActive,
-      assignments: values.assignments.filter((a) => a.productId),
-    };
-
+  async function handleSubmit(values: LimitFormValues) {
     try {
       if (editing) {
-        await updateRule.mutateAsync({ id: editing.id, body: payload });
-        message.success('Rule updated');
+        await update.mutateAsync({ id: editing.id, body: { percentage: values.percentage, isActive: values.isActive } });
+        message.success('Limit updated');
       } else {
-        await createRule.mutateAsync(payload);
-        message.success('Rule created');
+        await upsert.mutateAsync(values);
+        message.success('Limit saved');
       }
       setModalOpen(false);
     } catch (err) {
-      const msg =
-        err instanceof ApiClientError ? err.message : 'Something went wrong';
-      message.error(msg);
+      message.error(
+        err instanceof ApiClientError ? err.message :
+        err instanceof Error ? err.message :
+        'Something went wrong',
+      );
     }
   }
 
   async function handleDelete(id: string) {
     try {
-      await deleteRule.mutateAsync(id);
-      message.success('Rule deleted');
+      await remove.mutateAsync(id);
+      message.success('Limit removed');
     } catch {
-      message.error('Could not delete rule');
+      message.error('Could not remove limit');
     }
   }
 
-  const pagination: TablePaginationConfig = {
-    current: page,
-    pageSize: PAGE_SIZE,
-    total,
-    showSizeChanger: false,
-    showTotal: (t) => `${t} rules`,
-    onChange: (p) => setPage(p),
-  };
-
-  const columns: ColumnsType<AdminComplimentaryRule> = [
+  const columns: ColumnsType<AdminBranchComplimentaryLimit> = [
     {
-      title: 'Rule Name',
-      dataIndex: 'name',
-      key: 'name',
-      render: (name: string, row) => (
+      title: 'Branch',
+      key: 'branch',
+      render: (_, row) => (
         <div>
-          <div style={{ fontWeight: 600 }}>{name}</div>
-          {row.description && (
-            <Text type="secondary" style={{ fontSize: 12 }}>
-              {row.description}
-            </Text>
-          )}
+          <div style={{ fontWeight: 600 }}>{row.branchName}</div>
+          <Text type="secondary" style={{ fontSize: 12 }}>{row.branchCode}</Text>
         </div>
       ),
     },
     {
-      title: 'Trigger Service',
-      key: 'trigger',
-      render: (_, row) => (
-        <div>
-          {row.triggerCategoryName && (
-            <Text type="secondary" style={{ fontSize: 11 }}>
-              {row.triggerCategoryName}
-            </Text>
-          )}
-          <div>{row.triggerServiceName}</div>
-        </div>
-      ),
-    },
-    {
-      title: 'Complimentary Products',
-      key: 'assignments',
-      render: (_, row) => (
-        <Space wrap size={4}>
-          {row.assignments.map((a) => (
-            <Tag key={a.id} style={{ marginBottom: 2 }}>
-              {a.productName}
-              {a.quantity > 1 && (
-                <Text type="secondary" style={{ fontSize: 11 }}>
-                  {' '}×{a.quantity}
-                </Text>
-              )}
-            </Tag>
-          ))}
-        </Space>
+      title: 'Complimentary % Limit',
+      dataIndex: 'percentage',
+      width: 200,
+      render: (v: number) => (
+        <Tag color="gold" style={{ fontSize: 13, padding: '2px 10px' }}>{v}% of bill total</Tag>
       ),
     },
     {
       title: 'Status',
       dataIndex: 'isActive',
-      key: 'isActive',
-      width: 90,
-      render: (v: boolean) => (
-        <Tag color={v ? 'green' : 'default'}>{v ? 'Active' : 'Inactive'}</Tag>
-      ),
+      width: 110,
+      render: (v: boolean) => <Tag color={v ? 'green' : 'default'}>{v ? 'Active' : 'Inactive'}</Tag>,
     },
     {
-      title: 'Created',
-      dataIndex: 'createdAt',
-      key: 'createdAt',
-      width: 110,
-      render: (v: string) => formatDate(v),
+      title: 'Last Updated',
+      dataIndex: 'updatedAt',
+      width: 130,
+      render: (v: string) => new Date(v).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }),
     },
     {
       title: '',
@@ -238,18 +139,8 @@ export default function AdminMasterComplimentaryPage() {
       width: 80,
       render: (_, row) => (
         <Space>
-          <Button
-            type="text"
-            icon={<EditOutlined />}
-            size="small"
-            onClick={() => openEdit(row)}
-          />
-          <Popconfirm
-            title="Delete this rule?"
-            onConfirm={() => handleDelete(row.id)}
-            okText="Delete"
-            okButtonProps={{ danger: true }}
-          >
+          <Button type="text" icon={<EditOutlined />} size="small" onClick={() => openEdit(row)} />
+          <Popconfirm title="Remove this branch limit?" onConfirm={() => handleDelete(row.id)} okText="Remove" okButtonProps={{ danger: true }}>
             <Button type="text" danger icon={<DeleteOutlined />} size="small" />
           </Popconfirm>
         </Space>
@@ -257,18 +148,15 @@ export default function AdminMasterComplimentaryPage() {
     },
   ];
 
-  const isSaving = createRule.isPending || updateRule.isPending;
-
   return (
-    <div style={{ padding: '24px' }}>
+    <div style={{ padding: 24 }}>
       <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
         <Col>
           <Title level={4} style={{ margin: 0, color: colors.gold.primary }}>
-            {navItem?.label ?? 'Complimentary Products'}
+            {navItem?.label ?? 'Complimentary Settings'}
           </Title>
           <Text type="secondary" style={{ fontSize: 13 }}>
-            {navItem?.description ??
-              'Rules that grant complimentary products when a service is booked.'}
+            Set the maximum complimentary value (as % of total bill) allowed per branch. Eligible services and products are controlled via the Services and Products master pages.
           </Text>
         </Col>
         <Col>
@@ -278,153 +166,60 @@ export default function AdminMasterComplimentaryPage() {
             onClick={openCreate}
             style={{ background: colors.gold.primary, borderColor: colors.gold.primary }}
           >
-            Add Rule
+            Set Branch Limit
           </Button>
         </Col>
       </Row>
 
       <Card>
-        <Row gutter={16} style={{ marginBottom: 16 }}>
-          <Col flex="300px">
-            <Input
-              prefix={<SearchOutlined />}
-              placeholder="Search rules or services…"
-              value={search}
-              onChange={(e) => { setSearch(e.target.value); setPage(1); }}
-              allowClear
-            />
-          </Col>
-        </Row>
-
-        <Table<AdminComplimentaryRule>
+        <Table<AdminBranchComplimentaryLimit>
           columns={columns}
-          dataSource={rules}
+          dataSource={limits ?? []}
           rowKey="id"
           loading={isLoading}
-          pagination={pagination}
+          pagination={false}
           size="small"
+          locale={{ emptyText: 'No branch limits configured yet. Click "Set Branch Limit" to add one.' }}
         />
       </Card>
 
       <Modal
-        title={editing ? 'Edit Complimentary Rule' : 'Add Complimentary Rule'}
+        title={editing ? 'Edit Branch Limit' : 'Set Branch Complimentary Limit'}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={() => form.submit()}
-        okText={editing ? 'Save' : 'Create'}
-        confirmLoading={isSaving}
-        width={640}
+        okText={editing ? 'Save' : 'Set Limit'}
+        confirmLoading={upsert.isPending || update.isPending}
+        width={460}
         destroyOnClose
       >
-        <Form
-          form={form}
-          layout="vertical"
-          onFinish={handleSubmit}
-          style={{ marginTop: 8 }}
-        >
+        <Form form={form} layout="vertical" onFinish={handleSubmit} style={{ marginTop: 8 }}>
+          {!editing ? (
+            <Form.Item label="Branch" name="branchId" rules={[{ required: true, message: 'Select a branch' }]}>
+              <Select
+                showSearch
+                placeholder="Select branch"
+                options={branchOptions}
+                filterOption={(input, opt) =>
+                  String(opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                }
+              />
+            </Form.Item>
+          ) : (
+            <Form.Item label="Branch">
+              <Input value={`${editing.branchName} (${editing.branchCode})`} disabled />
+            </Form.Item>
+          )}
           <Form.Item
-            label="Rule Name"
-            name="name"
-            rules={[{ required: true, message: 'Rule name is required' }]}
+            label="Complimentary % (of total bill)"
+            name="percentage"
+            rules={[{ required: true, message: 'Enter percentage' }]}
           >
-            <Input placeholder="e.g. Complimentary serum with TCA Peel" />
+            <InputNumber min={0} max={100} precision={0} addonAfter="%" style={{ width: '100%' }} placeholder="e.g. 20" />
           </Form.Item>
-
-          <Form.Item label="Description" name="description">
-            <Input.TextArea rows={2} placeholder="Optional notes about this rule" />
-          </Form.Item>
-
-          <Form.Item
-            label="Trigger Service"
-            name="triggerServiceId"
-            rules={[{ required: true, message: 'Select a trigger service' }]}
-          >
-            <Select
-              showSearch
-              placeholder="Select service that triggers this rule"
-              options={serviceOptions}
-              filterOption={(input, opt) =>
-                (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
-              }
-            />
-          </Form.Item>
-
           <Form.Item label="Active" name="isActive" valuePropName="checked">
             <Switch />
           </Form.Item>
-
-          <div style={{ marginBottom: 8, fontWeight: 500 }}>
-            Complimentary Products
-          </div>
-
-          <Form.List
-            name="assignments"
-            rules={[
-              {
-                validator: async (_, items) => {
-                  const valid = (items ?? []).filter((a: AssignmentRow) => a?.productId);
-                  if (!valid.length) {
-                    return Promise.reject('Add at least one product');
-                  }
-                },
-              },
-            ]}
-          >
-            {(fields, { add, remove }, { errors }) => (
-              <>
-                {fields.map(({ key, name, ...rest }) => (
-                  <Row key={key} gutter={8} align="middle" style={{ marginBottom: 8 }}>
-                    <Col flex="auto">
-                      <Form.Item
-                        {...rest}
-                        name={[name, 'productId']}
-                        rules={[{ required: true, message: 'Select a product' }]}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <Select
-                          showSearch
-                          placeholder="Select product"
-                          options={productOptions}
-                          filterOption={(input, opt) =>
-                            (opt?.label ?? '')
-                              .toLowerCase()
-                              .includes(input.toLowerCase())
-                          }
-                        />
-                      </Form.Item>
-                    </Col>
-                    <Col style={{ width: 100 }}>
-                      <Form.Item
-                        {...rest}
-                        name={[name, 'quantity']}
-                        style={{ marginBottom: 0 }}
-                      >
-                        <InputNumber min={1} placeholder="Qty" style={{ width: '100%' }} />
-                      </Form.Item>
-                    </Col>
-                    <Col>
-                      {fields.length > 1 && (
-                        <MinusCircleOutlined
-                          onClick={() => remove(name)}
-                          style={{ color: '#ff4d4f', cursor: 'pointer', fontSize: 16 }}
-                        />
-                      )}
-                    </Col>
-                  </Row>
-                ))}
-                <Form.ErrorList errors={errors} />
-                <Button
-                  type="dashed"
-                  onClick={() => add({ productId: '', quantity: 1 })}
-                  icon={<PlusOutlined />}
-                  size="small"
-                  style={{ marginTop: 4 }}
-                >
-                  Add Product
-                </Button>
-              </>
-            )}
-          </Form.List>
         </Form>
       </Modal>
     </div>

@@ -1,5 +1,5 @@
 import { Prisma } from '@prisma/client';
-import type { AdminUser, Branch, BranchAddress, Zone } from '@prisma/client';
+import type { AdminUser, Branch, BranchAddress, Zone, State } from '@prisma/client';
 import type { AdminBranch } from '@shared/types/admin-branch';
 import type { AdminBranchAddress } from '@shared/types/admin-branch-address';
 import { BRANCH_TYPES, type BranchType } from '@shared/enums';
@@ -10,6 +10,7 @@ import { BRANCH_TYPES, type BranchType } from '@shared/enums';
  */
 export const branchAdminInclude = {
   zone: true,
+  state: { select: { id: true, name: true } },
   createdByAdmin: true,
   addresses: { orderBy: [{ isPrimary: 'desc' }, { createdAt: 'asc' }] },
   parent: { select: { id: true, name: true, code: true } },
@@ -19,6 +20,7 @@ export const branchAdminInclude = {
 /** Branch with the relations the admin UI needs. */
 export type BranchWithAdminRelations = Branch & {
   zone: Zone | null;
+  state?: Pick<State, 'id' | 'name'> | null;
   createdByAdmin: AdminUser | null;
   addresses?: BranchAddress[];
   parent?: Pick<Branch, 'id' | 'name' | 'code'> | null;
@@ -59,6 +61,8 @@ export function toAdminBranch(branch: BranchWithAdminRelations): AdminBranch {
     email: branch.email,
     ipAddress: branch.ipAddress,
     loginPassword: branch.loginPassword ?? null,
+    stateId: branch.stateId ?? null,
+    stateName: branch.state?.name ?? null,
     isActive: branch.isActive,
     zone: branch.zone
       ? { id: branch.zone.id, country: branch.zone.country, stateName: branch.zone.stateName }

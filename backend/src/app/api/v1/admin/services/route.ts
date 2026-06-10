@@ -66,6 +66,7 @@ export const POST = route(async (req) => {
       minPrice: body.minPrice,
       maxPrice: body.maxPrice,
       taxPercent: body.taxPercent,
+      taxType: body.taxType,
       hasMeasurements: body.hasMeasurements,
       hasComplementary: body.hasComplementary,
       isActive: body.isActive,

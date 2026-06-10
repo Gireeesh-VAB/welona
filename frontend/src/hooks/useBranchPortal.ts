@@ -1,7 +1,8 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { api, apiList } from '@/lib/api-client';
+import type { CouponLookupResult } from '@shared/types/admin-coupon';
 
 // ---- Products ---------------------------------------------------------------
 
@@ -181,5 +182,33 @@ export function useBranchServices(params: ServiceParams = {}) {
         isActive: params.isActive,
       }),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Complimentary config (branch % limit, for billing) --------------------
+
+export interface BranchComplimentaryConfig {
+  branchPercentage: number | null;
+  limitIsActive: boolean;
+}
+
+/** Returns the branch's complimentary % limit configured by admin. */
+export function useBranchComplimentaryConfig() {
+  return useQuery({
+    queryKey: ['branch-complimentary'],
+    queryFn: () => api.get<BranchComplimentaryConfig>('/complimentary'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Coupon lookup (billing) ------------------------------------------------
+
+export { type CouponLookupResult };
+
+/** Validate and look up a coupon code during billing. Returns coupon details or throws. */
+export function useLookupCoupon() {
+  return useMutation({
+    mutationFn: (code: string) =>
+      api.get<CouponLookupResult>('/coupons/lookup', { code }),
   });
 }

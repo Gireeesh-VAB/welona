@@ -64,6 +64,7 @@ interface ServiceFormValues {
   minPriceRupees: number;
   maxPriceRupees: number;
   taxPercent: number;
+  taxType: 'inclusive' | 'exclusive';
   hasMeasurements: boolean;
   hasComplementary: boolean;
   isActive: boolean;
@@ -125,6 +126,10 @@ export default function AdminMasterServicesPage() {
   const [editing, setEditing] = useState<AdminService | null>(null);
   const [form] = Form.useForm<ServiceFormValues>();
 
+  const watchedTaxPercent = Form.useWatch('taxPercent', form);
+  const watchedTaxType = Form.useWatch('taxType', form);
+  const watchedMaxPrice = Form.useWatch('maxPriceRupees', form);
+
   const create = useCreateAdminService();
   const update = useUpdateAdminService();
   const remove = useDeleteAdminService();
@@ -135,32 +140,41 @@ export default function AdminMasterServicesPage() {
 
   const openCreate = () => {
     setEditing(null);
-    form.resetFields();
-    form.setFieldsValue({
-      isActive: true,
-      hasMeasurements: false,
-      hasComplementary: false,
-      taxPercent: 18,
-      minPriceRupees: 0,
-      maxPriceRupees: 0,
-    });
     setModalOpen(true);
   };
 
   const openEdit = (row: AdminService) => {
     setEditing(row);
-    form.setFieldsValue({
-      categoryId: row.categoryId,
-      name: row.name,
-      hsnSacCode: row.hsnSacCode ?? undefined,
-      minPriceRupees: paiseToRupees(row.minPrice),
-      maxPriceRupees: paiseToRupees(row.maxPrice),
-      taxPercent: row.taxPercent,
-      hasMeasurements: row.hasMeasurements,
-      hasComplementary: row.hasComplementary,
-      isActive: row.isActive,
-    });
     setModalOpen(true);
+  };
+
+  const handleModalOpen = (open: boolean) => {
+    if (!open) return;
+    form.resetFields();
+    if (editing) {
+      form.setFieldsValue({
+        categoryId: editing.categoryId,
+        name: editing.name,
+        hsnSacCode: editing.hsnSacCode ?? '',
+        minPriceRupees: paiseToRupees(editing.minPrice),
+        maxPriceRupees: paiseToRupees(editing.maxPrice),
+        taxPercent: editing.taxPercent,
+        taxType: (editing.taxType as 'inclusive' | 'exclusive') ?? 'exclusive',
+        hasMeasurements: editing.hasMeasurements,
+        hasComplementary: editing.hasComplementary,
+        isActive: editing.isActive,
+      });
+    } else {
+      form.setFieldsValue({
+        isActive: true,
+        hasMeasurements: false,
+        hasComplementary: false,
+        taxPercent: 18,
+        taxType: 'exclusive',
+        minPriceRupees: 0,
+        maxPriceRupees: 0,
+      });
+    }
   };
 
   const onSubmit = async (values: ServiceFormValues) => {
@@ -171,6 +185,7 @@ export default function AdminMasterServicesPage() {
       minPrice: rupeesToPaise(values.minPriceRupees),
       maxPrice: rupeesToPaise(values.maxPriceRupees),
       taxPercent: values.taxPercent,
+      taxType: values.taxType,
       hasMeasurements: values.hasMeasurements,
       hasComplementary: values.hasComplementary,
       isActive: values.isActive,
@@ -307,6 +322,25 @@ export default function AdminMasterServicesPage() {
           ),
       },
       {
+        title: 'GST',
+        key: 'gst',
+        width: 130,
+        render: (_: unknown, row: AdminService) => {
+          if (!row.taxPercent) return emptyCell;
+          return (
+            <Space size={4}>
+              <Text style={{ fontWeight: 600 }}>{row.taxPercent}%</Text>
+              <Tag
+                color={row.taxType === 'inclusive' ? 'blue' : 'orange'}
+                style={{ fontSize: 11, margin: 0 }}
+              >
+                {row.taxType ?? 'exclusive'}
+              </Tag>
+            </Space>
+          );
+        },
+      },
+      {
         title: 'Created By',
         dataIndex: ['createdBy', 'name'],
         key: 'createdBy',
@@ -384,6 +418,7 @@ export default function AdminMasterServicesPage() {
                 taxPercent: row.taxPercent !== undefined ? Number(row.taxPercent) : 0,
                 hasMeasurements: false,
                 hasComplementary: false,
+                taxType: 'exclusive',
                 isActive: true,
               };
               await create.mutateAsync(body);
@@ -462,6 +497,7 @@ export default function AdminMasterServicesPage() {
         confirmLoading={create.isPending || update.isPending}
         width={680}
         destroyOnClose
+        afterOpenChange={handleModalOpen}
       >
         <Form<ServiceFormValues>
           form={form}
@@ -527,29 +563,106 @@ export default function AdminMasterServicesPage() {
 
           <Row gutter={12}>
             <Col span={8}>
-              <Form.Item
-                label="Tax %"
-                name="taxPercent"
-                rules={[{ required: true, message: 'Required' }]}
-              >
+              <Form.Item label="GST %" name="taxPercent">
                 <InputNumber
                   min={0}
                   max={100}
                   style={{ width: '100%' }}
                   formatter={(v) => `${v}%`}
                   parser={(v) => Number(String(v).replace('%', '')) as 0}
+                  placeholder="0"
                 />
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item
-                label="Measurements"
-                name="hasMeasurements"
-                valuePropName="checked"
-              >
+              <Form.Item label="Tax Type" name="taxType">
+                <Select
+                  options={[
+                    { value: 'exclusive', label: 'Exclusive' },
+                    { value: 'inclusive', label: 'Inclusive' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Measurements" name="hasMeasurements" valuePropName="checked">
                 <Switch checkedChildren="Yes" unCheckedChildren="No" />
               </Form.Item>
             </Col>
+          </Row>
+
+          {/* Live GST preview — shown only when a % is set */}
+          {!!watchedTaxPercent && (
+            <Row gutter={12} style={{ marginBottom: 12 }}>
+              <Col span={24}>
+                {(() => {
+                  const pricePaise = Math.round((watchedMaxPrice || 0) * 100);
+                  const pct = watchedTaxPercent || 0;
+                  const isInclusive = watchedTaxType === 'inclusive';
+                  const taxableAmt = isInclusive
+                    ? Math.round((pricePaise * 100) / (100 + pct))
+                    : pricePaise;
+                  const taxAmt = isInclusive
+                    ? pricePaise - taxableAmt
+                    : Math.round((pricePaise * pct) / 100);
+                  const grandTotal = isInclusive ? pricePaise : pricePaise + taxAmt;
+                  const halfAmt = Math.ceil(taxAmt / 2);
+                  const fmt = (p: number) =>
+                    (p / 100).toLocaleString('en-IN', {
+                      style: 'currency',
+                      currency: 'INR',
+                      maximumFractionDigits: 2,
+                    });
+                  return (
+                    <div style={{
+                      background: 'rgba(91,44,139,0.07)',
+                      border: '1px solid rgba(91,44,139,0.2)',
+                      borderRadius: 8,
+                      padding: '10px 14px',
+                    }}>
+                      <Space style={{ marginBottom: 6 }}>
+                        <Text style={{ fontWeight: 600, fontSize: 13 }}>GST Preview</Text>
+                        <Tag color={isInclusive ? 'blue' : 'orange'} style={{ fontSize: 11 }}>
+                          {isInclusive ? 'Inclusive — price includes tax' : 'Exclusive — tax added on top'}
+                        </Tag>
+                      </Space>
+                      <Row gutter={8}>
+                        <Col span={6}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>Taxable Amount</Text>
+                          <div style={{ fontWeight: 600 }}>{pricePaise ? fmt(taxableAmt) : '—'}</div>
+                        </Col>
+                        <Col span={6}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>GST ({pct}%)</Text>
+                          <div style={{ fontWeight: 600 }}>{pricePaise ? fmt(taxAmt) : '—'}</div>
+                        </Col>
+                        <Col span={7}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>
+                            CGST {pct / 2}% + SGST {pct / 2}%
+                            <br />
+                            <span style={{ fontSize: 11, color: '#aaa' }}>(same state)</span>
+                          </Text>
+                          <div style={{ fontWeight: 600 }}>
+                            {pricePaise ? `${fmt(halfAmt)} + ${fmt(taxAmt - halfAmt)}` : '—'}
+                          </div>
+                        </Col>
+                        <Col span={5}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>
+                            Final Amount
+                            {!isInclusive && <span style={{ color: '#aaa', fontSize: 11 }}> (excl.)</span>}
+                          </Text>
+                          <div style={{ fontWeight: 700, color: '#5B2C8B' }}>
+                            {pricePaise ? fmt(grandTotal) : '—'}
+                          </div>
+                        </Col>
+                      </Row>
+                    </div>
+                  );
+                })()}
+              </Col>
+            </Row>
+          )}
+
+          <Row gutter={12}>
             <Col span={8}>
               <Form.Item
                 label="Complementary Items"

@@ -15,6 +15,7 @@ export function toAdminService(row: ServiceWithRelations): AdminService {
     minPrice: row.minPrice,
     maxPrice: row.maxPrice,
     taxPercent: row.taxPercent,
+    taxType: row.taxType,
     hasMeasurements: row.hasMeasurements,
     hasComplementary: row.hasComplementary,
     isActive: row.isActive,

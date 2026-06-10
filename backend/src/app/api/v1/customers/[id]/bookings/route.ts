@@ -4,6 +4,7 @@ import { ok, created } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
 import { bookingCreateSchema } from '@shared/schemas/customer-modules';
+import { calculateGst } from '@/lib/gst';
 
 type Ctx = { params: { id: string } };
 
@@ -53,6 +54,15 @@ export const GET = route<Ctx>(async (req, { params }) => {
       notes: b.notes,
       consultantId: b.consultantStaffId,
       consultantName: b.consultantStaffId ? (employeeMap[b.consultantStaffId] ?? null) : null,
+      gstRateId: b.gstRateId,
+      taxableAmt: b.taxableAmt,
+      cgstPct: b.cgstPct,
+      cgstAmt: b.cgstAmt,
+      sgstPct: b.sgstPct,
+      sgstAmt: b.sgstAmt,
+      igstPct: b.igstPct,
+      igstAmt: b.igstAmt,
+      taxType: b.taxType,
       items: b.items.map((it) => ({
         id: it.id,
         category: it.category,
@@ -72,6 +82,44 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const customer = await requireCustomer(claims.orgId, params.id);
 
   const body = await parseBody(req, bookingCreateSchema);
+
+  // netAmount is 0 for this simple booking path (no line items); GST still computed if rate provided
+  let netAmount = 0;
+
+  // Compute GST if a rate was selected
+  let gstData: Record<string, unknown> = {};
+  if (body.gstRateId) {
+    const gstRate = await db.gstRate.findFirst({ where: { id: body.gstRateId, isActive: true } });
+    if (gstRate) {
+      const branchId = body.branchId ?? customer.branchId;
+      const [branchData, customerData] = await Promise.all([
+        branchId
+          ? db.branch.findUnique({ where: { id: branchId }, select: { stateId: true } })
+          : null,
+        db.customer.findUnique({ where: { id: customer.id }, select: { stateId: true } }),
+      ]);
+      const gst = calculateGst({
+        netAmountPaise: netAmount,
+        percentage: gstRate.percentage,
+        taxType: gstRate.taxType as 'inclusive' | 'exclusive',
+        branchStateId: branchData?.stateId ?? null,
+        customerStateId: customerData?.stateId ?? null,
+      });
+      gstData = {
+        gstRateId: gstRate.id,
+        taxableAmt: gst.taxableAmt,
+        cgstPct: gst.cgstPct,
+        cgstAmt: gst.cgstAmt,
+        sgstPct: gst.sgstPct,
+        sgstAmt: gst.sgstAmt,
+        igstPct: gst.igstPct,
+        igstAmt: gst.igstAmt,
+        taxType: gstRate.taxType,
+      };
+      if (gstRate.taxType === 'exclusive') netAmount = gst.grandTotal;
+    }
+  }
+
   const booking = await db.booking.create({
     data: {
       orgId: claims.orgId,
@@ -80,8 +128,10 @@ export const POST = route<Ctx>(async (req, { params }) => {
       serviceName: body.serviceName,
       scheduledAt: new Date(body.scheduledAt),
       status: body.status ?? 'scheduled',
+      netAmount,
       notes: body.notes || null,
       createdById: claims.sub,
+      ...gstData,
     },
   });
   return created(booking);

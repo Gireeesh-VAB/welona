@@ -16,10 +16,13 @@ export interface AdminProduct {
   purchasePrice: number;
   /** Basis points (1800 = 18%). */
   taxPercent: number;
+  /** 'inclusive' | 'exclusive' */
+  taxType: string;
   reorderLevel: number;
   imageUrl: string | null;
   trackBatches: boolean;
   trackExpiry: boolean;
+  hasComplementary: boolean;
   isActive: boolean;
   createdBy: { id: string; name: string; email: string } | null;
   createdAt: string;

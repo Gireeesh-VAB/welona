@@ -94,6 +94,7 @@ export const POST = route(async (req) => {
           email: body.email ?? null,
           ipAddress: body.ipAddress ?? null,
           loginPassword: body.loginPassword ?? null,
+          stateId: body.stateId ?? null,
           zoneId: body.zoneId,
           parentBranchId: body.parentBranchId ?? null,
           isActive: body.isActive ?? true,

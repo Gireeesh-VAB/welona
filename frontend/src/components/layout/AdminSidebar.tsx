@@ -103,6 +103,8 @@ const icons: Record<string, ReactNode> = {
   'master-role': <IdcardOutlined />,
   'master-create-offer': <GiftOutlined />,
   'master-category': <TagsOutlined />,
+  'master-products': <ShoppingOutlined />,
+  'master-complimentary': <GiftOutlined />,
   // HR sub-items
   'hr-designations': <SolutionOutlined />,
   'hr-departments': <ApartmentOutlined />,
