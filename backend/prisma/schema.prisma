@@ -211,8 +211,9 @@ model AdminUser {
   appliedLeaveApplications  LeaveApplication[] @relation("LeaveAppliedBy")
   approvedLeaveApplications LeaveApplication[] @relation("LeaveApprovedBy")
   createdHolidays      Holiday[]
-  createdProducts      Product[]
-  createdInventoryMovements InventoryMovement[]
+  createdProducts            Product[]
+  createdComplimentaryRules  ComplimentaryRule[]
+  createdInventoryMovements  InventoryMovement[]
   createdSuppliers     Supplier[]
   createdPurchaseOrders PurchaseOrder[]
   createdGoodsReceipts GoodsReceipt[]
@@ -636,10 +637,11 @@ model Service {
   isActive          Boolean     @default(true)
   createdByAdminId  String?
   createdByAdmin       AdminUser?           @relation(fields: [createdByAdminId], references: [id])
-  marketingOfferItems  MarketingOfferItem[]
-  branchServices       BranchService[]
-  createdAt            DateTime             @default(now())
-  updatedAt            DateTime             @updatedAt
+  marketingOfferItems    MarketingOfferItem[]
+  branchServices         BranchService[]
+  complimentaryRules     ComplimentaryRule[]
+  createdAt              DateTime             @default(now())
+  updatedAt              DateTime             @updatedAt
 
   @@index([categoryId])
   @@index([isActive])
@@ -1610,9 +1612,10 @@ model Product {
   purchaseOrderItems PurchaseOrderItem[]
   goodsReceiptItems  GoodsReceiptItem[]
   stockTransferItems StockTransferItem[]
-  batches          ProductBatch[]
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  batches                    ProductBatch[]
+  complimentaryAssignments   ComplimentaryProductAssignment[]
+  createdAt                  DateTime @default(now())
+  updatedAt                  DateTime @updatedAt
 
   @@index([categoryId])
   @@index([isActive])
@@ -1869,4 +1872,45 @@ model Holiday {
 
   @@unique([date, name])
   @@index([date])
+}
+
+// =============================================================================
+// Complimentary Product Rules
+// =============================================================================
+
+/// A rule that grants complimentary products when a specific service is booked.
+/// Each rule has a trigger service and a list of products to give for free.
+model ComplimentaryRule {
+  id               String   @id @default(cuid())
+  orgId            String
+  name             String
+  description      String?
+  /// The service that triggers this rule.
+  triggerServiceId String
+  triggerService   Service  @relation(fields: [triggerServiceId], references: [id])
+  isActive         Boolean  @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  assignments      ComplimentaryProductAssignment[]
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  @@index([orgId])
+  @@index([triggerServiceId])
+  @@index([isActive])
+}
+
+/// A product (with quantity) assigned as complimentary under a `ComplimentaryRule`.
+model ComplimentaryProductAssignment {
+  id        String            @id @default(cuid())
+  ruleId    String
+  rule      ComplimentaryRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+  productId String
+  product   Product           @relation(fields: [productId], references: [id])
+  quantity  Int               @default(1)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  @@unique([ruleId, productId])
+  @@index([productId])
 }

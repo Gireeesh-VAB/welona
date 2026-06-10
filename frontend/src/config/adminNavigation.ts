@@ -92,6 +92,12 @@ export const adminNavigation: AdminNavItem[] = [
         path: '/admin/master/products',
         description: 'Retail product master — SKU, brand, prices, tax and stock thresholds.',
       },
+      {
+        key: 'master-complimentary',
+        label: 'Complimentary',
+        path: '/admin/master/complimentary',
+        description: 'Rules that grant complimentary products when a specific service is booked.',
+      },
     ],
   },
   {
