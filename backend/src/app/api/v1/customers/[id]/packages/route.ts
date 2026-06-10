@@ -36,10 +36,13 @@ export const POST = route<Ctx>(async (req, { params }) => {
   if (body.usedSessions > body.totalSessions) {
     throw Errors.badRequest('Used sessions cannot exceed total sessions');
   }
-  const pkg = await db.package.create({
+  const branchId = claims.branchIds?.[0] ?? null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const pkg = await (db as any).package.create({
     data: {
       orgId: claims.orgId,
       customerId: customer.id,
+      branchId,
       treatmentId: body.treatmentId ?? null,
       name: body.name,
       totalSessions: body.totalSessions,

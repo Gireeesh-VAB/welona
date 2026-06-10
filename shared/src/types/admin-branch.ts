@@ -16,6 +16,9 @@ export interface AdminBranch {
   phone: string | null;
   email: string | null;
   ipAddress: string | null;
+  loginPassword: string | null;
+  stateId: string | null;
+  stateName: string | null;
   isActive: boolean;
   zone: {
     id: string;

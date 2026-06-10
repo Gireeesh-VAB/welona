@@ -6,6 +6,11 @@ export type ProductWithRelations = Prisma.ProductGetPayload<{
   include: { category: true; createdByAdmin: true };
 }>;
 
+export const productAdminInclude = {
+  category: true,
+  createdByAdmin: true,
+} satisfies Prisma.ProductInclude;
+
 export function toAdminProduct(row: ProductWithRelations): AdminProduct {
   return {
     id: row.id,
@@ -21,10 +26,12 @@ export function toAdminProduct(row: ProductWithRelations): AdminProduct {
     salePrice: row.salePrice,
     purchasePrice: row.purchasePrice,
     taxPercent: row.taxPercent,
+    taxType: row.taxType,
     reorderLevel: row.reorderLevel,
     imageUrl: row.imageUrl,
     trackBatches: row.trackBatches,
     trackExpiry: row.trackExpiry,
+    hasComplementary: row.hasComplementary,
     isActive: row.isActive,
     createdBy: row.createdByAdmin
       ? {

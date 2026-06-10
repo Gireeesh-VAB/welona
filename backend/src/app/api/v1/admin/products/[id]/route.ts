@@ -5,7 +5,7 @@ import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
 import { requireAdminAuth } from '@/lib/auth/service';
 import { adminProductUpdateSchema } from '@shared/schemas/admin-products';
-import { toAdminProduct } from '@/lib/admin-product-mapper';
+import { toAdminProduct, productAdminInclude } from '@/lib/admin-product-mapper';
 
 interface RouteContext {
   params: { id: string };
@@ -31,13 +31,15 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
         ...(body.salePrice !== undefined && { salePrice: body.salePrice }),
         ...(body.purchasePrice !== undefined && { purchasePrice: body.purchasePrice }),
         ...(body.taxPercent !== undefined && { taxPercent: body.taxPercent }),
+        ...(body.taxType !== undefined && { taxType: body.taxType }),
         ...(body.reorderLevel !== undefined && { reorderLevel: body.reorderLevel }),
         ...(body.imageUrl !== undefined && { imageUrl: body.imageUrl }),
         ...(body.trackBatches !== undefined && { trackBatches: body.trackBatches }),
         ...(body.trackExpiry !== undefined && { trackExpiry: body.trackExpiry }),
+        ...(body.hasComplementary !== undefined && { hasComplementary: body.hasComplementary }),
         ...(body.isActive !== undefined && { isActive: body.isActive }),
       },
-      include: { category: true, createdByAdmin: true },
+      include: productAdminInclude,
     });
     return ok(toAdminProduct(row));
   } catch (error) {

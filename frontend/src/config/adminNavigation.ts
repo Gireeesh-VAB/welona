@@ -63,6 +63,18 @@ export const adminNavigation: AdminNavItem[] = [
         description: 'Tax codes and slabs (GST, CGST, SGST, IGST, cess).',
       },
       {
+        key: 'master-states',
+        label: 'States',
+        path: '/admin/master/states',
+        description: 'Indian state master — used for GST intra/inter-state tax determination.',
+      },
+      {
+        key: 'master-gst-rates',
+        label: 'GST Rates',
+        path: '/admin/master/gst-rates',
+        description: 'GST rate slabs (5%, 12%, 18%, 28%) with inclusive/exclusive configuration.',
+      },
+      {
         key: 'master-media',
         label: 'Media',
         path: '/admin/master/media',
@@ -91,6 +103,18 @@ export const adminNavigation: AdminNavItem[] = [
         label: 'Products',
         path: '/admin/master/products',
         description: 'Retail product master — SKU, brand, prices, tax and stock thresholds.',
+      },
+      {
+        key: 'master-complimentary',
+        label: 'Complimentary',
+        path: '/admin/master/complimentary',
+        description: 'Rules that grant complimentary products when a specific service is booked.',
+      },
+      {
+        key: 'master-coupons',
+        label: 'Coupons',
+        path: '/admin/master/coupons',
+        description: 'Create and manage discount coupons (percentage or fixed amount) for branches.',
       },
     ],
   },

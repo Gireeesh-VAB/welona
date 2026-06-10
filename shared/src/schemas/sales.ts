@@ -44,6 +44,7 @@ export const customerCreateSchema = z.object({
   gstin: z.string().trim().optional(),
   address: z.string().trim().optional(),
   city: z.string().trim().optional(),
+  stateId: z.string().optional(),
   notes: z.string().trim().optional(),
   branchId: id.optional(),
   tags: z.array(z.string().trim()).optional(),

@@ -8,7 +8,7 @@ import {
   adminProductCreateSchema,
   adminProductListQuerySchema,
 } from '@shared/schemas/admin-products';
-import { toAdminProduct } from '@/lib/admin-product-mapper';
+import { toAdminProduct, productAdminInclude } from '@/lib/admin-product-mapper';
 import { readClientIp } from '@/lib/client-ip';
 
 export const GET = route(async (req) => {
@@ -36,7 +36,7 @@ export const GET = route(async (req) => {
   const [items, total] = await Promise.all([
     db.product.findMany({
       where,
-      include: { category: true, createdByAdmin: true },
+      include: productAdminInclude,
       orderBy: [{ name: 'asc' }],
       skip: (page - 1) * limit,
       take: limit,
@@ -67,15 +67,17 @@ export const POST = route(async (req) => {
         salePrice: body.salePrice,
         purchasePrice: body.purchasePrice,
         taxPercent: body.taxPercent,
+        taxType: body.taxType,
         reorderLevel: body.reorderLevel,
         imageUrl: body.imageUrl ?? null,
         trackBatches: body.trackBatches,
         trackExpiry: body.trackExpiry,
+        hasComplementary: body.hasComplementary,
         isActive: body.isActive,
         ipAddress: ip,
         createdByAdminId: claims.sub,
       },
-      include: { category: true, createdByAdmin: true },
+      include: productAdminInclude,
     });
     return created(toAdminProduct(row));
   } catch (error) {

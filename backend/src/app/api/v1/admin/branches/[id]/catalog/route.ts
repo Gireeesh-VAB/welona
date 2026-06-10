@@ -23,12 +23,13 @@ export const GET = route<RouteContext>(async (req, { params }) => {
   const exists = await db.branch.findUnique({ where: { id: params.id }, select: { id: true } });
   if (!exists) throw Errors.notFound('Branch');
 
-  const [products, services, paymentModes, categories, ledgers] = await Promise.all([
+  const [products, services, paymentModes, categories, ledgers, complimentaryRules] = await Promise.all([
     db.branchProduct.findMany({ where: { branchId: params.id }, select: { productId: true } }),
     db.branchService.findMany({ where: { branchId: params.id }, select: { serviceId: true } }),
     db.branchPaymentMode.findMany({ where: { branchId: params.id }, select: { paymentModeId: true } }),
     db.branchCategory.findMany({ where: { branchId: params.id }, select: { categoryId: true } }),
     db.branchLedger.findMany({ where: { branchId: params.id }, select: { ledgerId: true } }),
+    db.complimentaryServiceBranch.findMany({ where: { branchId: params.id }, select: { ruleId: true } }),
   ]);
 
   return ok<AdminBranchCatalogInput>({
@@ -37,6 +38,7 @@ export const GET = route<RouteContext>(async (req, { params }) => {
     paymentModeIds: paymentModes.map((p) => p.paymentModeId),
     categoryIds: categories.map((c) => c.categoryId),
     ledgerIds: ledgers.map((l) => l.ledgerId),
+    complimentaryRuleIds: complimentaryRules.map((r) => r.ruleId),
   });
 });
 
@@ -51,6 +53,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
   const paymentModeIds = Array.from(new Set(body.paymentModeIds));
   const categoryIds = Array.from(new Set(body.categoryIds));
   const ledgerIds = Array.from(new Set(body.ledgerIds));
+  const complimentaryRuleIds = Array.from(new Set(body.complimentaryRuleIds));
 
   // Verify every submitted id exists so a bad id can't silently drop rows.
   const countOk = async (
@@ -69,6 +72,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
     countOk(paymentModeIds.length, db.paymentMode, paymentModeIds, 'payment modes'),
     countOk(categoryIds.length, db.category, categoryIds, 'categories'),
     countOk(ledgerIds.length, db.ledger, ledgerIds, 'ledgers'),
+    countOk(complimentaryRuleIds.length, db.complimentaryServiceRule, complimentaryRuleIds, 'complimentary rules'),
   ]);
 
   await db.$transaction([
@@ -77,22 +81,14 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
     db.branchPaymentMode.deleteMany({ where: { branchId: params.id } }),
     db.branchCategory.deleteMany({ where: { branchId: params.id } }),
     db.branchLedger.deleteMany({ where: { branchId: params.id } }),
-    db.branchProduct.createMany({
-      data: productIds.map((productId) => ({ branchId: params.id, productId })),
-    }),
-    db.branchService.createMany({
-      data: serviceIds.map((serviceId) => ({ branchId: params.id, serviceId })),
-    }),
-    db.branchPaymentMode.createMany({
-      data: paymentModeIds.map((paymentModeId) => ({ branchId: params.id, paymentModeId })),
-    }),
-    db.branchCategory.createMany({
-      data: categoryIds.map((categoryId) => ({ branchId: params.id, categoryId })),
-    }),
-    db.branchLedger.createMany({
-      data: ledgerIds.map((ledgerId) => ({ branchId: params.id, ledgerId })),
-    }),
+    db.complimentaryServiceBranch.deleteMany({ where: { branchId: params.id } }),
+    db.branchProduct.createMany({ data: productIds.map((productId) => ({ branchId: params.id, productId })) }),
+    db.branchService.createMany({ data: serviceIds.map((serviceId) => ({ branchId: params.id, serviceId })) }),
+    db.branchPaymentMode.createMany({ data: paymentModeIds.map((paymentModeId) => ({ branchId: params.id, paymentModeId })) }),
+    db.branchCategory.createMany({ data: categoryIds.map((categoryId) => ({ branchId: params.id, categoryId })) }),
+    db.branchLedger.createMany({ data: ledgerIds.map((ledgerId) => ({ branchId: params.id, ledgerId })) }),
+    db.complimentaryServiceBranch.createMany({ data: complimentaryRuleIds.map((ruleId) => ({ branchId: params.id, ruleId })) }),
   ]);
 
-  return ok<AdminBranchCatalogInput>({ productIds, serviceIds, paymentModeIds, categoryIds, ledgerIds });
+  return ok<AdminBranchCatalogInput>({ productIds, serviceIds, paymentModeIds, categoryIds, ledgerIds, complimentaryRuleIds });
 });

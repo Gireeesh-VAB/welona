@@ -35,6 +35,8 @@ import {
   DeleteOutlined,
   EditOutlined,
   EnvironmentOutlined,
+  EyeInvisibleOutlined,
+  EyeOutlined,
   PlusOutlined,
   SearchOutlined,
   StarFilled,
@@ -62,7 +64,9 @@ import { useAdminServices } from '@/hooks/useAdminServices';
 import { useAdminPaymentModes } from '@/hooks/useAdminPaymentModes';
 import { useAdminCategories } from '@/hooks/useAdminCategories';
 import { useAdminLedgers } from '@/hooks/useAdminLedgers';
+import { useAdminComplimentaryRules } from '@/hooks/useAdminComplimentary';
 import { useZones } from '@/hooks/useZones';
+import { useAdminStates } from '@/hooks/useAdminStates';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
@@ -126,11 +130,13 @@ interface BranchFormValues {
   branchCode: string;
   branchType: BranchType;
   zoneId: string;
+  stateId?: string;
   parentBranchId?: string;
   address?: string;
   phone?: string;
   email?: string;
   ipAddress?: string;
+  loginPassword?: string;
   isActive: boolean;
   additionalAddresses?: AdditionalAddressFormValues[];
 }
@@ -155,6 +161,24 @@ function formatDate(iso: string): string {
     month: 'short',
     year: 'numeric',
   });
+}
+
+function PasswordCell({ password }: { password: string }) {
+  const [visible, setVisible] = useState(false);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+      <Text code style={{ fontSize: 11, letterSpacing: visible ? 0 : 2 }}>
+        {visible ? password : '••••••••'}
+      </Text>
+      <Button
+        type="text"
+        size="small"
+        icon={visible ? <EyeInvisibleOutlined /> : <EyeOutlined />}
+        onClick={(e) => { e.stopPropagation(); setVisible((v) => !v); }}
+        style={{ padding: 0, height: 16, width: 16, minWidth: 16, color: '#888' }}
+      />
+    </div>
+  );
 }
 
 export default function AdminMasterBranchesPage() {
@@ -249,6 +273,7 @@ export default function AdminMasterBranchesPage() {
   // Zone options for the dropdown — fetch a generous page so the picker
   // doesn't paginate; the master zones list isn't expected to be huge.
   const { data: zonesData } = useZones({ limit: 100 });
+  const { data: statesData } = useAdminStates({ limit: 50 });
   const zoneOptions = useMemo(
     () =>
       (zonesData?.items ?? []).map((z) => ({
@@ -256,6 +281,15 @@ export default function AdminMasterBranchesPage() {
         label: `${z.country} — ${z.stateName}`,
       })),
     [zonesData],
+  );
+
+  const stateOptions = useMemo(
+    () =>
+      (statesData?.items ?? []).map((s: any) => ({
+        value: s.id,
+        label: `${s.name} (${s.code})`,
+      })),
+    [statesData],
   );
 
   const createBranch = useCreateAdminBranch();
@@ -280,11 +314,13 @@ export default function AdminMasterBranchesPage() {
       branchCode: branch.branchCode,
       branchType: branch.branchType,
       zoneId: branch.zone?.id ?? '',
+      stateId: branch.stateId ?? undefined,
       parentBranchId: branch.parent?.id ?? undefined,
       address: branch.address ?? undefined,
       phone: branch.phone ?? undefined,
       email: branch.email ?? undefined,
       ipAddress: branch.ipAddress ?? undefined,
+      loginPassword: undefined,
       isActive: branch.isActive,
       additionalAddresses: branch.additionalAddresses.map((a) => ({
         id: a.id,
@@ -330,6 +366,7 @@ export default function AdminMasterBranchesPage() {
   const [paymentModeKeys, setPaymentModeKeys] = useState<string[]>([]);
   const [categoryKeys, setCategoryKeys] = useState<string[]>([]);
   const [ledgerKeys, setLedgerKeys] = useState<string[]>([]);
+  const [complimentaryRuleKeys, setComplimentaryRuleKeys] = useState<string[]>([]);
   const { data: catalogData, isLoading: catalogLoading } = useBranchCatalog(
     catalogBranch?.id ?? null,
   );
@@ -340,6 +377,7 @@ export default function AdminMasterBranchesPage() {
   const { data: paymentModesData } = useAdminPaymentModes({ active: 'active', limit: 100 });
   const { data: categoriesData } = useAdminCategories({ active: 'active', limit: 100 });
   const { data: ledgersData } = useAdminLedgers({ active: 'active', limit: 100 });
+  const { data: complimentaryRulesData } = useAdminComplimentaryRules({ isActive: true, limit: 500 });
   const productTransferData = useMemo(
     () =>
       (productsData?.items ?? []).map((p) => ({
@@ -372,6 +410,14 @@ export default function AdminMasterBranchesPage() {
       })),
     [ledgersData],
   );
+  const complimentaryTransferData = useMemo(
+    () =>
+      (complimentaryRulesData?.items ?? []).map((r) => ({
+        key: r.id,
+        title: `${r.categoryName}${r.name ? ` — ${r.name}` : ''}`,
+      })),
+    [complimentaryRulesData],
+  );
 
   // Sync the drawer selection to the loaded assignment whenever it arrives.
   useEffect(() => {
@@ -381,6 +427,7 @@ export default function AdminMasterBranchesPage() {
       setPaymentModeKeys(catalogData.paymentModeIds);
       setCategoryKeys(catalogData.categoryIds);
       setLedgerKeys(catalogData.ledgerIds);
+      setComplimentaryRuleKeys(catalogData.complimentaryRuleIds ?? []);
     }
   }, [catalogData]);
 
@@ -392,6 +439,7 @@ export default function AdminMasterBranchesPage() {
         paymentModeIds: paymentModeKeys,
         categoryIds: categoryKeys,
         ledgerIds: ledgerKeys,
+        complimentaryRuleIds: complimentaryRuleKeys,
       });
       message.success('Branch assignment updated');
       setCatalogBranch(null);
@@ -486,11 +534,13 @@ export default function AdminMasterBranchesPage() {
       branchCode: values.branchCode.trim(),
       branchType: values.branchType,
       zoneId: values.zoneId,
+      stateId: values.stateId || undefined,
       parentBranchId: values.parentBranchId || null,
       address: values.address?.trim() ? values.address.trim() : undefined,
       phone: values.phone?.trim() ? values.phone.trim() : undefined,
       email: values.email?.trim() ? values.email.trim() : undefined,
       ipAddress: values.ipAddress?.trim() ? values.ipAddress.trim() : undefined,
+      loginPassword: values.loginPassword?.trim() ? values.loginPassword.trim() : undefined,
       isActive: values.isActive,
       additionalAddresses: cleanedAdditional.length > 0 ? cleanedAdditional : undefined,
     };
@@ -630,6 +680,20 @@ export default function AdminMasterBranchesPage() {
           ),
       },
       {
+        title: 'GST State',
+        key: 'gstState',
+        width: 140,
+        render: (_: unknown, branch: AdminBranch) =>
+          branch.stateName ? (
+            <Space size={4} direction="vertical" style={{ gap: 2 }}>
+              <Tag color="purple" style={{ fontSize: 11, margin: 0 }}>{branch.stateName}</Tag>
+              <Text style={{ fontSize: 10, color: '#888' }}>CGST+SGST / IGST</Text>
+            </Space>
+          ) : (
+            <Text type="secondary" style={{ fontSize: 12 }}>Not set</Text>
+          ),
+      },
+      {
         title: 'Parent',
         key: 'parent',
         width: 170,
@@ -703,6 +767,20 @@ export default function AdminMasterBranchesPage() {
         width: 140,
         render: (value: string | null) =>
           value ? <Text code style={{ fontSize: 12 }}>{value}</Text> : emptyCell,
+      },
+      {
+        title: 'Login',
+        key: 'login',
+        width: 180,
+        render: (_, branch) => {
+          if (!branch.loginPassword) return emptyCell;
+          return (
+            <div style={{ lineHeight: 1.3 }}>
+              <Text code style={{ fontSize: 11 }}>{branch.branchCode.toLowerCase()}</Text>
+              <PasswordCell password={branch.loginPassword} />
+            </div>
+          );
+        },
       },
       {
         title: 'Addresses',
@@ -1086,6 +1164,60 @@ export default function AdminMasterBranchesPage() {
           </Form.Item>
 
           <Form.Item
+            label="State (for GST)"
+            name="stateId"
+            tooltip="Used to determine CGST+SGST (intra-state) or IGST (inter-state) when billing customers."
+          >
+            <Select
+              allowClear
+              showSearch
+              placeholder="Select state"
+              options={stateOptions}
+              filterOption={(input, option) =>
+                (option?.label ?? '').toLowerCase().includes(input.toLowerCase())
+              }
+              notFoundContent="No states — add them under Master / States first."
+            />
+          </Form.Item>
+
+          {/* GST logic explainer — shown when a state is selected */}
+          <Form.Item noStyle shouldUpdate={(prev, cur) => prev.stateId !== cur.stateId}>
+            {({ getFieldValue }) => {
+              const sid = getFieldValue('stateId');
+              const stateName = sid
+                ? (statesData?.items ?? []).find((s: any) => s.id === sid)?.name
+                : null;
+              if (!stateName) return null;
+              return (
+                <div style={{
+                  background: 'rgba(91,44,139,0.07)',
+                  border: '1px solid rgba(91,44,139,0.2)',
+                  borderRadius: 8,
+                  padding: '10px 14px',
+                  marginBottom: 16,
+                  fontSize: 13,
+                }}>
+                  <div style={{ fontWeight: 600, marginBottom: 6 }}>
+                    GST Application — Branch State: {stateName}
+                  </div>
+                  <Row gutter={16}>
+                    <Col span={12}>
+                      <Tag color="green" style={{ marginBottom: 4 }}>Intra-state customer</Tag>
+                      <div style={{ fontSize: 12 }}>Customer in <strong>{stateName}</strong></div>
+                      <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>→ CGST + SGST (each half of GST rate)</div>
+                    </Col>
+                    <Col span={12}>
+                      <Tag color="blue" style={{ marginBottom: 4 }}>Inter-state customer</Tag>
+                      <div style={{ fontSize: 12 }}>Customer in any other state</div>
+                      <div style={{ fontSize: 12, color: '#888', marginTop: 2 }}>→ IGST (full GST rate)</div>
+                    </Col>
+                  </Row>
+                </div>
+              );
+            }}
+          </Form.Item>
+
+          <Form.Item
             label="Parent Branch"
             name="parentBranchId"
             tooltip="Optional. Place this branch under another in the hierarchy (e.g. an outlet under a region). Leave empty for a top-level branch."
@@ -1135,6 +1267,21 @@ export default function AdminMasterBranchesPage() {
             ]}
           >
             <Input placeholder="e.g. 192.168.1.10" />
+          </Form.Item>
+
+          <Form.Item
+            label={editing ? 'Login Password (leave blank to keep existing)' : 'Login Password'}
+            name="loginPassword"
+            tooltip="Branch login password. Sets the username to the branch code (lowercase). Min 6 characters."
+            rules={[
+              { min: 6, message: 'Password must be at least 6 characters' },
+            ]}
+          >
+            <Input.Password
+              placeholder={editing ? 'Enter new password to change' : 'e.g. Welona@123'}
+              maxLength={100}
+              autoComplete="new-password"
+            />
           </Form.Item>
 
           <Form.Item
@@ -1481,6 +1628,7 @@ export default function AdminMasterBranchesPage() {
                 { key: 'payment-modes', label: 'Payment Modes', data: paymentModeTransferData, keys: paymentModeKeys, set: setPaymentModeKeys, right: 'Accepted' },
                 { key: 'categories', label: 'Categories', data: categoryTransferData, keys: categoryKeys, set: setCategoryKeys, right: 'Assigned' },
                 { key: 'ledgers', label: 'Ledgers', data: ledgerTransferData, keys: ledgerKeys, set: setLedgerKeys, right: 'Assigned' },
+                { key: 'complimentary', label: 'Complimentary', data: complimentaryTransferData, keys: complimentaryRuleKeys, set: setComplimentaryRuleKeys, right: 'Assigned' },
               ].map((t) => ({
                 key: t.key,
                 label: `${t.label} (${t.keys.length})`,

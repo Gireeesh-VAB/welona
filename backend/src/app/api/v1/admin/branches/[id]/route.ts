@@ -1,4 +1,5 @@
 import { Prisma } from '@prisma/client';
+import bcrypt from 'bcryptjs';
 import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
@@ -33,21 +34,49 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
   }
 
   try {
-    const branch = await db.branch.update({
-      where: { id: params.id },
-      data: {
-        ...(body.branchName !== undefined && { name: body.branchName }),
-        ...(body.branchCode !== undefined && { code: body.branchCode }),
-        ...(body.branchType !== undefined && { branchType: body.branchType }),
-        ...(body.zoneId !== undefined && { zoneId: body.zoneId }),
-        ...(body.parentBranchId !== undefined && { parentBranchId: body.parentBranchId }),
-        ...(body.address !== undefined && { address: body.address ?? null }),
-        ...(body.phone !== undefined && { phone: body.phone ?? null }),
-        ...(body.email !== undefined && { email: body.email ?? null }),
-        ...(body.ipAddress !== undefined && { ipAddress: body.ipAddress ?? null }),
-        ...(body.isActive !== undefined && { isActive: body.isActive }),
-      },
-      include: branchAdminInclude,
+    const branch = await db.$transaction(async (tx) => {
+      const updated = await tx.branch.update({
+        where: { id: params.id },
+        data: {
+          ...(body.branchName !== undefined && { name: body.branchName }),
+          ...(body.branchCode !== undefined && { code: body.branchCode }),
+          ...(body.branchType !== undefined && { branchType: body.branchType }),
+          ...(body.zoneId !== undefined && { zoneId: body.zoneId }),
+          ...(body.parentBranchId !== undefined && { parentBranchId: body.parentBranchId }),
+          ...(body.address !== undefined && { address: body.address ?? null }),
+          ...(body.phone !== undefined && { phone: body.phone ?? null }),
+          ...(body.email !== undefined && { email: body.email ?? null }),
+          ...(body.ipAddress !== undefined && { ipAddress: body.ipAddress ?? null }),
+          ...(body.loginPassword !== undefined && { loginPassword: body.loginPassword ?? null }),
+          ...(body.stateId !== undefined && { stateId: body.stateId ?? null }),
+          ...(body.isActive !== undefined && { isActive: body.isActive }),
+        },
+        include: branchAdminInclude,
+      });
+
+      // Sync the SystemUser password if a new password was provided.
+      if (body.loginPassword) {
+        const passwordHash = await bcrypt.hash(body.loginPassword, 10);
+        const userName = (body.branchCode ?? updated.code).toLowerCase();
+        const existing = await tx.systemUser.findFirst({ where: { branchId: params.id } });
+        if (existing) {
+          await tx.systemUser.update({
+            where: { id: existing.id },
+            data: { passwordHash, userName },
+          });
+        } else {
+          await tx.systemUser.create({
+            data: {
+              userName,
+              passwordHash,
+              branchId: params.id,
+              isActive: true,
+            },
+          });
+        }
+      }
+
+      return updated;
     });
     return ok(toAdminBranch(branch));
   } catch (error) {

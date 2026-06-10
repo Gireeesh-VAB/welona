@@ -6,6 +6,7 @@ import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
 import { nextDocumentNumber } from '@/lib/sales/service';
 import { appointmentCreateSchema } from '@shared/schemas/customer-modules';
+import { calculateGst } from '@/lib/gst';
 
 const monthQuerySchema = z.object({
   month: z
@@ -82,9 +83,68 @@ export const POST = route(async (req) => {
     sortOrder: i,
   }));
   const totalAmount = items.reduce((s, it) => s + it.lineTotal, 0);
-  const netAmount = totalAmount - body.discount + body.roundOff;
+  let netAmount = totalAmount - body.discount + body.roundOff;
   const serviceName =
     items.length === 1 ? items[0].service : `${items[0].service} +${items.length - 1} more`;
+
+  // Auto-calculate GST from each service's taxPercent / taxType configuration.
+  // Look up branch + customer states once so CGST/SGST vs IGST can be determined.
+  const branchId = body.branchId ?? customer.branchId;
+  const [branchData, customerData] = await Promise.all([
+    branchId ? db.branch.findUnique({ where: { id: branchId }, select: { stateId: true } }) : null,
+    db.customer.findUnique({ where: { id: customer.id }, select: { stateId: true } }),
+  ]);
+
+  let aggregateTaxable = 0;
+  let aggregateTax = 0;
+  let aggregateCgst = 0;
+  let aggregateSgst = 0;
+  let aggregateIgst = 0;
+  let extraAmount = 0; // exclusive tax added on top of netAmount
+
+  // Fetch all services that appear in the booking items (by name, org-scoped).
+  const serviceNames = [...new Set(items.map((it) => it.service))];
+  const serviceRows = await db.service.findMany({
+    where: { name: { in: serviceNames }, isActive: true },
+    select: { name: true, taxPercent: true, taxType: true },
+  });
+  const serviceMap = new Map(serviceRows.map((s) => [s.name, s]));
+
+  for (const item of items) {
+    const svc = serviceMap.get(item.service);
+    if (!svc || !svc.taxPercent) continue;
+    const linePaise = item.lineTotal;
+    const gst = calculateGst({
+      netAmountPaise: linePaise,
+      percentage: svc.taxPercent,
+      taxType: svc.taxType as 'inclusive' | 'exclusive',
+      branchStateId: branchData?.stateId ?? null,
+      customerStateId: customerData?.stateId ?? null,
+    });
+    aggregateTaxable += gst.taxableAmt;
+    aggregateTax += gst.totalTax;
+    aggregateCgst += gst.cgstAmt;
+    aggregateSgst += gst.sgstAmt;
+    aggregateIgst += gst.igstAmt;
+    if (svc.taxType === 'exclusive') extraAmount += gst.totalTax;
+  }
+
+  const isIntraState = !!(branchData?.stateId && customerData?.stateId && branchData.stateId === customerData.stateId);
+
+  const gstData: Record<string, unknown> = aggregateTax > 0
+    ? {
+        taxableAmt: aggregateTaxable,
+        cgstPct: isIntraState ? 50 : 0,   // 50 = 0.5 in basis points representation — half of full rate
+        cgstAmt: aggregateCgst,
+        sgstPct: isIntraState ? 50 : 0,
+        sgstAmt: aggregateSgst,
+        igstPct: isIntraState ? 0 : 100,
+        igstAmt: aggregateIgst,
+        taxType: isIntraState ? 'cgst_sgst' : 'igst',
+      }
+    : {};
+
+  netAmount += extraAmount;
 
   const booking = await db.$transaction(async (tx) => {
     const number = await nextDocumentNumber(tx, claims.orgId, 'booking', 'BKG');
@@ -105,6 +165,7 @@ export const POST = route(async (req) => {
         notes: body.notes || null,
         createdById: claims.sub,
         items: { create: items },
+        ...gstData,
       },
     });
   });

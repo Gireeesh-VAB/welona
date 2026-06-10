@@ -9,6 +9,8 @@ export interface AdminService {
   maxPrice: number;
   /** Whole percentage, 0-100. */
   taxPercent: number;
+  /** 'inclusive' | 'exclusive' */
+  taxType: string;
   hasMeasurements: boolean;
   hasComplementary: boolean;
   isActive: boolean;

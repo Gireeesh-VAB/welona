@@ -94,10 +94,12 @@ interface FormValues {
   salePriceRupees: number;
   purchasePriceRupees: number;
   taxPercentDisplay: number;
+  taxType: 'inclusive' | 'exclusive';
   reorderLevel: number;
   imageUrl?: string | null;
   trackBatches: boolean;
   trackExpiry: boolean;
+  hasComplementary: boolean;
   isActive: boolean;
 }
 
@@ -137,6 +139,7 @@ export default function AdminMasterProductsPage() {
     [categoriesData],
   );
 
+
   const create = useCreateProduct();
   const update = useUpdateProduct();
   const remove = useDeleteProduct();
@@ -145,6 +148,9 @@ export default function AdminMasterProductsPage() {
   const [editing, setEditing] = useState<AdminProduct | null>(null);
   const [form] = Form.useForm<FormValues>();
   const imageUrl = Form.useWatch('imageUrl', form);
+  const watchedTaxPercent = Form.useWatch('taxPercentDisplay', form);
+  const watchedTaxType = Form.useWatch('taxType', form);
+  const watchedSalePrice = Form.useWatch('salePriceRupees', form);
   // Product whose QR/barcode label is being viewed.
   const [qrProduct, setQrProduct] = useState<AdminProduct | null>(null);
 
@@ -165,43 +171,54 @@ export default function AdminMasterProductsPage() {
 
   const openCreate = () => {
     setEditing(null);
-    form.resetFields();
-    form.setFieldsValue({
-      uom: 'unit',
-      mrpRupees: 0,
-      salePriceRupees: 0,
-      purchasePriceRupees: 0,
-      taxPercentDisplay: 18,
-      reorderLevel: 0,
-      trackBatches: false,
-      trackExpiry: false,
-      isActive: true,
-    });
     setModalOpen(true);
   };
 
   const openEdit = (row: AdminProduct) => {
     setEditing(row);
-    form.setFieldsValue({
-      sku: row.sku,
-      name: row.name,
-      brand: row.brand ?? undefined,
-      categoryId: row.category?.id,
-      hsnSacCode: row.hsnSacCode ?? undefined,
-      uom: row.uom,
-      barcode: row.barcode ?? undefined,
-      description: row.description ?? undefined,
-      mrpRupees: row.mrp / 100,
-      salePriceRupees: row.salePrice / 100,
-      purchasePriceRupees: row.purchasePrice / 100,
-      taxPercentDisplay: row.taxPercent / 100,
-      reorderLevel: row.reorderLevel,
-      imageUrl: row.imageUrl ?? null,
-      trackBatches: row.trackBatches,
-      trackExpiry: row.trackExpiry,
-      isActive: row.isActive,
-    });
     setModalOpen(true);
+  };
+
+  const handleModalOpen = (open: boolean) => {
+    if (!open) return;
+    form.resetFields();
+    if (editing) {
+      form.setFieldsValue({
+        sku: editing.sku,
+        name: editing.name,
+        brand: editing.brand ?? '',
+        categoryId: editing.category?.id,
+        hsnSacCode: editing.hsnSacCode ?? '',
+        uom: editing.uom,
+        barcode: editing.barcode ?? '',
+        description: editing.description ?? '',
+        mrpRupees: editing.mrp / 100,
+        salePriceRupees: editing.salePrice / 100,
+        purchasePriceRupees: editing.purchasePrice / 100,
+        taxPercentDisplay: editing.taxPercent / 100,
+        taxType: (editing.taxType as 'inclusive' | 'exclusive') ?? 'exclusive',
+        reorderLevel: editing.reorderLevel,
+        imageUrl: editing.imageUrl ?? null,
+        trackBatches: editing.trackBatches,
+        trackExpiry: editing.trackExpiry,
+        hasComplementary: editing.hasComplementary,
+        isActive: editing.isActive,
+      });
+    } else {
+      form.setFieldsValue({
+        uom: 'unit',
+        mrpRupees: 0,
+        salePriceRupees: 0,
+        purchasePriceRupees: 0,
+        taxPercentDisplay: 18,
+        taxType: 'exclusive',
+        reorderLevel: 0,
+        trackBatches: false,
+        trackExpiry: false,
+        hasComplementary: false,
+        isActive: true,
+      });
+    }
   };
 
   const onSubmit = async (values: FormValues) => {
@@ -218,10 +235,12 @@ export default function AdminMasterProductsPage() {
       salePrice: Math.round(values.salePriceRupees * 100),
       purchasePrice: Math.round(values.purchasePriceRupees * 100),
       taxPercent: Math.round(values.taxPercentDisplay * 100),
+      taxType: values.taxType,
       reorderLevel: values.reorderLevel,
       imageUrl: values.imageUrl ?? null,
       trackBatches: values.trackBatches,
       trackExpiry: values.trackExpiry,
+      hasComplementary: values.hasComplementary,
       isActive: values.isActive,
     };
     try {
@@ -324,11 +343,23 @@ export default function AdminMasterProductsPage() {
       ),
     },
     {
-      title: 'Tax',
-      dataIndex: 'taxPercent',
-      width: 80,
-      align: 'right',
-      render: (v: number) => (v ? `${v / 100}%` : '—'),
+      title: 'GST',
+      key: 'gst',
+      width: 140,
+      render: (_: unknown, row: AdminProduct) => {
+        if (!row.taxPercent) return <Text type="secondary">—</Text>;
+        return (
+          <Space size={4}>
+            <Text style={{ fontWeight: 600 }}>{row.taxPercent / 100}%</Text>
+            <Tag
+              color={row.taxType === 'inclusive' ? 'blue' : 'orange'}
+              style={{ fontSize: 11, margin: 0 }}
+            >
+              {row.taxType}
+            </Tag>
+          </Space>
+        );
+      },
     },
     {
       title: 'Reorder',
@@ -343,6 +374,15 @@ export default function AdminMasterProductsPage() {
       width: 100,
       render: (v: string | null) =>
         v ? <Text code style={{ fontSize: 11 }}>{v}</Text> : <Text type="secondary">—</Text>,
+    },
+    {
+      title: 'Complimentary',
+      dataIndex: 'hasComplementary',
+      width: 130,
+      align: 'center',
+      render: (v: boolean) => (
+        <Tag color={v ? 'green' : 'default'} style={{ fontSize: 11 }}>{v ? 'Enabled' : 'No'}</Tag>
+      ),
     },
     {
       title: 'Status',
@@ -453,8 +493,10 @@ export default function AdminMasterProductsPage() {
                 purchasePrice: row.purchasePrice !== undefined ? Number(row.purchasePrice) : 0,
                 taxPercent: row.taxPercent !== undefined ? Number(row.taxPercent) : 0,
                 reorderLevel: row.reorderLevel !== undefined ? Number(row.reorderLevel) : 0,
+                taxType: 'exclusive',
                 trackBatches: false,
                 trackExpiry: false,
+                hasComplementary: false,
                 isActive: true,
               };
               await create.mutateAsync(body);
@@ -544,6 +586,7 @@ export default function AdminMasterProductsPage() {
         confirmLoading={create.isPending || update.isPending}
         width={760}
         destroyOnClose
+        afterOpenChange={handleModalOpen}
       >
         <Form<FormValues>
           form={form}
@@ -628,10 +671,88 @@ export default function AdminMasterProductsPage() {
               </Form.Item>
             </Col>
             <Col span={8}>
-              <Form.Item label="Tax %" name="taxPercentDisplay">
-                <InputNumber min={0} max={100} step={0.5} style={{ width: '100%' }} />
+              <Form.Item label="GST %" name="taxPercentDisplay">
+                <InputNumber
+                  min={0}
+                  max={100}
+                  step={1}
+                  style={{ width: '100%' }}
+                  formatter={(v) => `${v}%`}
+                  parser={(v) => Number(String(v).replace('%', '')) as 0}
+                  placeholder="0"
+                />
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item label="Tax Type" name="taxType">
+                <Select
+                  options={[
+                    { value: 'exclusive', label: 'Exclusive' },
+                    { value: 'inclusive', label: 'Inclusive' },
+                  ]}
+                />
+              </Form.Item>
+            </Col>
+            {!!watchedTaxPercent && (
+              <Col span={24}>
+                {(() => {
+                  const salePaise = Math.round((watchedSalePrice || 0) * 100);
+                  const pct = watchedTaxPercent || 0;
+                  const isInclusive = watchedTaxType === 'inclusive';
+                  const taxableAmt = isInclusive
+                    ? Math.round((salePaise * 100) / (100 + pct))
+                    : salePaise;
+                  const taxAmt = isInclusive
+                    ? salePaise - taxableAmt
+                    : Math.round((salePaise * pct) / 100);
+                  const grandTotal = isInclusive ? salePaise : salePaise + taxAmt;
+                  const halfAmt = Math.ceil(taxAmt / 2);
+                  const fmt = (p: number) =>
+                    (p / 100).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
+                  return (
+                    <div style={{
+                      background: 'rgba(91,44,139,0.07)',
+                      border: '1px solid rgba(91,44,139,0.2)',
+                      borderRadius: 8,
+                      padding: '10px 14px',
+                      marginBottom: 12,
+                    }}>
+                      <Space style={{ marginBottom: 6 }}>
+                        <Text style={{ fontWeight: 600, fontSize: 13 }}>GST Preview</Text>
+                        <Tag color={isInclusive ? 'blue' : 'orange'} style={{ fontSize: 11 }}>
+                          {isInclusive ? 'Inclusive — price includes tax' : 'Exclusive — tax added on top'}
+                        </Tag>
+                      </Space>
+                      <Row gutter={8}>
+                        <Col span={6}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>Taxable Amount</Text>
+                          <div style={{ fontWeight: 600 }}>{salePaise ? fmt(taxableAmt) : '—'}</div>
+                        </Col>
+                        <Col span={5}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>GST ({pct}%)</Text>
+                          <div style={{ fontWeight: 600 }}>{salePaise ? fmt(taxAmt) : '—'}</div>
+                        </Col>
+                        <Col span={8}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>
+                            CGST {pct / 2}% + SGST {pct / 2}%
+                            <br /><span style={{ fontSize: 11, color: '#aaa' }}>(same state)</span>
+                          </Text>
+                          <div style={{ fontWeight: 600 }}>
+                            {salePaise ? `${fmt(halfAmt)} + ${fmt(taxAmt - halfAmt)}` : '—'}
+                          </div>
+                        </Col>
+                        <Col span={5}>
+                          <Text style={{ fontSize: 12, color: '#888' }}>Final Amount</Text>
+                          <div style={{ fontWeight: 700, color: '#5B2C8B' }}>
+                            {salePaise ? fmt(grandTotal) : '—'}
+                          </div>
+                        </Col>
+                      </Row>
+                    </div>
+                  );
+                })()}
+              </Col>
+            )}
             <Col span={16}>
               <Form.Item label="Description" name="description">
                 <Input.TextArea rows={2} maxLength={500} showCount />
@@ -649,6 +770,11 @@ export default function AdminMasterProductsPage() {
             </Col>
             <Col span={8}>
               <Form.Item label="Track expiry" name="trackExpiry" valuePropName="checked" tooltip="Batches carry an expiry date; drives expiry alerts.">
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Complimentary Enabled" name="hasComplementary" valuePropName="checked" tooltip="When enabled, branch staff can offer this product as complimentary during billing.">
                 <Switch checkedChildren="Yes" unCheckedChildren="No" />
               </Form.Item>
             </Col>

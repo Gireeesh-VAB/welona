@@ -9,6 +9,7 @@ import {
   DISCOUNT_TYPES,
   OFFER_STATUSES,
   PACKAGE_STATUSES,
+  SESSION_STATUSES,
 } from '@shared/enums';
 
 const id = z.string().min(1);
@@ -24,6 +25,7 @@ export const bookingCreateSchema = z.object({
   status: z.enum(BOOKING_STATUSES).optional(),
   branchId: id.optional(),
   notes: optionalText,
+  gstRateId: z.string().optional(),
 });
 
 export const bookingUpdateSchema = z.object({
@@ -78,6 +80,21 @@ export const packageUpdateSchema = z.object({
   status: z.enum(PACKAGE_STATUSES).optional(),
   notes: optionalText,
 });
+
+// --- Session Entries --------------------------------------------------------
+
+export const sessionEntryCreateSchema = z.object({
+  bookingId:   id.optional(),
+  sessionDate: z.string().min(1, 'Session date is required'),
+  staffName:   optionalText,
+  status:      z.enum(SESSION_STATUSES),
+  remarks:     optionalText,
+});
+
+export const sessionEntryUpdateSchema = sessionEntryCreateSchema.partial();
+
+export type SessionEntryCreateInput = z.infer<typeof sessionEntryCreateSchema>;
+export type SessionEntryUpdateInput = z.infer<typeof sessionEntryUpdateSchema>;
 
 // --- Offers -----------------------------------------------------------------
 

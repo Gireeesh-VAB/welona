@@ -20,6 +20,8 @@ export interface Customer {
   gstin: string | null;
   address: string | null;
   city: string | null;
+  stateId: string | null;
+  stateName: string | null;
   notes: string | null;
   avatarUrl: string | null;
   tags: string[];

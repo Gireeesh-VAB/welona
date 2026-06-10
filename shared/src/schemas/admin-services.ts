@@ -17,6 +17,7 @@ export const adminServiceCreateSchema = z
     minPrice: z.coerce.number().int().nonnegative().default(0),
     maxPrice: z.coerce.number().int().nonnegative().default(0),
     taxPercent: z.coerce.number().int().min(0).max(100).default(0),
+    taxType: z.enum(['inclusive', 'exclusive']).default('exclusive'),
     hasMeasurements: z.boolean().default(false),
     hasComplementary: z.boolean().default(false),
     isActive: z.boolean().default(true),
@@ -34,6 +35,7 @@ export const adminServiceUpdateSchema = z
     minPrice: z.coerce.number().int().nonnegative().optional(),
     maxPrice: z.coerce.number().int().nonnegative().optional(),
     taxPercent: z.coerce.number().int().min(0).max(100).optional(),
+    taxType: z.enum(['inclusive', 'exclusive']).optional(),
     hasMeasurements: z.boolean().optional(),
     hasComplementary: z.boolean().optional(),
     isActive: z.boolean().optional(),
@@ -52,7 +54,7 @@ export const adminServiceListQuerySchema = z.object({
   categoryId: z.string().optional(),
   active: z.enum(['all', 'active', 'inactive']).default('all'),
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(10),
+  limit: z.coerce.number().int().positive().max(500).default(10),
 });
 
 export type AdminServiceCreateInput = z.infer<typeof adminServiceCreateSchema>;

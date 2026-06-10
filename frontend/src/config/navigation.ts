@@ -87,6 +87,13 @@ export const navigation: NavItem[] = [
     description: 'Manage customer enquiries and follow-ups.',
   },
   {
+    key: 'session-management',
+    label: 'Session Management',
+    path: '/session-management',
+    moduleId: 'M15',
+    description: 'Track and log customer package sessions.',
+  },
+  {
     key: 'duplicate-receipt',
     label: 'Duplicate Receipt',
     path: '/duplicate-receipt',
@@ -218,6 +225,7 @@ export const navGroups: NavGroup[] = [
       'customers',
       'bookings',
       'enquiry',
+      'session-management',
     ],
   },
   {

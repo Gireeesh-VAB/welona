@@ -19,6 +19,8 @@ export const adminProductCreateSchema = z.object({
   purchasePrice: z.coerce.number().int().min(0).default(0),
   /** Tax in basis points — 1800 = 18%. */
   taxPercent: z.coerce.number().int().min(0).max(10000).default(0),
+  /** 'inclusive' | 'exclusive' */
+  taxType: z.enum(['inclusive', 'exclusive']).default('exclusive'),
   /** Units — drives the low-stock warning on the inventory page. */
   reorderLevel: z.coerce.number().int().min(0).default(0),
   /** Product photo as a data URL or external URL. Empty string clears it. */
@@ -31,6 +33,7 @@ export const adminProductCreateSchema = z.object({
     .or(z.literal('').transform(() => null)),
   trackBatches: z.boolean().default(false),
   trackExpiry: z.boolean().default(false),
+  hasComplementary: z.boolean().default(false),
   isActive: z.boolean().default(true),
 });
 

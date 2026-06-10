@@ -38,7 +38,10 @@ export const GET = route(async (req) => {
       orderBy: { createdAt: 'desc' },
       skip: (query.page - 1) * query.limit,
       take: query.limit,
-      include: { branch: { select: { id: true, name: true } } },
+      include: {
+        branch: { select: { id: true, name: true } },
+        state: { select: { id: true, name: true } },
+      },
     }),
     db.customer.count({ where }),
   ]);
@@ -63,6 +66,7 @@ export const POST = route(async (req) => {
       gstin: body.gstin || null,
       address: body.address || null,
       city: body.city || null,
+      stateId: body.stateId ?? null,
       notes: body.notes || null,
       tags: JSON.stringify(body.tags ?? []),
       createdById: claims.sub,

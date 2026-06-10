@@ -80,7 +80,7 @@ export const adminCategoryListQuerySchema = z.object({
   search: z.string().trim().optional(),
   active: z.enum(['all', 'active', 'inactive']).default('all'),
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(200).default(50),
+  limit: z.coerce.number().int().positive().max(500).default(50),
 });
 
 export type AdminCategoryCreateInput = z.infer<typeof adminCategoryCreateSchema>;

@@ -88,6 +88,7 @@ function serialize(s: {
   minPrice: number;
   maxPrice: number;
   taxPercent: number;
+  taxType: string;
   hasMeasurements: boolean;
   hasComplementary: boolean;
   isActive: boolean;
@@ -101,6 +102,7 @@ function serialize(s: {
     minPrice: s.minPrice,
     maxPrice: s.maxPrice,
     taxPercent: s.taxPercent,
+    taxType: s.taxType,
     hasMeasurements: s.hasMeasurements,
     hasComplementary: s.hasComplementary,
     isActive: s.isActive,
