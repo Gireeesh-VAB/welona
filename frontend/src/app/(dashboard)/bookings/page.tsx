@@ -121,7 +121,7 @@ export default function ServiceAppointmentsPage() {
                     }
                     description={
                       <Text type="secondary" style={{ fontSize: 12 }}>
-                        {a.customerName} · {titleCase(a.status)}
+                        {a.categoryName ? `${a.categoryName} · ` : ''}{a.customerName} · {titleCase(a.status)}
                         {a.netAmount > 0 ? ` · ${formatMoney(a.netAmount)}` : ''}
                       </Text>
                     }

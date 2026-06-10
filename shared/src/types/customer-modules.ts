@@ -9,6 +9,7 @@ export interface Booking {
   branchId: string | null;
   number: string | null;
   serviceName: string;
+  categoryName: string | null;
   scheduledAt: string;
   status: string;
   netAmount: number;
@@ -22,6 +23,7 @@ export interface Appointment {
   customerId: string;
   customerName: string;
   serviceName: string;
+  categoryName: string | null;
   scheduledAt: string;
   status: string;
   netAmount: number;

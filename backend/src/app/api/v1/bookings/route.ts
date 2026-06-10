@@ -40,7 +40,10 @@ export const GET = route(async (req) => {
   const staffBranchId = claims.branchIds[0] ?? null;
   const bookings = await db.booking.findMany({
     where: { orgId: claims.orgId, scheduledAt: { gte: start, lt: end }, ...(staffBranchId ? { branchId: staffBranchId } : {}) },
-    include: { customer: { select: { id: true, name: true } } },
+    include: {
+      customer: { select: { id: true, name: true } },
+      items: { orderBy: { sortOrder: 'asc' }, take: 1 },
+    },
     orderBy: { scheduledAt: 'asc' },
   });
 
@@ -50,6 +53,7 @@ export const GET = route(async (req) => {
       customerId: b.customerId,
       customerName: b.customer?.name ?? '—',
       serviceName: b.serviceName,
+      categoryName: b.items[0]?.category ?? null,
       scheduledAt: b.scheduledAt.toISOString(),
       status: b.status,
       netAmount: b.netAmount,
