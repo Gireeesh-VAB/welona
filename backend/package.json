@@ -11,10 +11,14 @@
     "type-check": "tsc --noEmit",
     "db:push": "prisma db push",
     "db:seed": "prisma db seed",
+      "db:seed-showcase": "tsx prisma/seed-admin-showcase.ts",
+    "db:seed-system-users": "tsx prisma/seed-admin-system-users.ts",
     "db:seed-hr": "tsx prisma/seed-hr.ts",
     "db:seed-products": "tsx prisma/seed-products-inventory.ts",
+    "db:seed-all": "prisma db seed && tsx prisma/seed-admin-showcase.ts && tsx prisma/seed-admin-system-users.ts && tsx prisma/seed-hr.ts && tsx prisma/seed-products-inventory.ts",
     "db:studio": "prisma studio",
     "db:reset": "prisma db push --force-reset && prisma db seed",
+    "db:reset-all": "prisma db push --force-reset && npm run db:seed-all",
     "postinstall": "prisma generate"
   },
   "prisma": {
