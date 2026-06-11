@@ -27,6 +27,14 @@ export const adminServiceCreateSchema = z
     path: ['maxPrice'],
   });
 
+export const serviceInventoryItemSchema = z.object({
+  productId: z.string().min(1, 'Product is required'),
+  quantityPerSession: z.coerce.number().int().positive('Must be at least 1'),
+  lowStockThreshold: z.coerce.number().int().nonnegative().optional(),
+  sortOrder: z.coerce.number().int().nonnegative().default(0),
+});
+export type ServiceInventoryItemInput = z.infer<typeof serviceInventoryItemSchema>;
+
 export const adminServiceUpdateSchema = z
   .object({
     categoryId: z.string().min(1).optional(),
@@ -39,6 +47,7 @@ export const adminServiceUpdateSchema = z
     hasMeasurements: z.boolean().optional(),
     hasComplementary: z.boolean().optional(),
     isActive: z.boolean().optional(),
+    inventoryItems: z.array(serviceInventoryItemSchema).optional(),
   })
   .refine(
     (v) =>

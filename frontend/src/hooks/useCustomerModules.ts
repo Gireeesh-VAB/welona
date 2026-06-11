@@ -78,6 +78,20 @@ export const usePackages = packages.useList;
 export const useCreatePackage = packages.useCreate;
 export const useUpdatePackage = packages.useUpdate;
 
+export function usePackageCheckout(customerId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Body) =>
+      api.post<{ package: Package; invoice: Record<string, unknown> }>(
+        `/customers/${customerId}/packages/checkout`,
+        body,
+      ),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-packages', customerId] });
+    },
+  });
+}
+
 const offers = makeModuleHooks<Offer>('offers', 'customer-offers');
 export const useOffers = offers.useList;
 export const useCreateOffer = offers.useCreate;

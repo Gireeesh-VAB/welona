@@ -68,19 +68,39 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
   }
 
   try {
-    const row = await db.category.update({
-      where: { id: params.id },
-      data: {
-        ...(body.name !== undefined && { name: body.name }),
-        ...(body.categoryCode !== undefined && {
-          categoryCode: body.categoryCode ?? null,
-        }),
-        ...(body.description !== undefined && { description: body.description ?? null }),
-        ...(body.isActive !== undefined && { isActive: body.isActive }),
-        ...flagPatch,
-      },
-      include: { createdByAdmin: true, _count: { select: { services: true } } },
+    const row = await db.$transaction(async (tx) => {
+      const updated = await tx.category.update({
+        where: { id: params.id },
+        data: {
+          ...(body.name !== undefined && { name: body.name }),
+          ...(body.categoryCode !== undefined && {
+            categoryCode: body.categoryCode ?? null,
+          }),
+          ...(body.description !== undefined && { description: body.description ?? null }),
+          ...(body.isActive !== undefined && { isActive: body.isActive }),
+          ...flagPatch,
+        },
+        include: { createdByAdmin: true, _count: { select: { services: true } } },
+      });
+
+      if (body.serviceIds !== undefined) {
+        await tx.service.updateMany({
+          where: { categoryId: params.id, id: { notIn: body.serviceIds } },
+          data: { categoryId: null },
+        });
+        if (body.serviceIds.length > 0) {
+          await tx.service.updateMany({
+            where: { id: { in: body.serviceIds } },
+            data: { categoryId: params.id },
+          });
+        }
+        const count = await tx.service.count({ where: { categoryId: params.id } });
+        return { ...updated, _count: { services: count } };
+      }
+
+      return updated;
     });
+
     return ok(toDTO(row));
   } catch (error) {
     if (error instanceof Prisma.PrismaClientKnownRequestError) {

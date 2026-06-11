@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { App, Button, Card, Checkbox, Col, Form, Input, Row, Typography } from 'antd';
+import { App, Button, Card, Checkbox, Col, Form, Input, Row, Select, Typography } from 'antd';
 import { useRouter } from 'next/navigation';
 import {
   CATEGORY_FLAG_KEYS,
@@ -12,6 +12,7 @@ import {
   useCreateAdminCategory,
   useUpdateAdminCategory,
 } from '@/hooks/useAdminCategories';
+import { useAdminServices } from '@/hooks/useAdminServices';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import type { AdminCategory } from '@shared/types/admin-category';
@@ -46,9 +47,15 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
     for (const k of CATEGORY_FLAG_KEYS) empty[k] = false;
     return empty;
   });
+  const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
 
   const create = useCreateAdminCategory();
   const update = useUpdateAdminCategory();
+  // Fetch ALL active services so the user can assign any service to this category.
+  const { data: servicesData } = useAdminServices({
+    active: 'active',
+    limit: 500,
+  });
 
   // Hydrate the form when an existing category is loaded for edit.
   useEffect(() => {
@@ -62,6 +69,14 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
     for (const k of CATEGORY_FLAG_KEYS) next[k] = initial[k] ?? false;
     setFlags(next);
   }, [initial, form]);
+
+  // Pre-select only services that currently belong to this category.
+  useEffect(() => {
+    if (!initial || !servicesData) return;
+    setSelectedServiceIds(
+      servicesData.items.filter((s) => s.categoryId === initial.id).map((s) => s.id),
+    );
+  }, [initial, servicesData]);
 
   const toggleFlag = (key: CategoryFlagKey, value: boolean) => {
     setFlags((prev) => ({ ...prev, [key]: value }));
@@ -84,7 +99,7 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
     };
     try {
       if (mode === 'edit' && initial) {
-        await update.mutateAsync({ id: initial.id, body });
+        await update.mutateAsync({ id: initial.id, body: { ...body, serviceIds: selectedServiceIds } });
         message.success('Category updated');
       } else {
         await create.mutateAsync(body);
@@ -156,6 +171,28 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
           >
             <Input placeholder="Hair Services" maxLength={300} />
           </Form.Item>
+          {mode === 'edit' && (
+            <Form.Item label="Services">
+              <Select
+                mode="multiple"
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                placeholder="Select services for this category"
+                value={selectedServiceIds}
+                onChange={setSelectedServiceIds}
+                loading={!servicesData}
+                options={(servicesData?.items ?? []).map((s) => ({
+                  value: s.id,
+                  label:
+                    s.categoryId && s.categoryId !== initial?.id
+                      ? `${s.name} (currently: ${s.category?.name ?? 'other'})`
+                      : s.name,
+                }))}
+                style={{ width: '100%' }}
+              />
+            </Form.Item>
+          )}
         </Form>
 
         <div

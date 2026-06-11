@@ -64,6 +64,7 @@ const MOVEMENT_TAG_COLOR: Record<InventoryMovementType, string> = {
   adjustment: 'purple',
   transfer_in: 'cyan',
   transfer_out: 'volcano',
+  service_consumption: 'magenta',
 };
 
 function formatDate(iso: string): string {

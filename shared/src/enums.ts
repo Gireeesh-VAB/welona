@@ -192,8 +192,12 @@ export const INVENTORY_MOVEMENT_TYPES = [
   'adjustment',
   'transfer_in',
   'transfer_out',
+  'service_consumption',
 ] as const;
 export type InventoryMovementType = (typeof INVENTORY_MOVEMENT_TYPES)[number];
+
+export const STOCK_INDENT_STATUSES = ['pending', 'approved', 'rejected', 'fulfilled'] as const;
+export type StockIndentStatus = (typeof STOCK_INDENT_STATUSES)[number];
 
 /** Lifecycle states of a Purchase Order. */
 export const PURCHASE_ORDER_STATUSES = [

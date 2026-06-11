@@ -69,6 +69,14 @@ export interface BookingDetail {
   netAmount: number;
   notes: string | null;
   createdAt: string;
+  taxableAmt: number;
+  cgstPct: number;
+  cgstAmt: number;
+  sgstPct: number;
+  sgstAmt: number;
+  igstPct: number;
+  igstAmt: number;
+  taxType: string | null;
 }
 
 export interface Package {

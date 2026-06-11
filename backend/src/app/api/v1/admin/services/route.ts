@@ -8,7 +8,7 @@ import {
   adminServiceCreateSchema,
   adminServiceListQuerySchema,
 } from '@shared/schemas/admin-services';
-import { toAdminService } from '@/lib/admin-service-mapper';
+import { toAdminService, serviceInclude } from '@/lib/admin-service-mapper';
 
 /**
  * Admin master-data: services and products.
@@ -40,7 +40,7 @@ export const GET = route(async (req) => {
   const [items, total] = await Promise.all([
     db.service.findMany({
       where,
-      include: { category: true, createdByAdmin: true },
+      include: serviceInclude,
       orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
       skip: (page - 1) * limit,
       take: limit,
@@ -72,7 +72,7 @@ export const POST = route(async (req) => {
       isActive: body.isActive,
       createdByAdminId: claims.sub,
     },
-    include: { category: true, createdByAdmin: true },
+    include: serviceInclude,
   });
   return created(toAdminService(row));
 });

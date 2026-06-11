@@ -355,7 +355,7 @@ export default function AdminMasterProductsPage() {
               color={row.taxType === 'inclusive' ? 'blue' : 'orange'}
               style={{ fontSize: 11, margin: 0 }}
             >
-              {row.taxType}
+              {row.taxType === 'inclusive' ? 'Inclusive' : 'Exclusive'}
             </Tag>
           </Space>
         );
@@ -709,6 +709,12 @@ export default function AdminMasterProductsPage() {
                   const halfAmt = Math.ceil(taxAmt / 2);
                   const fmt = (p: number) =>
                     (p / 100).toLocaleString('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 2 });
+                  const rowStyle = {
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '5px 0',
+                  } as const;
                   return (
                     <div style={{
                       background: 'rgba(91,44,139,0.07)',
@@ -717,37 +723,38 @@ export default function AdminMasterProductsPage() {
                       padding: '10px 14px',
                       marginBottom: 12,
                     }}>
-                      <Space style={{ marginBottom: 6 }}>
+                      <Space style={{ marginBottom: 8 }}>
                         <Text style={{ fontWeight: 600, fontSize: 13 }}>GST Preview</Text>
                         <Tag color={isInclusive ? 'blue' : 'orange'} style={{ fontSize: 11 }}>
                           {isInclusive ? 'Inclusive — price includes tax' : 'Exclusive — tax added on top'}
                         </Tag>
                       </Space>
-                      <Row gutter={8}>
-                        <Col span={6}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>Taxable Amount</Text>
-                          <div style={{ fontWeight: 600 }}>{salePaise ? fmt(taxableAmt) : '—'}</div>
-                        </Col>
-                        <Col span={5}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>GST ({pct}%)</Text>
-                          <div style={{ fontWeight: 600 }}>{salePaise ? fmt(taxAmt) : '—'}</div>
-                        </Col>
-                        <Col span={8}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>
+                      <div style={rowStyle}>
+                        <Text style={{ fontSize: 12, color: '#888' }}>Taxable Amount</Text>
+                        <Text style={{ fontWeight: 600 }}>{salePaise ? fmt(taxableAmt) : '—'}</Text>
+                      </div>
+                      <div style={{ ...rowStyle, borderTop: '1px dashed rgba(91,44,139,0.15)', marginTop: 2 }}>
+                        <Text style={{ fontSize: 12, color: '#888' }}>
+                          GST ({pct}%)
+                          <span style={{ fontSize: 11, color: '#aaa', marginLeft: 6 }}>
                             CGST {pct / 2}% + SGST {pct / 2}%
-                            <br /><span style={{ fontSize: 11, color: '#aaa' }}>(same state)</span>
-                          </Text>
-                          <div style={{ fontWeight: 600 }}>
-                            {salePaise ? `${fmt(halfAmt)} + ${fmt(taxAmt - halfAmt)}` : '—'}
-                          </div>
-                        </Col>
-                        <Col span={5}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>Final Amount</Text>
-                          <div style={{ fontWeight: 700, color: '#5B2C8B' }}>
-                            {salePaise ? fmt(grandTotal) : '—'}
-                          </div>
-                        </Col>
-                      </Row>
+                          </span>
+                        </Text>
+                        <Space size={4}>
+                          <Text style={{ fontWeight: 600 }}>{salePaise ? fmt(taxAmt) : '—'}</Text>
+                          {salePaise && (
+                            <Text style={{ fontSize: 11, color: '#aaa' }}>
+                              ({fmt(halfAmt)} + {fmt(taxAmt - halfAmt)})
+                            </Text>
+                          )}
+                        </Space>
+                      </div>
+                      <div style={{ ...rowStyle, borderTop: '2px solid rgba(91,44,139,0.25)', marginTop: 4, paddingTop: 7 }}>
+                        <Text style={{ fontSize: 13, fontWeight: 600 }}>Total Amount</Text>
+                        <Text style={{ fontWeight: 700, fontSize: 14, color: '#5B2C8B' }}>
+                          {salePaise ? fmt(grandTotal) : '—'}
+                        </Text>
+                      </div>
                     </div>
                   );
                 })()}

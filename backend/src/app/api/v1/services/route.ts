@@ -2,6 +2,7 @@ import { db } from '@/lib/db';
 import { route, parseQuery, booleanQueryParam } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { requireAuth } from '@/lib/auth/service';
+import { CATEGORY_FLAG_KEYS } from '@shared/schemas/admin-categories';
 import { z } from 'zod';
 
 const querySchema = z.object({
@@ -9,6 +10,16 @@ const querySchema = z.object({
   categoryId: z.string().optional(),
   isActive: booleanQueryParam(),
 });
+
+const serviceIncludeBranch = {
+  category: true,
+  inventoryItems: {
+    include: { product: { select: { name: true, uom: true, reorderLevel: true } } },
+    orderBy: { sortOrder: 'asc' as const },
+  },
+} as const;
+
+type ServiceRow = Awaited<ReturnType<typeof db.service.findMany<{ include: typeof serviceIncludeBranch }>>>[number];
 
 /**
  * GET /api/v1/services — branch-staff service catalogue filtered by BranchService.
@@ -23,11 +34,8 @@ export const GET = route(async (req) => {
   const branchId = claims.branchIds[0] ?? null;
 
   const { search, categoryId, isActive } = parseQuery(req, querySchema);
-  // Default to active-only unless the caller explicitly passes isActive=false.
   const showActive = isActive ?? true;
 
-  // Branch-scoped: resolve assigned service IDs.
-  // If branchId is set but no assignments exist → return empty immediately.
   if (branchId) {
     const assigned = await db.branchService.findMany({
       where: { branchId },
@@ -54,10 +62,11 @@ export const GET = route(async (req) => {
     const services = await db.service.findMany({
       where,
       orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
-      include: { category: { select: { id: true, name: true } } },
+      include: serviceIncludeBranch,
     });
 
-    return ok(services.map(serialize));
+    const stockMap = await buildStockMap(services, branchId);
+    return ok(services.map((s) => serialize(s, stockMap)));
   }
 
   // Org-wide staff: no branch restriction.
@@ -73,31 +82,61 @@ export const GET = route(async (req) => {
   const services = await db.service.findMany({
     where,
     orderBy: [{ category: { name: 'asc' } }, { name: 'asc' }],
-    include: { category: { select: { id: true, name: true } } },
+    include: serviceIncludeBranch,
   });
 
-  return ok(services.map(serialize));
+  return ok(services.map((s) => serialize(s, new Map())));
 });
 
-function serialize(s: {
-  id: string;
-  name: string;
-  categoryId: string;
-  category?: { name: string } | null;
-  hsnSacCode: string | null;
-  minPrice: number;
-  maxPrice: number;
-  taxPercent: number;
-  taxType: string;
-  hasMeasurements: boolean;
-  hasComplementary: boolean;
-  isActive: boolean;
-}) {
+async function buildStockMap(
+  services: ServiceRow[],
+  branchId: string,
+): Promise<Map<string, number>> {
+  const allProductIds = services.flatMap((s) => s.inventoryItems.map((i) => i.productId));
+  if (allProductIds.length === 0) return new Map();
+
+  const wh =
+    (await db.warehouse.findFirst({ where: { branchId, isDefault: true }, select: { id: true } })) ??
+    (await db.warehouse.findFirst({ where: { branchId, isActive: true }, select: { id: true } }));
+  if (!wh) return new Map();
+
+  const stocks = await db.inventoryStock.findMany({
+    where: { warehouseId: wh.id, productId: { in: allProductIds } },
+    select: { productId: true, quantity: true },
+  });
+  return new Map(stocks.map((s) => [s.productId, s.quantity]));
+}
+
+function serialize(s: ServiceRow, stockMap: Map<string, number>) {
+  const categoryFlags = CATEGORY_FLAG_KEYS.reduce(
+    (acc, key) => {
+      acc[key] = (s.category?.[key] as boolean) ?? false;
+      return acc;
+    },
+    {} as Record<string, boolean>,
+  );
+
+  const inventoryItems = s.inventoryItems.map((item) => {
+    const onHandQty = stockMap.get(item.productId) ?? 0;
+    const lowStockThreshold = item.lowStockThreshold ?? item.product.reorderLevel ?? 0;
+    return {
+      productId: item.productId,
+      productName: item.product.name,
+      productUom: item.product.uom,
+      quantityPerSession: item.quantityPerSession,
+      onHandQty,
+      lowStockThreshold,
+      isLowStock: onHandQty <= lowStockThreshold,
+    };
+  });
+
+  const hasLowStock = inventoryItems.some((i) => i.isLowStock);
+
   return {
     id: s.id,
     name: s.name,
     categoryId: s.categoryId,
-    categoryName: s.category?.name ?? null,
+    categoryName: (s.category?.['name'] as string) ?? null,
     hsnSacCode: s.hsnSacCode,
     minPrice: s.minPrice,
     maxPrice: s.maxPrice,
@@ -106,5 +145,8 @@ function serialize(s: {
     hasMeasurements: s.hasMeasurements,
     hasComplementary: s.hasComplementary,
     isActive: s.isActive,
+    categoryFlags,
+    inventoryItems,
+    hasLowStock,
   };
 }

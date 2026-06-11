@@ -1,7 +1,17 @@
+export interface ServiceInventoryItem {
+  id: string;
+  productId: string;
+  productName: string;
+  productUom: string;
+  quantityPerSession: number;
+  lowStockThreshold: number | null;
+  sortOrder: number;
+}
+
 export interface AdminService {
   id: string;
-  categoryId: string;
-  category: { id: string; name: string };
+  categoryId: string | null;
+  category: { id: string; name: string } | null;
   name: string;
   hsnSacCode: string | null;
   /** Stored as integer paise; convert for display. */
@@ -14,6 +24,7 @@ export interface AdminService {
   hasMeasurements: boolean;
   hasComplementary: boolean;
   isActive: boolean;
+  inventoryItems: ServiceInventoryItem[];
   createdBy: { id: string; name: string; email: string } | null;
   createdAt: string;
   updatedAt: string;

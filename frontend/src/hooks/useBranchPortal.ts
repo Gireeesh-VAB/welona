@@ -152,18 +152,32 @@ export function useBranchEmployees(designation?: string) {
 
 // ---- Services (branch-assigned catalog) -------------------------------------
 
+export interface BranchInventoryItem {
+  productId: string;
+  productName: string;
+  productUom: string;
+  quantityPerSession: number;
+  onHandQty: number;
+  lowStockThreshold: number;
+  isLowStock: boolean;
+}
+
 export interface BranchService {
   id: string;
   name: string;
-  categoryId: string;
+  categoryId: string | null;
   categoryName: string | null;
   hsnSacCode: string | null;
   minPrice: number;
   maxPrice: number;
   taxPercent: number;
+  taxType: string;
   hasMeasurements: boolean;
   hasComplementary: boolean;
   isActive: boolean;
+  categoryFlags: Record<string, boolean>;
+  inventoryItems: BranchInventoryItem[];
+  hasLowStock: boolean;
 }
 
 interface ServiceParams {
