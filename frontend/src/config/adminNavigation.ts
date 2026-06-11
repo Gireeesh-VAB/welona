@@ -116,6 +116,12 @@ export const adminNavigation: AdminNavItem[] = [
         path: '/admin/master/coupons',
         description: 'Create and manage discount coupons (percentage or fixed amount) for branches.',
       },
+      {
+        key: 'master-package-sessions',
+        label: 'Package Sessions',
+        path: '/admin/master/package-sessions',
+        description: 'Define session package templates — services included, default sessions and price — used by branches.',
+      },
     ],
   },
   {
@@ -183,6 +189,12 @@ export const adminNavigation: AdminNavItem[] = [
         label: 'Audit Log',
         path: '/admin/inventory/audit',
         description: 'Who changed what — suppliers, purchase orders, receipts, transfers, warehouses.',
+      },
+      {
+        key: 'inventory-indents',
+        label: 'Stock Indents',
+        path: '/admin/master/indents',
+        description: 'Branch purchase requests for low-stock inventory items — approve, reject or mark fulfilled.',
       },
     ],
   },

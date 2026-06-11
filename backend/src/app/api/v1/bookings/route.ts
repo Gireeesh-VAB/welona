@@ -2,11 +2,12 @@ import { z } from 'zod';
 import { db } from '@/lib/db';
 import { route, parseQuery, parseBody } from '@/lib/api/handler';
 import { ok, created } from '@/lib/api/response';
-import { Errors } from '@/lib/api/errors';
+import { Errors, ApiError } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
 import { nextDocumentNumber } from '@/lib/sales/service';
 import { appointmentCreateSchema } from '@shared/schemas/customer-modules';
 import { calculateGst } from '@/lib/gst';
+import { checkServiceSessionStock, applyServiceSessionStock } from '@/lib/service-inventory';
 
 const monthQuerySchema = z.object({
   month: z
@@ -146,13 +147,37 @@ export const POST = route(async (req) => {
 
   netAmount += extraAmount;
 
+  const effectiveBranchId = body.branchId ?? customer.branchId ?? null;
+  const isCompleted = (body.status ?? 'scheduled') === 'completed';
+
+  // Stock check — runs before the write transaction so we can warn the user.
+  if (isCompleted && effectiveBranchId && !body.forceCreate) {
+    const serviceLines = items.map((it) => ({ serviceName: it.service, sessionCount: it.quantity }));
+    const shortfalls = await db.$transaction((tx) =>
+      checkServiceSessionStock(tx, { branchId: effectiveBranchId, orgId: claims.orgId, lines: serviceLines }),
+    );
+    if (shortfalls.length > 0) {
+      // Encode each shortfall as a details entry (JSON string per entry) so the frontend can parse them.
+      const details = shortfalls.map((s) => ({
+        field: 'shortfall',
+        message: JSON.stringify(s),
+      }));
+      throw new ApiError(
+        'STOCK_INSUFFICIENT',
+        'Insufficient stock for one or more products. Proceed anyway or raise an indent.',
+        409,
+        details,
+      );
+    }
+  }
+
   const booking = await db.$transaction(async (tx) => {
     const number = await nextDocumentNumber(tx, claims.orgId, 'booking', 'BKG');
-    return tx.booking.create({
+    const created = await tx.booking.create({
       data: {
         orgId: claims.orgId,
         customerId: customer.id,
-        branchId: body.branchId ?? customer.branchId,
+        branchId: effectiveBranchId,
         number,
         consultantStaffId: body.consultantStaffId ?? null,
         serviceName,
@@ -168,6 +193,19 @@ export const POST = route(async (req) => {
         ...gstData,
       },
     });
+
+    // Auto-deduct inventory for completed bookings.
+    if (isCompleted && effectiveBranchId) {
+      const serviceLines = items.map((it) => ({ serviceName: it.service, sessionCount: it.quantity }));
+      await applyServiceSessionStock(tx, {
+        branchId: effectiveBranchId,
+        orgId: claims.orgId,
+        bookingRef: created.number ?? created.id,
+        lines: serviceLines,
+      });
+    }
+
+    return created;
   });
 
   return created({ id: booking.id, number: booking.number });

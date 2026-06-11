@@ -32,6 +32,7 @@ model Organization {
   salesOrders SalesOrder[]
   invoices    Invoice[]
   treatments  Treatment[]
+  packageSessionMasters PackageSessionMaster[]
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
 }
@@ -93,6 +94,7 @@ model Branch {
   complimentaryLimit       BranchComplimentaryLimit?
   couponBranches           CouponBranch[]
   packages                 Package[]
+  stockIndents             StockIndent[]
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
 
@@ -250,6 +252,7 @@ model AdminUser {
   createdStockTransfers StockTransfer[]
   createdWarehouses    Warehouse[]
   createdCoupons       Coupon[]
+  createdPackageSessionMasters PackageSessionMaster[]
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 }
@@ -657,8 +660,8 @@ model Category {
 /// Prices are integer minor units (paise); taxPercent is a whole percentage.
 model Service {
   id                String      @id @default(cuid())
-  categoryId        String
-  category          Category    @relation(fields: [categoryId], references: [id])
+  categoryId        String?
+  category          Category?   @relation(fields: [categoryId], references: [id])
   name              String
   hsnSacCode        String?
   minPrice          Int         @default(0) // minor units
@@ -673,6 +676,7 @@ model Service {
   marketingOfferItems    MarketingOfferItem[]
   branchServices         BranchService[]
   complimentaryItems     ComplimentaryServiceItem[]
+  inventoryItems         ServiceInventoryItem[]
   createdAt              DateTime             @default(now())
   updatedAt              DateTime             @updatedAt
 
@@ -1113,13 +1117,38 @@ model BookingItem {
 }
 
 /// A session-based treatment package purchased by a customer.
+/// Admin-managed template for session packages. Branches use these as
+/// the basis for creating customer packages; the master defines which
+/// services are included and the default session count / price.
+model PackageSessionMaster {
+  id               String     @id @default(cuid())
+  orgId            String
+  org              Organization @relation(fields: [orgId], references: [id])
+  name             String
+  description      String?
+  serviceIds       String     @default("[]") // JSON array of Service IDs
+  defaultSessions  Int        @default(1)
+  price            Int        @default(0)    // minor units (paise)
+  isActive         Boolean    @default(true)
+  createdByAdminId String?
+  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  packages         Package[]
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([orgId])
+  @@index([isActive])
+}
+
 model Package {
-  id            String    @id @default(cuid())
+  id            String                @id @default(cuid())
   orgId         String
   customerId    String
-  customer      Customer  @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer      Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
   branchId      String?
-  branch        Branch?   @relation(fields: [branchId], references: [id])
+  branch        Branch?               @relation(fields: [branchId], references: [id])
+  masterId      String?
+  master        PackageSessionMaster? @relation(fields: [masterId], references: [id])
   treatmentId   String? // optional link to a Treatment (not enforced)
   name          String
   totalSessions Int
@@ -1137,6 +1166,7 @@ model Package {
   @@index([orgId])
   @@index([customerId])
   @@index([branchId])
+  @@index([masterId])
 }
 
 /// Individual session log entry for a package.
@@ -1686,6 +1716,8 @@ model Product {
   goodsReceiptItems  GoodsReceiptItem[]
   stockTransferItems StockTransferItem[]
   batches                    ProductBatch[]
+  serviceInventoryItems      ServiceInventoryItem[]
+  stockIndents               StockIndent[]
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 
@@ -1883,6 +1915,49 @@ model BranchService {
   @@unique([branchId, serviceId])
   @@index([branchId])
   @@index([serviceId])
+}
+
+/// Maps a product (with a per-session quantity) to a service.
+/// When a booking for this service is completed, `quantityPerSession`
+/// units of the product are auto-deducted from branch inventory.
+model ServiceInventoryItem {
+  id                 String   @id @default(cuid())
+  serviceId          String
+  service            Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
+  productId          String
+  product            Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quantityPerSession Int      @default(1)
+  lowStockThreshold  Int?     // null → fall back to Product.reorderLevel
+  sortOrder          Int      @default(0)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  @@unique([serviceId, productId])
+  @@index([serviceId])
+  @@index([productId])
+}
+
+/// A stock indent (purchase requisition) raised by a branch when inventory
+/// is running low. Admin reviews and approves/rejects. Fulfilling the indent
+/// does not auto-add stock — staff must create a GRN/adjustment separately.
+model StockIndent {
+  id                   String   @id @default(cuid())
+  orgId                String
+  branchId             String
+  branch               Branch   @relation(fields: [branchId], references: [id])
+  productId            String
+  product              Product  @relation(fields: [productId], references: [id])
+  requestedQty         Int
+  status               String   @default("pending") // pending | approved | rejected | fulfilled
+  reason               String?
+  notes                String?
+  raisedBySystemUserId String?
+  raisedByAdminId      String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@index([orgId, branchId, status])
+  @@index([productId])
 }
 
 /// A PaymentMode accepted at a Branch.

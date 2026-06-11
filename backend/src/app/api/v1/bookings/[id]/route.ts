@@ -51,5 +51,13 @@ export const GET = route<Ctx>(async (req, { params }) => {
     netAmount: booking.netAmount,
     notes: booking.notes,
     createdAt: booking.createdAt.toISOString(),
+    taxableAmt: booking.taxableAmt,
+    cgstPct: booking.cgstPct,
+    cgstAmt: booking.cgstAmt,
+    sgstPct: booking.sgstPct,
+    sgstAmt: booking.sgstAmt,
+    igstPct: booking.igstPct,
+    igstAmt: booking.igstAmt,
+    taxType: booking.taxType,
   });
 });

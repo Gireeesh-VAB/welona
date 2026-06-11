@@ -175,19 +175,60 @@ export default function BookingReceiptPage() {
           </table>
 
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 16 }}>
-            <div style={{ width: 280 }}>
+            <div style={{ width: 300 }}>
+              {/* Subtotal row */}
               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                <span>Total Amount</span>
+                <span style={{ color: '#555' }}>Subtotal</span>
                 <span>{formatMoney(booking.totalAmount)}</span>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                <span>Discount</span>
-                <span>− {formatMoney(booking.discount)}</span>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                <span>Round Off</span>
-                <span>{formatMoney(booking.roundOff)}</span>
-              </div>
+              {/* Discount */}
+              {booking.discount > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                  <span style={{ color: '#555' }}>Discount</span>
+                  <span>− {formatMoney(booking.discount)}</span>
+                </div>
+              )}
+              {/* GST breakdown */}
+              {booking.taxableAmt > 0 && (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderTop: '1px dashed #e0d8c0', marginTop: 4 }}>
+                    <span style={{ color: '#555' }}>Taxable Amount</span>
+                    <span>{formatMoney(booking.taxableAmt)}</span>
+                  </div>
+                  {booking.cgstAmt > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                      <span style={{ color: '#555' }}>
+                        CGST ({(booking.cgstPct / 100).toFixed(2).replace(/\.?0+$/, '')}%)
+                      </span>
+                      <span>{formatMoney(booking.cgstAmt)}</span>
+                    </div>
+                  )}
+                  {booking.sgstAmt > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                      <span style={{ color: '#555' }}>
+                        SGST ({(booking.sgstPct / 100).toFixed(2).replace(/\.?0+$/, '')}%)
+                      </span>
+                      <span>{formatMoney(booking.sgstAmt)}</span>
+                    </div>
+                  )}
+                  {booking.igstAmt > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                      <span style={{ color: '#555' }}>
+                        IGST ({(booking.igstPct / 100).toFixed(2).replace(/\.?0+$/, '')}%)
+                      </span>
+                      <span>{formatMoney(booking.igstAmt)}</span>
+                    </div>
+                  )}
+                </>
+              )}
+              {/* Round Off */}
+              {booking.roundOff !== 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                  <span style={{ color: '#555' }}>Round Off</span>
+                  <span>{formatMoney(booking.roundOff)}</span>
+                </div>
+              )}
+              {/* Net Amount */}
               <div
                 style={{
                   display: 'flex',

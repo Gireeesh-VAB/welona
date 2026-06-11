@@ -5,11 +5,13 @@ import {
   App,
   Button,
   Card,
+  Checkbox,
   Col,
   Descriptions,
   Divider,
   Empty,
   Input,
+  Modal,
   Row,
   Select,
   Space,
@@ -30,10 +32,12 @@ import {
   PlusOutlined,
   StarOutlined,
   TagOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { useMemo, useState, useEffect, useRef } from 'react';
 import { useCustomers, useCustomer, useCustomerSales, useCustomerFollowUps, useCreateCustomer } from '@/hooks/useSales';
-import { useBranchServices, useBranchEmployees, useBranchComplimentaryConfig, useLookupCoupon } from '@/hooks/useBranchPortal';
+import { useBranchServices, useBranchEmployees, useBranchComplimentaryConfig, useLookupCoupon, type BranchInventoryItem } from '@/hooks/useBranchPortal';
+import { useRaiseIndent } from '@/hooks/useIndents';
 import type { CouponLookupResult } from '@/hooks/useBranchPortal';
 import { useCreateAppointment } from '@/hooks/useAppointments';
 import { ApiClientError } from '@/lib/api-client';
@@ -55,6 +59,7 @@ import {
 import StatusTag from '@/components/sales/StatusTag';
 import ModuleCard from '@/components/customers/ModuleCard';
 import AvatarUpload from '@/components/customers/AvatarUpload';
+import PackagesTab from '@/components/customers/PackagesTab';
 import { formatDate, formatMoney } from '@shared/format';
 import { colors } from '@/theme/colors';
 
@@ -75,7 +80,7 @@ export default function CustomerDetailPage() {
   const [packageOfferStep, setPackageOfferStep] = useState<1 | 2 | 3 | 4>(1);
   const [savedBookingId, setSavedBookingId] = useState<string | null>(null);
   const [savedNetAmountPaise, setSavedNetAmountPaise] = useState<number>(0);
-  const [bookingRows, setBookingRows] = useState<any[]>([{ id: 1, category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive' }]);
+  const [bookingRows, setBookingRows] = useState<any[]>([{ id: 1, category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive', serviceBy: '', discPct: 0 }]);
   const [complimentaryRows, setComplimentaryRows] = useState<any[]>([]);
   const [couponInput, setCouponInput] = useState('');
   const [appliedCoupon, setAppliedCoupon] = useState<(CouponLookupResult & { discountPaise: number }) | null>(null);
@@ -83,6 +88,17 @@ export default function CustomerDetailPage() {
     bookingDate: new Date().toISOString().split('T')[0],
     bookingId: `BK-${Math.floor(100000 + Math.random() * 900000)}`,
     consultant: '',
+    doctor: '',
+    teleCaller: '',
+    source: '',
+    tokenRef: '',
+    validityDate: '',
+    sessions: 1,
+    rating: 0,
+    paymentMode: '',
+    shareIncentive: '',
+    targetWeight: '',
+    measurements: '',
     discount: 0,
     roundOff: 0,
     remarks: '',
@@ -117,17 +133,16 @@ export default function CustomerDetailPage() {
       setPackageOfferStep(1);
       setSavedBookingId(null);
       setSavedNetAmountPaise(0);
-      setBookingRows([{ id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive' }]);
+      setBookingRows([{ id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive', serviceBy: '', discPct: 0 }]);
       setComplimentaryRows([]);
       setCouponInput('');
       setAppliedCoupon(null);
       setBookingData({
         bookingDate: new Date().toISOString().split('T')[0],
         bookingId: `BK-${Math.floor(100000 + Math.random() * 900000)}`,
-        consultant: '',
-        discount: 0,
-        roundOff: 0,
-        remarks: '',
+        consultant: '', doctor: '', teleCaller: '', source: '', tokenRef: '',
+        validityDate: '', sessions: 1, rating: 0, paymentMode: '', shareIncentive: '',
+        targetWeight: '', measurements: '', discount: 0, roundOff: 0, remarks: '',
       });
     }
   }, [expandedModuleView]);
@@ -189,8 +204,58 @@ export default function CustomerDetailPage() {
   const limitIsActive = complimentaryConfig?.limitIsActive ?? false;
   const lookupCoupon = useLookupCoupon();
   const createBooking = useCreateAppointment();
+  const raiseIndent = useRaiseIndent();
+
+  // Stock warning modal state
+  interface StockShortfall {
+    productId: string;
+    productName: string;
+    productUom: string;
+    required: number;
+    available: number;
+  }
+  const [stockWarningOpen, setStockWarningOpen] = useState(false);
+  const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([]);
+  const [stockIndentChecked, setStockIndentChecked] = useState<Set<string>>(new Set());
+  const [pendingBookingPayload, setPendingBookingPayload] = useState<Record<string, unknown> | null>(null);
   // Branch employees — used to populate the prescription "Doctor" dropdown.
   const { data: branchStaff, isLoading: branchStaffLoading } = useBranchEmployees();
+
+  // Must be before any early return — Rules of Hooks.
+  // OR logic: a field appears only if at least one selected service's category has the flag ON.
+  // When no service is selected yet, all optional fields are hidden (ALL_FALSE).
+  // isAmountEditable is the exception — defaults true when nothing is selected so the input stays usable.
+  const effectiveFlags = useMemo(() => {
+    const ALL_FALSE = {
+      hasConsultant: false, hasQuantity: false, isAmountEditable: true,
+      hasDoctor: false, hasTeleCaller: false, hasMedia: false, hasTokenReference: false,
+      hasServiceBy: false, hasIndividualDiscount: false, hasTotalDiscount: false,
+      hasValidity: false, hasSession: false, sessionBased: false, hasDND: false,
+      hasRating: false, hasDirectPayment: false, hasShareIncentive: false,
+      isCombo: false, servicesInCombo: false, hasAllSessionsLink: false,
+      hasBreakPackage: false, targetWeightBased: false, hasMeasurement: false,
+    };
+    const selectedSvcs = bookingRows
+      .filter(r => r.service)
+      .map(r => (branchServices ?? []).find(s => s.name === r.service))
+      .filter(Boolean);
+    if (selectedSvcs.length === 0) return ALL_FALSE;
+    const flag = (key: string) => selectedSvcs.some(s => s!.categoryFlags?.[key] ?? false);
+    return {
+      hasConsultant: flag('hasConsultant'), hasQuantity: flag('hasQuantity'),
+      isAmountEditable: flag('isAmountEditable'), hasDoctor: flag('hasDoctor'),
+      hasTeleCaller: flag('hasTeleCaller'), hasMedia: flag('hasMedia'),
+      hasTokenReference: flag('hasTokenReference'), hasServiceBy: flag('hasServiceBy'),
+      hasIndividualDiscount: flag('hasIndividualDiscount'), hasTotalDiscount: flag('hasTotalDiscount'),
+      hasValidity: flag('hasValidity'), hasSession: flag('hasSession'),
+      sessionBased: flag('sessionBased'), hasDND: flag('hasDND'),
+      hasRating: flag('hasRating'), hasDirectPayment: flag('hasDirectPayment'),
+      hasShareIncentive: flag('hasShareIncentive'), isCombo: flag('isCombo'),
+      servicesInCombo: flag('servicesInCombo'), hasAllSessionsLink: flag('hasAllSessionsLink'),
+      hasBreakPackage: flag('hasBreakPackage'), targetWeightBased: flag('targetWeightBased'),
+      hasMeasurement: flag('hasMeasurement'),
+    };
+  }, [bookingRows, branchServices]);
 
   if (isLoading || !customer) {
     return (
@@ -338,7 +403,7 @@ export default function CustomerDetailPage() {
   const netTotal = subtotal - discountAmount;
 
   const handleAddRow = () => {
-    setBookingRows([...bookingRows, { id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive' }]);
+    setBookingRows([...bookingRows, { id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive', serviceBy: '', discPct: 0 }]);
   };
 
   const handleAddComplementaryRow = () => {
@@ -413,7 +478,41 @@ export default function CustomerDetailPage() {
     setBookingRows(bookingRows.filter(row => row.id !== id));
   };
 
-  const handleSaveBooking = async () => {
+  const buildBookingPayload = (force = false): Record<string, unknown> => {
+    const validRows = bookingRows.filter((r) => r.service && r.service.trim());
+    const items = [
+      ...validRows.map((r) => ({
+        category: r.category || undefined,
+        service: r.service,
+        quantity: Math.max(1, Number(r.quantity) || 1),
+        amount: Math.round((Number(r.amount) || 0) * 100),
+      })),
+      ...complimentaryRows.filter(r => r.service?.trim()).map((r) => ({
+        category: undefined,
+        service: r.service,
+        quantity: Math.max(1, Number(r.quantity) || 1),
+        amount: 0,
+      })),
+    ];
+    const subtotalPaise = items.reduce((s, it) => s + (it.amount as number) * (it.quantity as number), 0);
+    const couponDiscountPaise = appliedCoupon?.discountPaise ?? 0;
+    const discountPaise = Math.round((subtotalPaise * (Number(bookingData.discount) || 0)) / 100) + couponDiscountPaise;
+    const roundOffPaise = Math.round((Number(bookingData.roundOff) || 0) * 100);
+    return {
+      customerId: id,
+      consultantStaffId: bookingData.consultant || undefined,
+      scheduledAt: new Date(bookingData.bookingDate).toISOString(),
+      status: 'completed',
+      notes: bookingData.remarks || undefined,
+      discount: discountPaise,
+      roundOff: roundOffPaise,
+      items,
+      forceCreate: force,
+      _netPaise: subtotalPaise - discountPaise + roundOffPaise,
+    };
+  };
+
+  const handleSaveBooking = async (force = false) => {
     const validRows = bookingRows.filter((r) => r.service && r.service.trim());
     if (!validRows.length) {
       message.error('Add at least one service to save booking');
@@ -421,49 +520,29 @@ export default function CustomerDetailPage() {
     }
 
     try {
-      // Build the booking line items. Amounts are entered in rupees → paise.
-      const items = [
-        ...validRows.map((r) => ({
-          category: r.category || undefined,
-          service: r.service,
-          quantity: Math.max(1, Number(r.quantity) || 1),
-          amount: Math.round((Number(r.amount) || 0) * 100),
-        })),
-        ...complimentaryRows.filter(r => r.service?.trim()).map((r) => ({
-          category: undefined,
-          service: r.service,
-          quantity: Math.max(1, Number(r.quantity) || 1),
-          amount: 0,
-        })),
-      ];
+      const payload = buildBookingPayload(force);
+      const netPaise = payload._netPaise as number;
+      const { _netPaise: _, ...apiPayload } = payload;
 
-      // discount is a percentage in the UI → convert to an absolute paise amount; add coupon discount.
-      const subtotalPaise = items.reduce((s, it) => s + it.amount * it.quantity, 0);
-      const couponDiscountPaise = appliedCoupon?.discountPaise ?? 0;
-      const discountPaise = Math.round((subtotalPaise * (Number(bookingData.discount) || 0)) / 100) + couponDiscountPaise;
-      const roundOffPaise = Math.round((Number(bookingData.roundOff) || 0) * 100);
-      const netPaise = subtotalPaise - discountPaise + roundOffPaise;
+      const result = await createBooking.mutateAsync(apiPayload);
 
-      // Save via the staff bookings endpoint (creates a Booking + BookingItems).
-      const result = await createBooking.mutateAsync({
-        customerId: id,
-        consultantStaffId: bookingData.consultant || undefined,
-        scheduledAt: new Date(bookingData.bookingDate).toISOString(),
-        status: 'completed',
-        notes: bookingData.remarks || undefined,
-        discount: discountPaise,
-        roundOff: roundOffPaise,
-        items,
-      });
-
-      // Store the created booking ID + netAmount so Step 4 can record the payment
       setSavedBookingId((result as any).id ?? null);
       setSavedNetAmountPaise(netPaise);
 
       message.success('Booking saved! Showing receipt…');
-      // Go to receipt step — keep booking data in state for display
       setPackageOfferStep(2);
     } catch (error) {
+      if (error instanceof ApiClientError && error.code === 'STOCK_INSUFFICIENT') {
+        const shortfalls: StockShortfall[] = (error.details ?? [])
+          .filter((d) => d.field === 'shortfall')
+          .map((d) => { try { return JSON.parse(d.message); } catch { return null; } })
+          .filter(Boolean);
+        setStockShortfalls(shortfalls);
+        setStockIndentChecked(new Set(shortfalls.map((s) => s.productId)));
+        setPendingBookingPayload(buildBookingPayload(true));
+        setStockWarningOpen(true);
+        return;
+      }
       message.error(
         'Error saving booking: ' +
           (error instanceof ApiClientError
@@ -472,6 +551,29 @@ export default function CustomerDetailPage() {
               ? error.message
               : 'Unknown error'),
       );
+    }
+  };
+
+  const handleStockProceed = async () => {
+    if (!pendingBookingPayload) return;
+    try {
+      // Raise indents for checked products.
+      for (const s of stockShortfalls) {
+        if (stockIndentChecked.has(s.productId)) {
+          await raiseIndent.mutateAsync({
+            productId: s.productId,
+            requestedQty: Math.max(1, s.required - s.available),
+            reason: 'Auto-raised from booking form — insufficient stock',
+          });
+        }
+      }
+      const result = await createBooking.mutateAsync(pendingBookingPayload);
+      setSavedBookingId((result as any).id ?? null);
+      setStockWarningOpen(false);
+      message.success('Booking saved! Showing receipt…');
+      setPackageOfferStep(2);
+    } catch (err) {
+      message.error('Failed to complete booking: ' + (err instanceof Error ? err.message : 'Unknown error'));
     }
   };
 
@@ -692,7 +794,7 @@ export default function CustomerDetailPage() {
                       count={m.count}
                       loading={m.loading}
                       onClick={() => setExpandedModuleView(expandedModuleView === m.key ? null : m.key)}
-                      onAdd={m.key === 'bookings' ? () => setExpandedModuleView('package-offer') : undefined}
+                      onAdd={m.key === 'bookings' ? () => setExpandedModuleView('new-booking') : undefined}
                     />
                   </Col>
                 ))}
@@ -1317,7 +1419,7 @@ export default function CustomerDetailPage() {
                     Currently Viewing
                   </div>
                   <div style={{ fontSize: 18, fontWeight: 700, color: 'white' }}>
-                    {modules.find(m => m.key === expandedModuleView)?.title || 'Module Details'}
+                    {expandedModuleView === 'new-booking' ? 'New Booking' : modules.find(m => m.key === expandedModuleView)?.title || 'Module Details'}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
@@ -1438,17 +1540,21 @@ export default function CustomerDetailPage() {
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(paidAmt / 100).toLocaleString('en-IN')}</td>
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(balAmt / 100).toLocaleString('en-IN')}</td>
                                     <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap', fontSize: 12 }}>
-                                      {b.gstRate ? (
-                                        <div>
-                                          {b.gstRate.taxType === 'IGST' ? (
-                                            <span style={{ color: '#7b1fa2' }}>
-                                              IGST {b.gstRate.percentage}%
-                                              {b.gstTaxAmount ? <><br />₹{Math.round(b.gstTaxAmount / 100).toLocaleString('en-IN')}</> : null}
+                                      {(b.cgstAmt > 0 || b.igstAmt > 0) ? (
+                                        <div style={{ lineHeight: 1.6 }}>
+                                          {b.taxableAmt > 0 && (
+                                            <div style={{ color: '#888', fontSize: 11 }}>
+                                              Taxable: ₹{Math.round(b.taxableAmt / 100).toLocaleString('en-IN')}
+                                            </div>
+                                          )}
+                                          {b.igstAmt > 0 ? (
+                                            <span style={{ color: '#7b1fa2', fontWeight: 500 }}>
+                                              IGST: ₹{Math.round(b.igstAmt / 100).toLocaleString('en-IN')}
                                             </span>
                                           ) : (
                                             <span style={{ color: '#1565c0' }}>
-                                              CGST+SGST {b.gstRate.percentage}%
-                                              {b.gstTaxAmount ? <><br />₹{Math.round(b.gstTaxAmount / 100).toLocaleString('en-IN')}</> : null}
+                                              CGST: ₹{Math.round(b.cgstAmt / 100).toLocaleString('en-IN')}<br />
+                                              SGST: ₹{Math.round(b.sgstAmt / 100).toLocaleString('en-IN')}
                                             </span>
                                           )}
                                         </div>
@@ -1662,11 +1768,45 @@ export default function CustomerDetailPage() {
                         Total Packages: <strong>{packages.length}</strong>
                       </p>
                       {packages.map((pkg: any) => (
-                        <Card key={pkg.id} style={{ marginBottom: 12 }}>
-                          <p style={{ fontWeight: 600, margin: 0 }}>{pkg.name || 'Package'}</p>
-                          <p style={{ fontSize: 12, color: colors.text.secondary, margin: '4px 0 0 0' }}>
-                            {pkg.description || '—'}
-                          </p>
+                        <Card key={pkg.id} style={{ marginBottom: 12 }} styles={{ body: { padding: '12px 16px' } }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                            <div>
+                              <p style={{ fontWeight: 600, margin: 0, fontSize: 14 }}>{pkg.name || 'Package'}</p>
+                              {pkg.notes && (
+                                <p style={{ fontSize: 12, color: colors.text.secondary, margin: '2px 0 0 0' }}>{pkg.notes}</p>
+                              )}
+                            </div>
+                            <span style={{
+                              fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
+                              background: pkg.status === 'active' ? '#f6ffed' : pkg.status === 'completed' ? '#e6f7ff' : '#fff2e8',
+                              color: pkg.status === 'active' ? '#52c41a' : pkg.status === 'completed' ? '#1677ff' : '#fa8c16',
+                              border: `1px solid ${pkg.status === 'active' ? '#b7eb8f' : pkg.status === 'completed' ? '#91caff' : '#ffbb96'}`,
+                            }}>
+                              {pkg.status ? pkg.status.charAt(0).toUpperCase() + pkg.status.slice(1) : '—'}
+                            </span>
+                          </div>
+                          <div style={{ display: 'flex', gap: 24, marginTop: 10, fontSize: 13 }}>
+                            <div>
+                              <span style={{ color: colors.text.secondary, fontSize: 11 }}>Sessions</span>
+                              <div style={{ fontWeight: 600 }}>{pkg.usedSessions ?? 0} / {pkg.totalSessions ?? 0} used</div>
+                            </div>
+                            <div>
+                              <span style={{ color: colors.text.secondary, fontSize: 11 }}>Price</span>
+                              <div style={{ fontWeight: 600 }}>₹{Math.round((pkg.price ?? 0) / 100).toLocaleString('en-IN')}</div>
+                            </div>
+                            {pkg.expiresAt && (
+                              <div>
+                                <span style={{ color: colors.text.secondary, fontSize: 11 }}>Expires</span>
+                                <div style={{ fontWeight: 600 }}>{new Date(pkg.expiresAt).toLocaleDateString('en-GB')}</div>
+                              </div>
+                            )}
+                            {pkg.purchasedAt && (
+                              <div>
+                                <span style={{ color: colors.text.secondary, fontSize: 11 }}>Purchased</span>
+                                <div style={{ fontWeight: 600 }}>{new Date(pkg.purchasedAt).toLocaleDateString('en-GB')}</div>
+                              </div>
+                            )}
+                          </div>
                         </Card>
                       ))}
                     </div>
@@ -3104,6 +3244,10 @@ export default function CustomerDetailPage() {
               )}
 
               {expandedModuleView === 'package-offer' && (
+                <PackagesTab customerId={id} customerName={customer?.name ?? ''} />
+              )}
+
+              {expandedModuleView === 'new-booking' && (
                 <div>
                   {/* Step Indicator */}
                   <div style={{ marginBottom: 32, display: 'flex', justifyContent: 'space-between', gap: 8 }}>
@@ -3170,20 +3314,64 @@ export default function CustomerDetailPage() {
                         <span style={{ fontSize: 14, fontWeight: 600, color: colors.text.primary }}>&#x27A1; Fresh Booking</span>
                       </div>
 
-                      {/* Consultant row */}
-                      <div style={{ padding: '12px 16px', borderBottom: `1px dashed ${colors.border}`, display: 'flex', alignItems: 'center', gap: 16 }}>
-                        <label style={{ fontSize: 13, color: colors.text.primary, minWidth: 90 }}>Consultant:</label>
-                        <select
-                          value={bookingData.consultant}
-                          onChange={(e) => setBookingData({ ...bookingData, consultant: e.target.value })}
-                          style={{ padding: '5px 10px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 13, minWidth: 200 }}
-                        >
-                          <option value="">Select Consultant</option>
-                          {(branchStaff ?? []).map((emp: any) => (
-                            <option key={emp.id} value={emp.id}>{emp.name}</option>
-                          ))}
-                        </select>
+                      {/* ── Header fields — each controlled by a category flag ── */}
+                      {(effectiveFlags.hasConsultant || effectiveFlags.hasDoctor || effectiveFlags.hasTeleCaller || effectiveFlags.hasMedia || effectiveFlags.hasTokenReference || effectiveFlags.hasDND) && (
+                      <div style={{ padding: '10px 16px', borderBottom: `1px dashed ${colors.border}`, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center' }}>
+                        {effectiveFlags.hasConsultant && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 80 }}>Consultant:</label>
+                            <select value={bookingData.consultant} onChange={(e) => setBookingData({ ...bookingData, consultant: e.target.value })}
+                              style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, minWidth: 160 }}>
+                              <option value="">Select</option>
+                              {(branchStaff ?? []).map((emp: any) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {effectiveFlags.hasDoctor && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 50 }}>Doctor:</label>
+                            <select value={bookingData.doctor} onChange={(e) => setBookingData({ ...bookingData, doctor: e.target.value })}
+                              style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, minWidth: 160 }}>
+                              <option value="">Select</option>
+                              {(branchStaff ?? []).map((emp: any) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {effectiveFlags.hasTeleCaller && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 80 }}>Tele-Caller:</label>
+                            <select value={bookingData.teleCaller} onChange={(e) => setBookingData({ ...bookingData, teleCaller: e.target.value })}
+                              style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, minWidth: 160 }}>
+                              <option value="">Select</option>
+                              {(branchStaff ?? []).map((emp: any) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {effectiveFlags.hasMedia && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 55 }}>Source:</label>
+                            <select value={bookingData.source} onChange={(e) => setBookingData({ ...bookingData, source: e.target.value })}
+                              style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, minWidth: 140 }}>
+                              <option value="">Select</option>
+                              {['Walk-in','Phone Call','WhatsApp','Online','Referral','Social Media','Email'].map(s => <option key={s} value={s}>{s}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {effectiveFlags.hasTokenReference && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 65 }}>Token No.:</label>
+                            <input value={bookingData.tokenRef} onChange={(e) => setBookingData({ ...bookingData, tokenRef: e.target.value })}
+                              placeholder="Token / Reference" style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, width: 130 }} />
+                          </div>
+                        )}
+                        {effectiveFlags.hasDND && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff3e0', border: '1px solid #ffb74d', borderRadius: 4, padding: '4px 10px' }}>
+                            <span style={{ fontSize: 11, color: '#e65100', fontWeight: 700 }}>DND</span>
+                            <span style={{ fontSize: 11, color: '#e65100' }}>Do Not Disturb</span>
+                          </div>
+                        )}
                       </div>
+                      )}
 
                       {/* Booking Details section */}
                       <div style={{ padding: '10px 16px 0' }}>
@@ -3198,20 +3386,22 @@ export default function CustomerDetailPage() {
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', width: 52, color: '#e53935', fontWeight: 600 }}>&#x2193; S.No.</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>&#x1F4C2; Category</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>&#x1F4CB; Service</th>
-                              <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>Quantity</th>
+                              {effectiveFlags.hasQuantity && <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>Quantity</th>}
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>&#x20B9; Amount</th>
+                              {effectiveFlags.hasIndividualDiscount && <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#e53935', fontWeight: 600 }}>Disc%</th>}
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#333', fontWeight: 600 }}>&#x2295; Total</th>
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#7b1fa2', fontWeight: 600 }}>
                                 GST %
                                 <div style={{ fontSize: 10, fontWeight: 400, color: '#888', marginTop: 2 }}>from service</div>
                               </th>
+                              {effectiveFlags.hasServiceBy && <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#1565c0', fontWeight: 600 }}>Service By</th>}
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, textAlign: 'center', color: '#333', fontWeight: 600 }}>Remove</th>
                             </tr>
                           </thead>
                           <tbody>
                             {bookingRows.length === 0 ? (
                               <tr>
-                                <td colSpan={8} style={{ padding: 20, textAlign: 'center', color: colors.text.secondary, borderTop: `1px solid ${colors.border}` }}>
+                                <td colSpan={7 + (effectiveFlags.hasQuantity ? 1 : 0) + (effectiveFlags.hasIndividualDiscount ? 1 : 0) + (effectiveFlags.hasServiceBy ? 1 : 0)} style={{ padding: 20, textAlign: 'center', color: colors.text.secondary, borderTop: `1px solid ${colors.border}` }}>
                                   No rows added. Click the button below to add a service.
                                 </td>
                               </tr>
@@ -3256,11 +3446,31 @@ export default function CustomerDetailPage() {
                                       {(branchServices ?? [])
                                         .filter(svc => !row.category || svc.categoryName === row.category)
                                         .map((svc) => (
-                                          <option key={svc.id} value={svc.name}>{svc.name}</option>
+                                          <option key={svc.id} value={svc.name}>
+                                            {svc.hasLowStock ? `⚠ ${svc.name}` : svc.name}
+                                          </option>
                                         ))}
                                     </select>
+                                    {/* F2: Inventory consumption info panel */}
+                                    {(() => {
+                                      const svc = (branchServices ?? []).find((s) => s.name === row.service);
+                                      if (!svc || !svc.inventoryItems?.length) return null;
+                                      return (
+                                        <div style={{ marginTop: 4, fontSize: 11, lineHeight: 1.6 }}>
+                                          {svc.inventoryItems.map((item: BranchInventoryItem) => (
+                                            <div key={item.productId} style={{ color: item.isLowStock ? '#e67e22' : '#27ae60' }}>
+                                              {item.isLowStock ? '⚠' : '✓'} {item.productName} — {item.quantityPerSession} {item.productUom}/session
+                                              <span style={{ color: '#888', marginLeft: 4 }}>
+                                                (in stock: {item.onHandQty} {item.productUom})
+                                              </span>
+                                            </div>
+                                          ))}
+                                        </div>
+                                      );
+                                    })()}
                                   </td>
                                   {/* Quantity */}
+                                  {effectiveFlags.hasQuantity && (
                                   <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
                                     <input
                                       type="number" min="1"
@@ -3269,18 +3479,35 @@ export default function CustomerDetailPage() {
                                       style={{ width: 60, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }}
                                     />
                                   </td>
+                                  )}
                                   {/* Amount */}
                                   <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
                                     <input
                                       type="number" min="0"
                                       value={row.amount}
                                       onChange={(e) => handleRowChange(row.id, 'amount', parseFloat(e.target.value) || 0)}
-                                      style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12 }}
+                                      disabled={!effectiveFlags.isAmountEditable}
+                                      style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12, background: effectiveFlags.isAmountEditable ? undefined : '#f5f5f5', cursor: effectiveFlags.isAmountEditable ? undefined : 'not-allowed' }}
                                     />
                                   </td>
-                                  {/* Total */}
+                                  {/* Disc% — per-row discount */}
+                                  {effectiveFlags.hasIndividualDiscount && (
+                                  <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
+                                    <input
+                                      type="number" min="0" max="100"
+                                      value={row.discPct}
+                                      onChange={(e) => handleRowChange(row.id, 'discPct', parseFloat(e.target.value) || 0)}
+                                      style={{ width: 56, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }}
+                                    />
+                                  </td>
+                                  )}
+                                  {/* Total (with individual discount applied) */}
                                   <td style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 600, color: '#e53935', borderRight: `1px solid ${colors.border}` }}>
-                                    {(row.quantity * row.amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                    {(() => {
+                                      const base = row.quantity * row.amount;
+                                      const disc = effectiveFlags.hasIndividualDiscount ? (row.discPct ?? 0) : 0;
+                                      return (base * (1 - disc / 100)).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                                    })()}
                                   </td>
                                   {/* GST % — read-only from service config */}
                                   <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}` }}>
@@ -3305,6 +3532,19 @@ export default function CustomerDetailPage() {
                                       <span style={{ fontSize: 11, color: '#ccc' }}>—</span>
                                     )}
                                   </td>
+                                  {/* Service By — staff member performing the service */}
+                                  {effectiveFlags.hasServiceBy && (
+                                  <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
+                                    <select
+                                      value={row.serviceBy}
+                                      onChange={(e) => handleRowChange(row.id, 'serviceBy', e.target.value)}
+                                      style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, fontSize: 12 }}
+                                    >
+                                      <option value="">Select</option>
+                                      {(branchStaff ?? []).map((emp: any) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                                    </select>
+                                  </td>
+                                  )}
                                   {/* Remove */}
                                   <td style={{ padding: '6px 10px', textAlign: 'center' }}>
                                     <div
@@ -3458,27 +3698,35 @@ export default function CustomerDetailPage() {
                               : Math.round((linePaise * pct) / 100);
                             aggTaxable += taxableAmt;
                             aggTax += taxAmt;
+                            // grossTotal = aggTaxable + aggTax covers both inclusive (price = base+tax)
+                            // and exclusive (price = base, tax added on top) correctly.
                           }
                           const hasGst = aggTax > 0;
+                          // True gross: for inclusive items the price already contains tax,
+                          // for exclusive items tax is on top — aggTaxable+aggTax handles both.
+                          const grossTotal = (aggTaxable + aggTax) / 100;
                           const fmt = (p: number) => (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
                           return (
                             <div style={{ textAlign: 'right', fontSize: 13, lineHeight: 2 }}>
-                              {hasGst && (
+                              {hasGst ? (
+                                <>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                    <span style={{ color: colors.text.secondary }}>Taxable Amount :</span>
+                                    <span style={{ minWidth: 60, textAlign: 'right' }}>{fmt(aggTaxable)}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                    <span style={{ color: '#7b1fa2', fontWeight: 500 }}>GST :</span>
+                                    <span style={{ minWidth: 60, textAlign: 'right', color: '#7b1fa2' }}>+{fmt(aggTax)}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `1px dashed ${colors.border}`, paddingTop: 2 }}>
+                                    <span style={{ color: colors.text.secondary, fontWeight: 600 }}>Total Amount :</span>
+                                    <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 600 }}>{grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                  </div>
+                                </>
+                              ) : (
                                 <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                                  <span style={{ color: colors.text.secondary }}>Taxable Amount :</span>
-                                  <span style={{ minWidth: 60, textAlign: 'right' }}>{fmt(aggTaxable)}</span>
-                                </div>
-                              )}
-                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                                <span style={{ color: colors.text.secondary }}>Total Amount :</span>
-                                <span style={{ minWidth: 60, textAlign: 'right' }}>{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                              </div>
-                              {hasGst && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                                  <span style={{ color: '#7b1fa2', fontWeight: 500 }}>
-                                    GST (auto) :
-                                  </span>
-                                  <span style={{ minWidth: 60, textAlign: 'right', color: '#7b1fa2' }}>+{fmt(aggTax)}</span>
+                                  <span style={{ color: colors.text.secondary }}>Total Amount :</span>
+                                  <span style={{ minWidth: 60, textAlign: 'right' }}>{totalAmount.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                                 </div>
                               )}
                               {/* Coupon Code Input */}
@@ -3530,24 +3778,106 @@ export default function CustomerDetailPage() {
                                   style={{ width: 80, padding: '2px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12 }}
                                 />
                               </div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `1px dashed ${colors.border}`, paddingTop: 4 }}>
-                                <span style={{ color: colors.text.secondary }}>Net Amount :</span>
-                                <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 700 }}>
-                                  {(totalAmount + (bookingData.roundOff || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `2px solid #7b1fa2`, paddingTop: 4 }}>
+                                <span style={{ color: '#7b1fa2', fontWeight: 700 }}>Final Bill Amount :</span>
+                                <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 700, color: '#7b1fa2' }}>
+                                  {(grossTotal + (bookingData.roundOff || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                                 </span>
                               </div>
-                              {hasGst && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `2px solid #7b1fa2`, paddingTop: 4 }}>
-                                  <span style={{ color: '#7b1fa2', fontWeight: 700 }}>Final Bill Amount :</span>
-                                  <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 700, color: '#7b1fa2' }}>
-                                    {(totalAmount + (bookingData.roundOff || 0) + aggTax / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
-                                  </span>
-                                </div>
-                              )}
                             </div>
                           );
                         })()}
                       </div>
+
+                      {/* ── Additional booking fields controlled by flags ── */}
+                      {(effectiveFlags.hasTotalDiscount || effectiveFlags.hasValidity || effectiveFlags.hasSession || effectiveFlags.sessionBased || effectiveFlags.hasRating || effectiveFlags.hasDirectPayment || effectiveFlags.hasShareIncentive || effectiveFlags.targetWeightBased || effectiveFlags.hasMeasurement || effectiveFlags.isCombo || effectiveFlags.hasAllSessionsLink || effectiveFlags.hasBreakPackage) && (
+                      <div style={{ padding: '10px 16px', borderBottom: `1px dashed ${colors.border}`, display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+                        {effectiveFlags.hasTotalDiscount && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 100 }}>Total Disc (₹):</label>
+                            <input type="number" min="0" value={bookingData.discount}
+                              onChange={(e) => setBookingData({ ...bookingData, discount: parseFloat(e.target.value) || 0 })}
+                              style={{ width: 80, padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, textAlign: 'right' }} />
+                          </div>
+                        )}
+                        {(effectiveFlags.hasSession || effectiveFlags.sessionBased) && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 70 }}>Sessions:</label>
+                            <input type="number" min="1" value={bookingData.sessions}
+                              onChange={(e) => setBookingData({ ...bookingData, sessions: parseInt(e.target.value) || 1 })}
+                              style={{ width: 70, padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, textAlign: 'center' }} />
+                          </div>
+                        )}
+                        {effectiveFlags.hasValidity && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 85 }}>Valid Until:</label>
+                            <input type="date" value={bookingData.validityDate}
+                              onChange={(e) => setBookingData({ ...bookingData, validityDate: e.target.value })}
+                              style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12 }} />
+                          </div>
+                        )}
+                        {effectiveFlags.hasDirectPayment && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 100 }}>Payment Mode:</label>
+                            <select value={bookingData.paymentMode} onChange={(e) => setBookingData({ ...bookingData, paymentMode: e.target.value })}
+                              style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, minWidth: 130 }}>
+                              <option value="">Select</option>
+                              {['Cash','Card','UPI','Net Banking','Cheque','Wallet','Mixed'].map(m => <option key={m} value={m}>{m}</option>)}
+                            </select>
+                          </div>
+                        )}
+                        {effectiveFlags.hasRating && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 55 }}>Rating:</label>
+                            <div style={{ display: 'flex', gap: 4 }}>
+                              {[1,2,3,4,5].map(star => (
+                                <span key={star} onClick={() => setBookingData({ ...bookingData, rating: star })}
+                                  style={{ fontSize: 18, cursor: 'pointer', color: (bookingData.rating ?? 0) >= star ? '#f59e0b' : '#d1d5db' }}>★</span>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                        {effectiveFlags.hasShareIncentive && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 100 }}>Share Incentive:</label>
+                            <input value={bookingData.shareIncentive} onChange={(e) => setBookingData({ ...bookingData, shareIncentive: e.target.value })}
+                              placeholder="Referrer name / code" style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, width: 160 }} />
+                          </div>
+                        )}
+                        {effectiveFlags.targetWeightBased && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 100 }}>Target Weight:</label>
+                            <input value={bookingData.targetWeight} onChange={(e) => setBookingData({ ...bookingData, targetWeight: e.target.value })}
+                              placeholder="e.g. 70 kg" style={{ padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12, width: 100 }} />
+                          </div>
+                        )}
+                        {effectiveFlags.hasMeasurement && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%' }}>
+                            <label style={{ fontSize: 12, color: colors.text.secondary, minWidth: 100 }}>Measurements:</label>
+                            <input value={bookingData.measurements} onChange={(e) => setBookingData({ ...bookingData, measurements: e.target.value })}
+                              placeholder="e.g. Waist: 32, Hip: 38" style={{ flex: 1, padding: '4px 8px', border: `1px solid ${colors.border}`, borderRadius: 4, fontSize: 12 }} />
+                          </div>
+                        )}
+                        {effectiveFlags.isCombo && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 4, padding: '4px 10px' }}>
+                            <span style={{ fontSize: 11, color: '#1565c0', fontWeight: 700 }}>COMBO</span>
+                            <span style={{ fontSize: 11, color: '#1565c0' }}>This is a combo package</span>
+                          </div>
+                        )}
+                        {effectiveFlags.hasAllSessionsLink && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#f3e5f5', border: '1px solid #ce93d8', borderRadius: 4, padding: '4px 10px' }}>
+                            <span style={{ fontSize: 11, color: '#7b1fa2', fontWeight: 700 }}>ALL SESSIONS</span>
+                            <span style={{ fontSize: 11, color: '#7b1fa2' }}>All sessions are linked</span>
+                          </div>
+                        )}
+                        {effectiveFlags.hasBreakPackage && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 4, padding: '4px 10px' }}>
+                            <span style={{ fontSize: 11, color: '#f57f17', fontWeight: 700 }}>BREAK</span>
+                            <span style={{ fontSize: 11, color: '#f57f17' }}>Package can be broken</span>
+                          </div>
+                        )}
+                      </div>
+                      )}
 
                       {/* Remarks */}
                       <div style={{ padding: '10px 16px', borderBottom: `1px dashed ${colors.border}`, display: 'flex', alignItems: 'flex-start', gap: 16 }}>
@@ -3570,7 +3900,7 @@ export default function CustomerDetailPage() {
                       <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'flex-end' }}>
                         <Button
                           type="default"
-                          onClick={handleSaveBooking}
+                          onClick={() => handleSaveBooking()}
                           loading={createBooking.isPending}
                           disabled={bookingRows.filter(r => r.service).length === 0}
                           style={{ fontSize: 13 }}
@@ -3586,7 +3916,18 @@ export default function CustomerDetailPage() {
                   {packageOfferStep === 2 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
                     const filledRows = bookingRows.filter(r => r.service);
-                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * r.amount, 0);
+                    let aggTaxable2 = 0, aggTax2 = 0;
+                    for (const row of filledRows) {
+                      const lp = Math.round(row.quantity * row.amount * 100);
+                      const pct = row.taxPercent ?? 0;
+                      if (!pct) { aggTaxable2 += lp; continue; }
+                      const incl = row.taxType === 'inclusive';
+                      const base = incl ? Math.round((lp * 100) / (100 + pct)) : lp;
+                      aggTaxable2 += base;
+                      aggTax2 += incl ? lp - base : Math.round((lp * pct) / 100);
+                    }
+                    const hasGst2 = aggTax2 > 0;
+                    const grossTotal2 = (aggTaxable2 + aggTax2) / 100;
                     return (
                       <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 6 }}>
                         <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 14, color: colors.text.primary }}>
@@ -3639,6 +3980,7 @@ export default function CustomerDetailPage() {
                                 <th style={{ padding: '7px 10px', textAlign: 'center', borderBottom: `1px solid #ddd`, color: '#555' }}>Qty</th>
                                 <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: `1px solid #ddd`, color: '#555' }}>Rate</th>
                                 <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: `1px solid #ddd`, color: '#555' }}>Amount</th>
+                                <th style={{ padding: '7px 10px', textAlign: 'center', borderBottom: `1px solid #ddd`, color: '#555' }}>GST</th>
                                 <th style={{ padding: '7px 10px', textAlign: 'center', borderBottom: `1px solid #ddd`, color: '#555' }}>Type</th>
                               </tr>
                             </thead>
@@ -3652,6 +3994,13 @@ export default function CustomerDetailPage() {
                                   <td style={{ padding: '7px 10px', textAlign: 'right' }}>{row.complementary ? '—' : `₹${row.amount.toLocaleString('en-IN')}`}</td>
                                   <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>
                                     {row.complementary ? '₹0' : `₹${(row.quantity * row.amount).toLocaleString('en-IN')}`}
+                                  </td>
+                                  <td style={{ padding: '7px 10px', textAlign: 'center', fontSize: 11 }}>
+                                    {row.taxPercent ? (
+                                      <span style={{ background: row.taxType === 'inclusive' ? '#f3e5f5' : '#e8eaf6', color: row.taxType === 'inclusive' ? '#7b1fa2' : '#3949ab', padding: '2px 6px', borderRadius: 8, fontWeight: 600 }}>
+                                        {row.taxPercent}%
+                                      </span>
+                                    ) : <span style={{ color: '#ccc' }}>—</span>}
                                   </td>
                                   <td style={{ padding: '7px 10px', textAlign: 'center' }}>
                                     {row.complementary
@@ -3675,11 +4024,28 @@ export default function CustomerDetailPage() {
 
                         {/* Total summary */}
                         <div style={{ padding: '12px 18px', background: '#fafafa', display: 'flex', justifyContent: 'flex-end', borderBottom: `1px solid ${colors.border}` }}>
-                          <div style={{ fontSize: 13 }}>
-                            <div style={{ display: 'flex', gap: 32, justifyContent: 'space-between' }}>
-                              <span style={{ color: '#666' }}>Total Amount</span>
-                              <span style={{ fontWeight: 700 }}>₹{totalAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                            </div>
+                          <div style={{ minWidth: 260, fontSize: 13 }}>
+                            {hasGst2 ? (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                                  <span style={{ color: '#666' }}>Taxable Amount</span>
+                                  <span>₹{(aggTaxable2 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                                  <span style={{ color: '#7b1fa2' }}>GST</span>
+                                  <span style={{ color: '#7b1fa2' }}>+ ₹{(aggTax2 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: `2px solid #333`, marginTop: 4 }}>
+                                  <span style={{ fontWeight: 700 }}>Total Amount</span>
+                                  <span style={{ fontWeight: 700 }}>₹{grossTotal2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                </div>
+                              </>
+                            ) : (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
+                                <span style={{ fontWeight: 700 }}>Total Amount</span>
+                                <span style={{ fontWeight: 700 }}>₹{grossTotal2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
                           </div>
                         </div>
 
@@ -3698,8 +4064,19 @@ export default function CustomerDetailPage() {
                   {packageOfferStep === 3 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
                     const filledRows = bookingRows.filter(r => r.service);
-                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * r.amount, 0);
-                    const netAmt = totalAmt + (bookingData.roundOff || 0);
+                    let aggTaxable3 = 0, aggTax3 = 0;
+                    for (const row of filledRows) {
+                      const lp = Math.round(row.quantity * row.amount * 100);
+                      const pct = row.taxPercent ?? 0;
+                      if (!pct) { aggTaxable3 += lp; continue; }
+                      const incl = row.taxType === 'inclusive';
+                      const base = incl ? Math.round((lp * 100) / (100 + pct)) : lp;
+                      aggTaxable3 += base;
+                      aggTax3 += incl ? lp - base : Math.round((lp * pct) / 100);
+                    }
+                    const hasGst3 = aggTax3 > 0;
+                    const grossTotal3 = (aggTaxable3 + aggTax3) / 100;
+                    const netAmt = grossTotal3 + (bookingData.roundOff || 0);
                     return (
                       <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 6 }}>
                         <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 14, color: colors.text.primary }}>
@@ -3767,13 +4144,21 @@ export default function CustomerDetailPage() {
                         {/* Payment breakdown */}
                         <div style={{ padding: '14px 18px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'flex-end' }}>
                           <div style={{ minWidth: 280, fontSize: 13 }}>
+                            {hasGst3 && (
+                              <>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
+                                  <span style={{ color: '#666' }}>Taxable Amount</span>
+                                  <span style={{ fontWeight: 600 }}>₹{(aggTaxable3 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                </div>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
+                                  <span style={{ color: '#7b1fa2' }}>GST</span>
+                                  <span style={{ color: '#7b1fa2', fontWeight: 600 }}>+ ₹{(aggTax3 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                </div>
+                              </>
+                            )}
                             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
                               <span style={{ color: '#666' }}>Total Amount</span>
-                              <span style={{ fontWeight: 600 }}>₹{totalAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
-                              <span style={{ color: '#666' }}>PP Token Discount</span>
-                              <span>₹0</span>
+                              <span style={{ fontWeight: 600 }}>₹{grossTotal3.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
                               <span style={{ color: '#666' }}>Round Off</span>
@@ -3806,8 +4191,19 @@ export default function CustomerDetailPage() {
                   {packageOfferStep === 4 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
                     const filledRows = bookingRows.filter(r => r.service);
-                    const totalAmt = filledRows.reduce((s, r) => s + r.quantity * r.amount, 0);
-                    const netAmt = totalAmt + (bookingData.roundOff || 0);
+                    let aggTaxable4 = 0, aggTax4 = 0;
+                    for (const row of filledRows) {
+                      const lp = Math.round(row.quantity * row.amount * 100);
+                      const pct = row.taxPercent ?? 0;
+                      if (!pct) { aggTaxable4 += lp; continue; }
+                      const incl = row.taxType === 'inclusive';
+                      const base = incl ? Math.round((lp * 100) / (100 + pct)) : lp;
+                      aggTaxable4 += base;
+                      aggTax4 += incl ? lp - base : Math.round((lp * pct) / 100);
+                    }
+                    const hasGst4 = aggTax4 > 0;
+                    const grossTotal4 = (aggTaxable4 + aggTax4) / 100;
+                    const netAmt = grossTotal4 + (bookingData.roundOff || 0);
                     return (
                       <div>
                         {/* Action bar — hidden on print */}
@@ -3909,13 +4305,21 @@ export default function CustomerDetailPage() {
                           {/* Payment totals */}
                           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
                             <div style={{ minWidth: 280, fontSize: 13 }}>
+                              {hasGst4 && (
+                                <>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
+                                    <span style={{ color: '#666' }}>Taxable Amount</span>
+                                    <span style={{ fontWeight: 600 }}>₹{(aggTaxable4 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
+                                    <span style={{ color: '#555' }}>GST</span>
+                                    <span style={{ fontWeight: 600 }}>+ ₹{(aggTax4 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                  </div>
+                                </>
+                              )}
                               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
                                 <span style={{ color: '#666' }}>Total Amount</span>
-                                <span style={{ fontWeight: 600 }}>₹{totalAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                              </div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
-                                <span style={{ color: '#666' }}>PP Token Discount</span>
-                                <span>₹0</span>
+                                <span style={{ fontWeight: 600 }}>₹{grossTotal4.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                               </div>
                               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
                                 <span style={{ color: '#666' }}>Round Off</span>
@@ -3956,6 +4360,56 @@ export default function CustomerDetailPage() {
         </>
       )}
 
+
+      {/* Stock warning modal — shown when booking returns 409 STOCK_INSUFFICIENT */}
+      <Modal
+        open={stockWarningOpen}
+        title={<span><WarningOutlined style={{ color: '#faad14', marginRight: 8 }} />Insufficient Stock — Proceed Anyway?</span>}
+        onCancel={() => setStockWarningOpen(false)}
+        okText="Raise Indent & Proceed"
+        cancelText="Cancel"
+        okButtonProps={{ loading: raiseIndent.isPending || createBooking.isPending, danger: true }}
+        onOk={handleStockProceed}
+        width={520}
+      >
+        <p style={{ marginBottom: 12, color: '#555' }}>
+          The following products do not have enough stock for this booking. You can still proceed — the booking will be created and indents will be raised for checked items.
+        </p>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 12 }}>
+          <thead>
+            <tr style={{ background: '#f5f5f5' }}>
+              <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Raise Indent?</th>
+              <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Product</th>
+              <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>Needed</th>
+              <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>In Stock</th>
+              <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>Short</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stockShortfalls.map((s) => (
+              <tr key={s.productId} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                <td style={{ padding: '6px 8px', textAlign: 'center' }}>
+                  <Checkbox
+                    checked={stockIndentChecked.has(s.productId)}
+                    onChange={(e) => {
+                      const next = new Set(stockIndentChecked);
+                      if (e.target.checked) next.add(s.productId); else next.delete(s.productId);
+                      setStockIndentChecked(next);
+                    }}
+                  />
+                </td>
+                <td style={{ padding: '6px 8px' }}>{s.productName}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'center' }}>{s.required} {s.productUom}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'center', color: '#e53935' }}>{s.available} {s.productUom}</td>
+                <td style={{ padding: '6px 8px', textAlign: 'center', color: '#e67e22', fontWeight: 600 }}>{s.required - s.available} {s.productUom}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 12, color: '#888', margin: 0 }}>
+          Checked items will have a stock indent raised automatically. The booking will be created regardless.
+        </p>
+      </Modal>
 
     </div>
   );

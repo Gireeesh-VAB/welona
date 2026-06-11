@@ -21,7 +21,7 @@ function toPackageSession(pkg: any): PackageSession {
     customerName: pkg.customer.name,
     customerPhone: pkg.customer.phone ?? null,
     branchId: pkg.branchId,
-    branchName: pkg.branch?.branchName ?? null,
+    branchName: pkg.branch?.name ?? null,
     name: pkg.name,
     totalSessions: pkg.totalSessions,
     usedSessions: pkg.usedSessions,
@@ -57,7 +57,7 @@ export const GET = route(async (req) => {
 
   const include = {
     customer: { select: { id: true, name: true, phone: true } },
-    branch:   { select: { id: true, branchName: true } },
+    branch:   { select: { id: true, name: true } },
   };
 
   const [rows, total] = await Promise.all([

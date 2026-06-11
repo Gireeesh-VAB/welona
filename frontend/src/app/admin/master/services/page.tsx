@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Col,
+  Divider,
   Form,
   Input,
   InputNumber,
@@ -23,12 +24,14 @@ import {
 import {
   DeleteOutlined,
   EditOutlined,
+  MinusCircleOutlined,
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import {
   useAdminServices,
+  useAdminProductOptions,
   useCreateAdminService,
   useDeleteAdminService,
   useUpdateAdminService,
@@ -57,6 +60,13 @@ const SERVICE_BULK_SAMPLES = [
   { _category: 'Skin Services', name: 'TCA Peel', hsnSacCode: '999722', minPrice: '3500', maxPrice: '7500', taxPercent: '18' },
 ];
 
+interface InventoryItemFormRow {
+  productId: string;
+  quantityPerSession: number;
+  lowStockThreshold?: number;
+  sortOrder?: number;
+}
+
 interface ServiceFormValues {
   categoryId: string;
   name: string;
@@ -68,6 +78,7 @@ interface ServiceFormValues {
   hasMeasurements: boolean;
   hasComplementary: boolean;
   isActive: boolean;
+  inventoryItems?: InventoryItemFormRow[];
 }
 
 const rupeesToPaise = (rupees: number) => Math.round((rupees || 0) * 100);
@@ -134,6 +145,16 @@ export default function AdminMasterServicesPage() {
   const update = useUpdateAdminService();
   const remove = useDeleteAdminService();
 
+  const { data: productOptions } = useAdminProductOptions();
+  const productSelectOptions = useMemo(
+    () =>
+      (productOptions ?? []).map((p) => ({
+        value: p.id,
+        label: `${p.name} (${p.uom})`,
+      })),
+    [productOptions],
+  );
+
   const fail = (err: unknown, fallback: string) => {
     message.error(err instanceof ApiClientError ? err.message : fallback);
   };
@@ -148,12 +169,11 @@ export default function AdminMasterServicesPage() {
     setModalOpen(true);
   };
 
-  const handleModalOpen = (open: boolean) => {
-    if (!open) return;
-    form.resetFields();
+  // Pre-computed initial values — read by the Form on every mount (destroyOnClose remounts on each open).
+  const formInitialValues = useMemo<Partial<ServiceFormValues>>(() => {
     if (editing) {
-      form.setFieldsValue({
-        categoryId: editing.categoryId,
+      return {
+        categoryId: editing.categoryId ?? undefined,
         name: editing.name,
         hsnSacCode: editing.hsnSacCode ?? '',
         minPriceRupees: paiseToRupees(editing.minPrice),
@@ -163,19 +183,25 @@ export default function AdminMasterServicesPage() {
         hasMeasurements: editing.hasMeasurements,
         hasComplementary: editing.hasComplementary,
         isActive: editing.isActive,
-      });
-    } else {
-      form.setFieldsValue({
-        isActive: true,
-        hasMeasurements: false,
-        hasComplementary: false,
-        taxPercent: 18,
-        taxType: 'exclusive',
-        minPriceRupees: 0,
-        maxPriceRupees: 0,
-      });
+        inventoryItems: (editing.inventoryItems ?? []).map((item) => ({
+          productId: item.productId,
+          quantityPerSession: item.quantityPerSession,
+          lowStockThreshold: item.lowStockThreshold ?? undefined,
+          sortOrder: item.sortOrder,
+        })),
+      };
     }
-  };
+    return {
+      isActive: true,
+      hasMeasurements: false,
+      hasComplementary: false,
+      taxPercent: 18,
+      taxType: 'exclusive' as const,
+      minPriceRupees: 0,
+      maxPriceRupees: 0,
+      inventoryItems: [],
+    };
+  }, [editing]);
 
   const onSubmit = async (values: ServiceFormValues) => {
     const body: AdminServiceCreateInput = {
@@ -190,15 +216,25 @@ export default function AdminMasterServicesPage() {
       hasComplementary: values.hasComplementary,
       isActive: values.isActive,
     };
+    // Inventory items are only saved in edit mode (need a persisted service ID).
+    const inventoryItems = editing
+      ? (values.inventoryItems ?? []).map((item, i) => ({
+          productId: item.productId,
+          quantityPerSession: item.quantityPerSession,
+          lowStockThreshold: item.lowStockThreshold ?? undefined,
+          sortOrder: i,
+        }))
+      : undefined;
     try {
       if (editing) {
-        await update.mutateAsync({ id: editing.id, body });
+        await update.mutateAsync({ id: editing.id, body: { ...body, inventoryItems } });
         message.success('Service updated');
       } else {
         await create.mutateAsync(body);
         message.success('Service added');
       }
       setModalOpen(false);
+      setEditing(null);
     } catch (err) {
       fail(err, 'Save failed.');
     }
@@ -268,7 +304,7 @@ export default function AdminMasterServicesPage() {
         dataIndex: ['category', 'name'],
         key: 'categoryName',
         width: 180,
-        sorter: (a, b) => a.category.name.localeCompare(b.category.name),
+        sorter: (a, b) => (a.category?.name ?? '').localeCompare(b.category?.name ?? ''),
         render: (value: string) => (
           <Tag
             color={colors.gold.primary}
@@ -334,8 +370,40 @@ export default function AdminMasterServicesPage() {
                 color={row.taxType === 'inclusive' ? 'blue' : 'orange'}
                 style={{ fontSize: 11, margin: 0 }}
               >
-                {row.taxType ?? 'exclusive'}
+                {row.taxType === 'inclusive' ? 'Inclusive' : 'Exclusive'}
               </Tag>
+            </Space>
+          );
+        },
+      },
+      {
+        title: 'Inventory Items',
+        key: 'inventoryItems',
+        width: 220,
+        render: (_: unknown, row: AdminService) => {
+          if (!row.inventoryItems?.length) {
+            return <Text style={{ fontSize: 12, color: colors.text.placeholder }}>—</Text>;
+          }
+          return (
+            <Space direction="vertical" size={2}>
+              {row.inventoryItems.map((item) => (
+                <Space key={item.productId} size={4}>
+                  <Tag
+                    style={{
+                      fontSize: 11,
+                      margin: 0,
+                      background: 'rgba(91,44,139,0.1)',
+                      border: '1px solid rgba(91,44,139,0.25)',
+                      color: colors.text.primary,
+                    }}
+                  >
+                    {item.productName}
+                  </Tag>
+                  <Text style={{ fontSize: 11, color: colors.text.placeholder }}>
+                    ×{item.quantityPerSession} {item.productUom}
+                  </Text>
+                </Space>
+              ))}
             </Space>
           );
         },
@@ -484,27 +552,26 @@ export default function AdminMasterServicesPage() {
           dataSource={data?.items ?? []}
           pagination={pagination}
           size="middle"
-          scroll={{ x: 1200 }}
+          scroll={{ x: 1500 }}
         />
       </Card>
 
       <Modal
         title={editing ? 'Edit Service' : 'Add Service'}
         open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => { setModalOpen(false); setEditing(null); }}
         onOk={() => form.submit()}
         okText={editing ? 'Save Changes' : 'Add Service'}
         confirmLoading={create.isPending || update.isPending}
-        width={680}
+        width={860}
         destroyOnClose
-        afterOpenChange={handleModalOpen}
       >
         <Form<ServiceFormValues>
           form={form}
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+          initialValues={formInitialValues}
         >
           <Row gutter={12}>
             <Col span={12}>
@@ -613,6 +680,12 @@ export default function AdminMasterServicesPage() {
                       currency: 'INR',
                       maximumFractionDigits: 2,
                     });
+                  const rowStyle = {
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    padding: '5px 0',
+                  } as const;
                   return (
                     <div style={{
                       background: 'rgba(91,44,139,0.07)',
@@ -620,41 +693,38 @@ export default function AdminMasterServicesPage() {
                       borderRadius: 8,
                       padding: '10px 14px',
                     }}>
-                      <Space style={{ marginBottom: 6 }}>
+                      <Space style={{ marginBottom: 8 }}>
                         <Text style={{ fontWeight: 600, fontSize: 13 }}>GST Preview</Text>
                         <Tag color={isInclusive ? 'blue' : 'orange'} style={{ fontSize: 11 }}>
                           {isInclusive ? 'Inclusive — price includes tax' : 'Exclusive — tax added on top'}
                         </Tag>
                       </Space>
-                      <Row gutter={8}>
-                        <Col span={6}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>Taxable Amount</Text>
-                          <div style={{ fontWeight: 600 }}>{pricePaise ? fmt(taxableAmt) : '—'}</div>
-                        </Col>
-                        <Col span={6}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>GST ({pct}%)</Text>
-                          <div style={{ fontWeight: 600 }}>{pricePaise ? fmt(taxAmt) : '—'}</div>
-                        </Col>
-                        <Col span={7}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>
+                      <div style={rowStyle}>
+                        <Text style={{ fontSize: 12, color: '#888' }}>Taxable Amount</Text>
+                        <Text style={{ fontWeight: 600 }}>{pricePaise ? fmt(taxableAmt) : '—'}</Text>
+                      </div>
+                      <div style={{ ...rowStyle, borderTop: '1px dashed rgba(91,44,139,0.15)', marginTop: 2 }}>
+                        <Text style={{ fontSize: 12, color: '#888' }}>
+                          GST ({pct}%)
+                          <span style={{ fontSize: 11, color: '#aaa', marginLeft: 6 }}>
                             CGST {pct / 2}% + SGST {pct / 2}%
-                            <br />
-                            <span style={{ fontSize: 11, color: '#aaa' }}>(same state)</span>
-                          </Text>
-                          <div style={{ fontWeight: 600 }}>
-                            {pricePaise ? `${fmt(halfAmt)} + ${fmt(taxAmt - halfAmt)}` : '—'}
-                          </div>
-                        </Col>
-                        <Col span={5}>
-                          <Text style={{ fontSize: 12, color: '#888' }}>
-                            Final Amount
-                            {!isInclusive && <span style={{ color: '#aaa', fontSize: 11 }}> (excl.)</span>}
-                          </Text>
-                          <div style={{ fontWeight: 700, color: '#5B2C8B' }}>
-                            {pricePaise ? fmt(grandTotal) : '—'}
-                          </div>
-                        </Col>
-                      </Row>
+                          </span>
+                        </Text>
+                        <Space size={4}>
+                          <Text style={{ fontWeight: 600 }}>{pricePaise ? fmt(taxAmt) : '—'}</Text>
+                          {pricePaise && (
+                            <Text style={{ fontSize: 11, color: '#aaa' }}>
+                              ({fmt(halfAmt)} + {fmt(taxAmt - halfAmt)})
+                            </Text>
+                          )}
+                        </Space>
+                      </div>
+                      <div style={{ ...rowStyle, borderTop: '2px solid rgba(91,44,139,0.25)', marginTop: 4, paddingTop: 7 }}>
+                        <Text style={{ fontSize: 13, fontWeight: 600 }}>Total Amount</Text>
+                        <Text style={{ fontWeight: 700, fontSize: 14, color: '#5B2C8B' }}>
+                          {pricePaise ? fmt(grandTotal) : '—'}
+                        </Text>
+                      </div>
                     </div>
                   );
                 })()}
@@ -673,6 +743,102 @@ export default function AdminMasterServicesPage() {
               </Form.Item>
             </Col>
           </Row>
+
+          {/* Inventory mapping — edit mode only */}
+          {editing && (
+            <>
+              <Divider orientation="left" style={{ fontSize: 13, marginTop: 8 }}>
+                Inventory Consumed Per Session
+              </Divider>
+              {/* Column headers */}
+              <Row gutter={8} style={{ marginBottom: 4 }}>
+                <Col flex="auto">
+                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>PRODUCT</Text>
+                </Col>
+                <Col style={{ width: 120 }}>
+                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>QTY / SESSION</Text>
+                </Col>
+                <Col style={{ width: 140 }}>
+                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>LOW STOCK LEVEL</Text>
+                </Col>
+                <Col style={{ width: 36 }} />
+              </Row>
+              <Form.List name="inventoryItems">
+                {(fields, { add, remove: removeField }) => (
+                  <>
+                    {fields.map(({ key, name, ...restField }) => (
+                      <Row key={key} gutter={8} align="middle" style={{ marginBottom: 8 }}>
+                        <Col flex="auto">
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'productId']}
+                            rules={[{ required: true, message: 'Select product' }]}
+                            style={{ marginBottom: 0 }}
+                          >
+                            <Select
+                              showSearch
+                              placeholder="Select product (type to search)"
+                              options={productSelectOptions}
+                              filterOption={(input, opt) =>
+                                (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                              }
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col style={{ width: 120 }}>
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'quantityPerSession']}
+                            rules={[{ required: true, message: 'Required' }]}
+                            style={{ marginBottom: 0 }}
+                          >
+                            <InputNumber
+                              min={1}
+                              style={{ width: '100%' }}
+                              placeholder="e.g. 30"
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col style={{ width: 140 }}>
+                          <Form.Item
+                            {...restField}
+                            name={[name, 'lowStockThreshold']}
+                            style={{ marginBottom: 0 }}
+                          >
+                            <InputNumber
+                              min={0}
+                              style={{ width: '100%' }}
+                              placeholder="e.g. 100"
+                            />
+                          </Form.Item>
+                        </Col>
+                        <Col>
+                          <Button
+                            type="text"
+                            danger
+                            icon={<MinusCircleOutlined />}
+                            onClick={() => removeField(name)}
+                          />
+                        </Col>
+                      </Row>
+                    ))}
+                    <Button
+                      type="dashed"
+                      onClick={() => add({ quantityPerSession: 1 })}
+                      icon={<PlusOutlined />}
+                      size="small"
+                      style={{ marginBottom: 8 }}
+                    >
+                      Add Inventory Item
+                    </Button>
+                    <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
+                      Qty/Session: units consumed per service session. Low Stock Level: warn badge when on-hand falls to or below this number (leave blank to use product's reorder level).
+                    </div>
+                  </>
+                )}
+              </Form.List>
+            </>
+          )}
 
           <Form.Item label="Status" name="isActive" valuePropName="checked">
             <Switch checkedChildren="Active" unCheckedChildren="Inactive" />

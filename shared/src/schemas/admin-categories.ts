@@ -74,7 +74,9 @@ export const adminCategoryCreateSchema = z.object({
   ...flagShape,
 });
 
-export const adminCategoryUpdateSchema = adminCategoryCreateSchema.partial();
+export const adminCategoryUpdateSchema = adminCategoryCreateSchema.partial().extend({
+  serviceIds: z.array(z.string()).optional(),
+});
 
 export const adminCategoryListQuerySchema = z.object({
   search: z.string().trim().optional(),

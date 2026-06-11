@@ -6,6 +6,7 @@ import {
   Button,
   Card,
   Input,
+  Modal,
   Popconfirm,
   Space,
   Switch,
@@ -17,6 +18,7 @@ import {
 import {
   DeleteOutlined,
   EditOutlined,
+  InfoCircleOutlined,
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -61,6 +63,7 @@ export default function AdminMasterCategoryPage() {
   const navItem = getAdminNavItem('master-category')!;
   const { message } = App.useApp();
 
+  const [flagsGuideOpen, setFlagsGuideOpen] = useState(false);
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
@@ -231,6 +234,12 @@ export default function AdminMasterCategoryPage() {
           <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
         </div>
         <Space>
+          <Button
+            icon={<InfoCircleOutlined />}
+            onClick={() => setFlagsGuideOpen(true)}
+          >
+            Flags Guide
+          </Button>
           <BulkUploadButton
             entityName="Categories"
             entityPlural="categories"
@@ -275,6 +284,70 @@ export default function AdminMasterCategoryPage() {
           size="middle"
         />
       </Card>
+
+      {/* ── Category Flags Guide Modal ── */}
+      <Modal
+        open={flagsGuideOpen}
+        onCancel={() => setFlagsGuideOpen(false)}
+        footer={<Button type="primary" onClick={() => setFlagsGuideOpen(false)}>Got it</Button>}
+        width={900}
+        title={
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <InfoCircleOutlined style={{ color: '#5B2C8B' }} />
+            <span>Category Flags Guide — What each flag does &amp; where it reflects</span>
+          </div>
+        }
+      >
+        <p style={{ fontSize: 12, color: '#888', margin: '0 0 12px' }}>
+          These flags are set per category. On the branch booking form, if <strong>any selected service&apos;s category</strong> has a flag turned ON, that field/column appears automatically.
+        </p>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+            <thead>
+              <tr style={{ background: '#5B2C8B', color: '#fff' }}>
+                <th style={{ padding: '8px 10px', textAlign: 'center', width: 36 }}>#</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Flag Name</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left' }}>What it does</th>
+                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Where it reflects on Branch Booking Form</th>
+              </tr>
+            </thead>
+            <tbody>
+              {([
+                ['1',  'Has Consultant',        'Assigns a staff consultant to the booking',                           'Header → "Consultant" staff dropdown'],
+                ['2',  'Has Doctor',             'Assigns a doctor to the booking',                                     'Header → "Doctor" staff dropdown'],
+                ['3',  'Has Tele Caller',        'Tracks which tele-caller brought the lead',                           'Header → "Tele-Caller" staff dropdown'],
+                ['4',  'Has Media / Source',     'Records how the customer came in (Walk-in, WhatsApp, Referral, etc.)','Header → "Source" dropdown'],
+                ['5',  'Has Token Reference',    'Attaches a token or reference number to the booking',                 'Header → "Token No." text input'],
+                ['6',  'Has DND',                'Marks the customer as Do Not Disturb',                                'Header → Orange DND badge'],
+                ['7',  'Has Quantity',           'Allows entering quantity per service line',                           'Table → "Quantity" column per row'],
+                ['8',  'Is Amount Editable',     'Controls whether staff can change the service price',                 'Table → Amount input locked (OFF) or editable (ON)'],
+                ['9',  'Has Individual Discount','Allows a per-service row discount percentage',                        'Table → "Disc%" column per row; row total auto-adjusts'],
+                ['10', 'Has Service By',         'Records which staff member performed each service',                   'Table → "Service By" staff dropdown per row'],
+                ['11', 'Has Total Discount',     'Allows an overall booking-level discount amount',                     'Footer → "Total Disc (₹)" input below totals'],
+                ['12', 'Has Session',            'Booking is tied to a fixed number of sessions',                       'Footer → "Sessions" count input'],
+                ['13', 'Session Based',          'Marks the service as session-based (works with Has Session)',         'Footer → "Sessions" count input'],
+                ['14', 'Has Validity',           'Package has an expiry / validity date',                               'Footer → "Valid Until" date picker'],
+                ['15', 'Has Direct Payment',     'Records the payment mode at booking time',                            'Footer → "Payment Mode" dropdown (Cash, Card, UPI…)'],
+                ['16', 'Has Rating',             'Captures customer satisfaction at the time of booking',               'Footer → 1–5 star rating picker'],
+                ['17', 'Has Share Incentive',    'Tracks referral or incentive sharing details',                        'Footer → "Share Incentive" referrer name / code field'],
+                ['18', 'Target Weight Based',    'Service is tied to a customer target weight goal',                    'Footer → "Target Weight" input (e.g. 70 kg)'],
+                ['19', 'Has Measurement',        'Records body measurements with the booking',                          'Footer → "Measurements" input (e.g. Waist: 32, Hip: 38)'],
+                ['20', 'Is Combo',               'Marks the package as a combo offer',                                  'Footer → Blue COMBO badge'],
+                ['21', 'Services In Combo',      'Identifies which services are bundled inside a combo',                'Footer → Works alongside Is Combo to list combo services'],
+                ['22', 'Has All Sessions Link',  'All sessions of this package are linked together',                    'Footer → Purple ALL SESSIONS badge'],
+                ['23', 'Has Break Package',      'The package can be split / broken into parts',                        'Footer → Amber BREAK badge'],
+              ] as [string, string, string, string][]).map(([num, name, what, where], i) => (
+                <tr key={num} style={{ background: i % 2 === 0 ? '#fafafa' : '#fff', borderBottom: '1px solid #f0f0f0' }}>
+                  <td style={{ padding: '7px 10px', textAlign: 'center', color: '#5B2C8B', fontWeight: 700 }}>{num}</td>
+                  <td style={{ padding: '7px 10px', fontWeight: 600, whiteSpace: 'nowrap', color: '#222' }}>{name}</td>
+                  <td style={{ padding: '7px 10px', color: '#444' }}>{what}</td>
+                  <td style={{ padding: '7px 10px', color: '#1565c0' }}>{where}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
     </div>
   );
 }

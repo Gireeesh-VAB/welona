@@ -54,12 +54,15 @@ export const appointmentCreateSchema = z.object({
   discount: nonNegInt.default(0),
   roundOff: z.number().int().default(0),
   items: z.array(bookingItemSchema).min(1, 'Add at least one service'),
+  /** When true, skip the insufficient-stock check and proceed anyway. */
+  forceCreate: z.boolean().default(false),
 });
 
 // --- Packages ---------------------------------------------------------------
 
 export const packageCreateSchema = z.object({
   name: z.string().trim().min(1, 'Package name is required'),
+  masterId: id.optional(),
   treatmentId: id.optional(),
   totalSessions: z.number().int().positive('Total sessions must be at least 1'),
   usedSessions: nonNegInt.default(0),
@@ -80,6 +83,19 @@ export const packageUpdateSchema = z.object({
   status: z.enum(PACKAGE_STATUSES).optional(),
   notes: optionalText,
 });
+
+export const packageCheckoutSchema = z.object({
+  name: z.string().trim().min(1, 'Package name is required'),
+  masterId: id.optional(),
+  totalSessions: z.number().int().positive('Total sessions must be at least 1'),
+  price: nonNegInt.default(0),
+  expiresAt: z.string().datetime().optional(),
+  notes: optionalText,
+  paidAmount: nonNegInt.default(0),
+  paymentMethod: z.enum(['cash', 'card', 'upi', 'bank_transfer', 'cheque', 'wallet']).default('cash'),
+  paymentRef: optionalText,
+});
+export type PackageCheckoutInput = z.infer<typeof packageCheckoutSchema>;
 
 // --- Session Entries --------------------------------------------------------
 
