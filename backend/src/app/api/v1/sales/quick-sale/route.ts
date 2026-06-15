@@ -19,12 +19,22 @@ export const POST = route(async (req) => {
   requirePermission(claims, 'sales:create');
   const body = await parseBody(req, quickSaleSchema);
 
-  const [customer, owner] = await Promise.all([
-    db.customer.findFirst({ where: { id: body.customerId, orgId: claims.orgId } }),
-    db.staff.findFirst({ where: { id: body.ownerStaffId, orgId: claims.orgId } }),
-  ]);
-  if (!customer) throw Errors.badRequest('Selected customer does not exist');
+  const owner = await db.staff.findFirst({ where: { id: body.ownerStaffId, orgId: claims.orgId } });
   if (!owner) throw Errors.badRequest('Selected salesperson does not exist');
+
+  let customer = await db.customer.findFirst({
+    where: { orgId: claims.orgId, name: body.customerName },
+  });
+  if (!customer) {
+    const staffBranchId = claims.branchIds?.[0] ?? null;
+    customer = await db.customer.create({
+      data: {
+        orgId: claims.orgId,
+        branchId: body.branchId ?? staffBranchId,
+        name: body.customerName,
+      },
+    });
+  }
 
   const totals = computeTotals(body.items);
   const branchId = body.branchId ?? customer.branchId;
@@ -36,7 +46,7 @@ export const POST = route(async (req) => {
         orgId: claims.orgId,
         branchId,
         number: orderNumber,
-        customerId: body.customerId,
+        customerId: customer.id,
         ownerStaffId: body.ownerStaffId,
         status: 'confirmed',
         paymentStatus: 'unpaid',
@@ -58,7 +68,7 @@ export const POST = route(async (req) => {
           orgId: claims.orgId,
           branchId,
           number: invoiceNumber,
-          customerId: body.customerId,
+          customerId: customer.id,
           orderId: order.id,
           status: 'issued',
           issuedAt: new Date(),

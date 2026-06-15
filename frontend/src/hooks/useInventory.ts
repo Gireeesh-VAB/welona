@@ -7,6 +7,10 @@ import type {
   AdminInventoryStockRow,
 } from '@shared/types/admin-inventory';
 import type {
+  AdminServiceInventoryRow,
+  AdminProductInventoryRow,
+} from '@shared/types/admin-service-inventory';
+import type {
   AdminInventoryMovementCreateInput,
   AdminInventoryOpeningStockInput,
 } from '@shared/schemas/admin-inventory';
@@ -66,8 +70,9 @@ export function useInventoryMovements(params: MoveListParams = {}) {
 }
 
 function invalidateAll(qc: ReturnType<typeof useQueryClient>) {
-  qc.invalidateQueries({ queryKey: [STOCK_KEY] });
-  qc.invalidateQueries({ queryKey: [MOVE_KEY] });
+  qc.refetchQueries({ queryKey: [STOCK_KEY] });
+  qc.refetchQueries({ queryKey: [MOVE_KEY] });
+  qc.refetchQueries({ queryKey: ['branch-stock'] });
 }
 
 export function useCreateInventoryMovement() {
@@ -88,5 +93,63 @@ export function useSetOpeningStock() {
         body,
       ),
     onSuccess: () => invalidateAll(qc),
+  });
+}
+
+// ─── Service Inventory ───────────────────────────────────────────────────────
+
+interface ServiceInventoryParams {
+  branchId: string | null;
+  search?: string;
+  categoryId?: string;
+  readiness?: string;
+  page?: number;
+  limit?: number;
+}
+
+export function useServiceInventory(params: ServiceInventoryParams) {
+  return useQuery<Paginated<AdminServiceInventoryRow>>({
+    queryKey: ['admin-service-inventory', params],
+    enabled: Boolean(params.branchId),
+    queryFn: () =>
+      apiList<AdminServiceInventoryRow>('/admin/inventory/service-inventory', {
+        query: {
+          branchId: params.branchId!,
+          search: params.search,
+          categoryId: params.categoryId,
+          readiness: params.readiness,
+          page: params.page,
+          limit: params.limit,
+        },
+      }),
+  });
+}
+
+// ─── Product Inventory ───────────────────────────────────────────────────────
+
+interface ProductInventoryParams {
+  branchId: string | null;
+  search?: string;
+  categoryId?: string;
+  stockStatus?: string;
+  page?: number;
+  limit?: number;
+}
+
+export function useProductInventory(params: ProductInventoryParams) {
+  return useQuery<Paginated<AdminProductInventoryRow>>({
+    queryKey: ['admin-product-inventory', params],
+    enabled: Boolean(params.branchId),
+    queryFn: () =>
+      apiList<AdminProductInventoryRow>('/admin/inventory/product-inventory', {
+        query: {
+          branchId: params.branchId!,
+          search: params.search,
+          categoryId: params.categoryId,
+          stockStatus: params.stockStatus,
+          page: params.page,
+          limit: params.limit,
+        },
+      }),
   });
 }

@@ -1,9 +1,10 @@
 'use client';
 
-import { useState } from 'react';
-import { Card, Table, Tag, Typography, Space } from 'antd';
+import { useMemo, useState } from 'react';
+import { Card, Select, Table, Tag, Typography, Space } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import { useGoodsReceipts } from '@/hooks/usePurchaseOrders';
+import { useAdminBranches } from '@/hooks/useAdminBranches';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminGoodsReceipt } from '@shared/types/admin-purchase-order';
@@ -24,9 +25,18 @@ export default function AdminGoodsReceiptsPage() {
   const colors = useBrandColors();
   const navItem = getAdminNavItem('inventory-grn')!;
 
+  const [branchId, setBranchId] = useState('');
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
-  const { data, isLoading } = useGoodsReceipts({ page, limit });
+  const { data: branchesData } = useAdminBranches({ limit: 200 });
+  const branchOptions = useMemo(
+    () => [
+      { value: '', label: 'All branches' },
+      ...(branchesData?.items ?? []).map((b) => ({ value: b.id, label: `${b.branchName} (${b.branchCode})` })),
+    ],
+    [branchesData],
+  );
+  const { data, isLoading } = useGoodsReceipts({ branchId: branchId || undefined, page, limit });
 
   const columns: ColumnsType<AdminGoodsReceipt> = [
     {
@@ -94,7 +104,17 @@ export default function AdminGoodsReceiptsPage() {
         <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
       </div>
       <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }} styles={{ body: { padding: 16 } }}>
-        <Space style={{ marginBottom: 12 }}>
+        <Space style={{ marginBottom: 12 }} wrap>
+          <Select
+            allowClear
+            placeholder="All branches"
+            value={branchId || undefined}
+            onChange={(v) => { setBranchId(v ?? ''); setPage(1); }}
+            style={{ width: 240 }}
+            options={branchOptions}
+            showSearch
+            filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())}
+          />
           <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>
             Goods receipts are created from a Purchase Order&apos;s &quot;Receive&quot; action and raise branch stock automatically.
           </Text>

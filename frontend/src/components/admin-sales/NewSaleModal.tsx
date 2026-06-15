@@ -2,7 +2,6 @@
 
 import { App, Checkbox, Form, Input, Modal, Select } from 'antd';
 import { useAdminQuickSale, useAdminSalespeople } from '@/hooks/useAdminSales';
-import CustomerPicker from './CustomerPicker';
 import LineItemsField from '@/components/sales/LineItemsField';
 import { ApiClientError } from '@/lib/api-client';
 import { toMinorUnits } from '@shared/format';
@@ -40,7 +39,7 @@ export default function NewSaleModal({ open, onClose }: Props) {
     }));
     try {
       const result = await quickSale.mutateAsync({
-        customerId: values.customerId,
+        customerName: values.customerName,
         ownerStaffId: values.ownerStaffId,
         notes: values.notes,
         createInvoice: values.createInvoice,
@@ -76,12 +75,12 @@ export default function NewSaleModal({ open, onClose }: Props) {
       >
         <div style={{ display: 'flex', gap: 12 }}>
           <Form.Item
-            name="customerId"
-            label="Customer"
-            rules={[{ required: true, message: 'Select or create a customer' }]}
+            name="customerName"
+            label="Customer Name"
+            rules={[{ required: true, message: 'Enter customer name' }]}
             style={{ flex: 1 }}
           >
-            <CustomerPicker />
+            <Input placeholder="Enter customer name" />
           </Form.Item>
           <Form.Item
             name="ownerStaffId"

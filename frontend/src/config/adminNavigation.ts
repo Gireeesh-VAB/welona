@@ -131,6 +131,18 @@ export const adminNavigation: AdminNavItem[] = [
     description: 'Per-branch stock levels, opening stock, and the movement ledger.',
     children: [
       {
+        key: 'inventory-product-inventory',
+        label: 'Product Inventory',
+        path: '/admin/inventory/product-inventory',
+        description: 'Combined product catalogue and live stock levels — prices, UOM, reorder indicators and quick adjustments.',
+      },
+      {
+        key: 'inventory-service-inventory',
+        label: 'Service Inventory',
+        path: '/admin/inventory/service-inventory',
+        description: 'Service readiness dashboard — shows which products each service needs and whether the branch has sufficient stock.',
+      },
+      {
         key: 'inventory-warehouses',
         label: 'Warehouses',
         path: '/admin/inventory/warehouses',
@@ -189,6 +201,12 @@ export const adminNavigation: AdminNavItem[] = [
         label: 'Audit Log',
         path: '/admin/inventory/audit',
         description: 'Who changed what — suppliers, purchase orders, receipts, transfers, warehouses.',
+      },
+      {
+        key: 'inventory-stock-requests',
+        label: 'Stock Requests',
+        path: '/admin/inventory/stock-requests',
+        description: 'Branch stock restock requests — review, approve, reject or mark fulfilled.',
       },
       {
         key: 'inventory-indents',

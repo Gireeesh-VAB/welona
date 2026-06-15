@@ -28,16 +28,28 @@ export const POST = route<Ctx>(async (req, { params }) => {
   const body = await parseBody(req, packageCheckoutSchema);
   const branchId = claims.branchIds?.[0] ?? null;
 
+  // Snapshot the master's serviceIds before the transaction so future edits to
+  // the master don't retroactively change this package's inventory mapping.
+  let serviceIdsSnapshot = '[]';
+  if (body.masterId) {
+    const master = await (db as any).packageSessionMaster.findUnique({
+      where: { id: body.masterId },
+      select: { serviceIds: true },
+    });
+    serviceIdsSnapshot = master?.serviceIds ?? '[]';
+  }
+
   const result = await db.$transaction(async (tx: Tx) => {
     // 1 — Create the Package record
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pkg = await (tx as any).package.create({
       data: {
-        orgId:         claims.orgId,
-        customerId:    customer.id,
+        orgId:               claims.orgId,
+        customerId:          customer.id,
         branchId,
-        masterId:      body.masterId ?? null,
-        name:          body.name,
+        masterId:            body.masterId ?? null,
+        serviceIdsSnapshot,
+        name:                body.name,
         totalSessions: body.totalSessions,
         usedSessions:  0,
         price:         body.price,
@@ -57,6 +69,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
         branchId,
         number,
         customerId: customer.id,
+        packageId:  pkg.id,
         status:     'issued',
         issuedAt:   new Date(),
         subtotal:   body.price,

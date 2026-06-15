@@ -7,8 +7,8 @@ type Client = typeof db | Prisma.TransactionClient;
 /** The branch's default warehouse id (falls back to any active warehouse). */
 export async function getDefaultWarehouseId(client: Client, branchId: string): Promise<string> {
   const wh =
-    (await client.warehouse.findFirst({ where: { branchId, isDefault: true }, select: { id: true } })) ??
-    (await client.warehouse.findFirst({ where: { branchId, isActive: true }, select: { id: true } }));
+    (await client.warehouse.findFirst({ where: { branchId, isDefault: true }, orderBy: { createdAt: 'asc' }, select: { id: true } })) ??
+    (await client.warehouse.findFirst({ where: { branchId, isActive: true }, orderBy: { createdAt: 'asc' }, select: { id: true } }));
   if (!wh) throw Errors.badRequest('This branch has no warehouse configured.');
   return wh.id;
 }

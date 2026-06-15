@@ -36,6 +36,30 @@ export function useUpdateIndent() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: StockIndentUpdateInput }) =>
       api.patch<StockIndent>(`/admin/indents/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
+    onSuccess: () => qc.refetchQueries({ queryKey: [KEY] }),
+  });
+}
+
+export function useAdminRaiseIndent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { branchId: string; productId: string; requestedQty: number; reason?: string }) =>
+      api.post<StockIndent>('/admin/indents', body),
+    onSuccess: () => qc.refetchQueries({ queryKey: [KEY] }),
+  });
+}
+
+/** Polls pending indent count every 30 s — used by the notification bell. */
+export function useAdminPendingIndentCount(enabled = true) {
+  return useQuery<Paginated<StockIndent>>({
+    queryKey: [KEY, { status: 'pending', page: 1, limit: 5 }],
+    queryFn: () =>
+      apiList<StockIndent>('/admin/indents', {
+        query: { status: 'pending', page: 1, limit: 5 },
+      }),
+    staleTime: 0,
+    enabled,
+    refetchInterval: enabled ? 30_000 : false,
+    refetchOnWindowFocus: enabled,
   });
 }

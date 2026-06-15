@@ -129,12 +129,12 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
           letterSpacing: 0.3,
         }}
       >
-        Category Creation
+        {mode === 'edit' ? 'Edit Category' : 'Create Category'}
       </div>
 
       <div style={{ padding: 24 }}>
         <Text style={{ color: colors.text.primary, fontWeight: 600 }}>
-          Category Creation
+          {mode === 'edit' ? 'Edit Category' : 'Create Category'}
         </Text>
         <div
           style={{
@@ -162,14 +162,14 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
             name="categoryCode"
             rules={[{ required: true, message: 'Required' }]}
           >
-            <Input placeholder="Hair Services" maxLength={40} />
+            <Input placeholder="e.g. HAIR, SKIN-01" maxLength={40} />
           </Form.Item>
           <Form.Item
             label="Remarks"
             name="remarks"
             rules={[{ required: true, message: 'Required' }]}
           >
-            <Input placeholder="Hair Services" maxLength={300} />
+            <Input placeholder="Optional remarks about this category" maxLength={300} />
           </Form.Item>
           {mode === 'edit' && (
             <Form.Item label="Services">
@@ -198,7 +198,7 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
         <div
           style={{ marginTop: 24, color: colors.text.primary, fontWeight: 500 }}
         >
-          Select Role
+          Category Flags
         </div>
         <div style={{ marginTop: 12 }}>
           <Row gutter={[12, 6]}>
@@ -235,7 +235,7 @@ export default function CategoryForm({ mode, initial }: CategoryFormProps) {
             onClick={() => router.push('/admin/master/category')}
             style={{ background: HEADER_BG, borderColor: HEADER_BG, color: '#FFFFFF' }}
           >
-            Back ToList
+            Back to List
           </Button>
         </div>
       </div>

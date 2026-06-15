@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, Input, Segmented, Select, Space, Table, Tag, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
@@ -37,8 +37,6 @@ export default function AdminBatchesPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
 
-  useEffect(() => {
-  }, []);
   const { data, isLoading } = useBatches({
     branchId: branchId || undefined,
     search: search || undefined,

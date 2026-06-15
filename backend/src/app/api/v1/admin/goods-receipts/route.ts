@@ -131,14 +131,10 @@ export const POST = route(async (req) => {
       await tx.goodsReceiptItem.create({
         data: { grnId: createdGrn.id, productId: it.productId, quantity: it.quantity, batchId },
       });
-      const stock = await tx.inventoryStock.upsert({
+      await tx.inventoryStock.upsert({
         where: { warehouseId_productId: { warehouseId, productId: it.productId } },
-        create: { branchId, warehouseId, productId: it.productId, quantity: 0 },
-        update: {},
-      });
-      await tx.inventoryStock.update({
-        where: { id: stock.id },
-        data: { quantity: stock.quantity + it.quantity },
+        create: { branchId, warehouseId, productId: it.productId, quantity: it.quantity },
+        update: { quantity: { increment: it.quantity } },
       });
       await tx.inventoryMovement.create({
         data: {

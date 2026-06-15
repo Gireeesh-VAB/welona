@@ -17,7 +17,7 @@ type Ctx = { params: { id: string } };
 async function loadCustomer(orgId: string, id: string) {
   const customer = await db.customer.findFirst({
     where: { id, orgId },
-    include: { branch: { select: { id: true, name: true } } },
+    include: { branch: { select: { id: true, name: true } }, state: { select: { id: true, name: true } } },
   });
   if (!customer) throw Errors.notFound('Customer');
   return customer;
@@ -53,8 +53,16 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
     // Only admins may move a customer between branches; branch sessions can't.
     data.branch = body.branchId ? { connect: { id: body.branchId } } : { disconnect: true };
   }
+  if (body.stateId !== undefined) {
+    data.state = body.stateId ? { connect: { id: body.stateId } } : { disconnect: true };
+  }
+  if (body.country !== undefined) data.country = body.country || null;
 
-  const updated = await db.customer.update({ where: { id: params.id }, data });
+  const updated = await db.customer.update({
+    where: { id: params.id },
+    data,
+    include: { state: { select: { id: true, name: true } } },
+  });
   return ok(serializeCustomer(updated));
 });
 

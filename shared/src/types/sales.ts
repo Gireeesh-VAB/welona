@@ -22,6 +22,7 @@ export interface Customer {
   city: string | null;
   stateId: string | null;
   stateName: string | null;
+  country: string | null;
   notes: string | null;
   avatarUrl: string | null;
   tags: string[];

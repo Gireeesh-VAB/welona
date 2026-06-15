@@ -91,7 +91,7 @@ export function useCreateCustomer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => api.post<Customer>('/customers', body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['customers'] }),
+    onSuccess: () => qc.refetchQueries({ queryKey: ['customers'] }),
   });
 }
 
@@ -100,8 +100,8 @@ export function useUpdateCustomer(id: string) {
   return useMutation({
     mutationFn: (body: Record<string, unknown>) => api.patch<Customer>(`/customers/${id}`, body),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['customers'] });
-      qc.invalidateQueries({ queryKey: ['customer', id] });
+      qc.refetchQueries({ queryKey: ['customers'] });
+      qc.refetchQueries({ queryKey: ['customer', id] });
     },
   });
 }

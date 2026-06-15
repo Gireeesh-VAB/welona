@@ -25,7 +25,7 @@ type StockRow = { productId: string; quantity: number };
  */
 export const GET = route(async (req) => {
   const claims = requireAuth(req);
-  requirePermission(claims, 'sales:read');
+  requirePermission(claims, 'inventory:read');
 
   const { branchId: queryBranchId, search, lowStockOnly, page, limit } = parseQuery(req, querySchema);
   const staffBranchId = claims.branchIds[0] ?? null;

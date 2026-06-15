@@ -25,7 +25,7 @@ const optionalEmail = z.string().email().optional().or(z.literal(''));
 /** Common list query: pagination, search and an optional status filter. */
 export const listQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(100).default(20),
+  limit: z.coerce.number().int().positive().max(10000).default(20),
   search: z.string().trim().optional(),
   status: z.string().trim().optional(),
   branchId: id.optional(),
@@ -45,6 +45,7 @@ export const customerCreateSchema = z.object({
   address: z.string().trim().optional(),
   city: z.string().trim().optional(),
   stateId: z.string().optional(),
+  country: z.string().trim().min(1, 'Country is required'),
   notes: z.string().trim().optional(),
   branchId: id.optional(),
   tags: z.array(z.string().trim()).optional(),
@@ -206,7 +207,7 @@ export const orderUpdateSchema = z.object({
  * raising an issued invoice for it.
  */
 export const quickSaleSchema = z.object({
-  customerId: id,
+  customerName: z.string().trim().min(1, 'Customer name is required'),
   ownerStaffId: id,
   branchId: id.optional(),
   notes: z.string().trim().optional(),

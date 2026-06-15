@@ -1,14 +1,20 @@
 'use client';
 
+import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
+  App,
   Avatar,
   Button,
   Card,
   Col,
   Descriptions,
   Empty,
+  Form,
+  Input,
+  Modal,
   Row,
+  Select,
   Spin,
   Statistic,
   Table,
@@ -19,6 +25,7 @@ import {
 import {
   ArrowLeftOutlined,
   AppstoreOutlined,
+  EditOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
@@ -38,9 +45,14 @@ import {
   useAdminDocuments,
   useAdminCustomerFollowUps,
   useAdminCustomerHistory,
+  useUpdateAdminCustomer,
 } from '@/hooks/useAdminCustomers';
+import { useAdminStates } from '@/hooks/useAdminStates';
+import { ApiClientError } from '@/lib/api-client';
 import StatusTag from '@/components/sales/StatusTag';
 import ModuleCard from '@/components/customers/ModuleCard';
+import CountryStateFields from '@/components/customers/CountryStateFields';
+import { PHONE_CODE_OPTIONS, COUNTRY_PHONE_CODE_MAP, buildPhone } from '@/components/customers/countryData';
 import { formatDate, formatMoney } from '@shared/format';
 import type { Invoice, Lead, Quotation, SalesOrder } from '@shared/types/sales';
 import { colors } from '@/theme/colors';
@@ -58,6 +70,13 @@ export default function AdminCustomerDetailPage() {
   const router = useRouter();
   const params = useParams<{ id: string }>();
   const id = params.id;
+  const { message } = App.useApp();
+
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [editProfileForm] = Form.useForm();
+  const updateCustomer = useUpdateAdminCustomer(id);
+  const { data: statesData } = useAdminStates({ limit: 200 });
+  const stateOptions = (statesData?.items ?? []).map((s) => ({ value: s.id, label: `${s.name} (${s.code})` }));
 
   const { data: customer, isLoading } = useAdminCustomer(id);
   const { data: sales, isLoading: salesLoading } = useAdminCustomerSales(id);
@@ -71,6 +90,38 @@ export default function AdminCustomerDetailPage() {
   const { data: feedback, isLoading: feedbackLoading } = useAdminFeedback(id);
   const { data: documents, isLoading: documentsLoading } = useAdminDocuments(id);
   const { data: history, isLoading: historyLoading } = useAdminCustomerHistory(id);
+
+  const openEditProfile = () => {
+    if (!customer) return;
+    const country = (customer as any).country || 'India';
+    editProfileForm.setFieldsValue({
+      name: customer.name,
+      phoneCode: COUNTRY_PHONE_CODE_MAP[country] || '+91',
+      phone: customer.phone || '',
+      email: customer.email || '',
+      companyName: customer.companyName || '',
+      gstin: customer.gstin || '',
+      address: customer.address || '',
+      city: customer.city || '',
+      stateId: customer.stateId || undefined,
+      country,
+      notes: customer.notes || '',
+    });
+    setEditProfileOpen(true);
+  };
+
+  const handleSaveProfile = async () => {
+    const values = await editProfileForm.validateFields();
+    const phone = buildPhone(values.phoneCode, values.phone);
+    delete values.phoneCode;
+    try {
+      await updateCustomer.mutateAsync({ ...values, phone });
+      message.success('Customer profile updated');
+      setEditProfileOpen(false);
+    } catch (err) {
+      message.error(err instanceof ApiClientError ? err.message : 'Could not update customer');
+    }
+  };
 
   if (isLoading || !customer) {
     return (
@@ -133,13 +184,20 @@ export default function AdminCustomerDetailPage() {
             {customer.name.charAt(0).toUpperCase()}
           </Avatar>
           <div style={{ flex: 1, minWidth: 260 }}>
-            <Title level={3} style={{ margin: 0 }}>
-              {customer.name}
-            </Title>
-            <Tag color={customer.type === 'business' ? 'gold' : 'default'}>
-              {customer.type === 'business' ? 'Business' : 'Individual'}
-            </Tag>
-            {!customer.isActive && <Tag color="red">Inactive</Tag>}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <Title level={3} style={{ margin: 0 }}>
+                  {customer.name}
+                </Title>
+                <Tag color={customer.type === 'business' ? 'gold' : 'default'}>
+                  {customer.type === 'business' ? 'Business' : 'Individual'}
+                </Tag>
+                {!customer.isActive && <Tag color="red">Inactive</Tag>}
+              </div>
+              <Button size="small" icon={<EditOutlined />} onClick={openEditProfile}>
+                Edit Profile
+              </Button>
+            </div>
 
             <Descriptions column={3} style={{ marginTop: 16 }} size="small">
               <Descriptions.Item label="Phone">{customer.phone || '—'}</Descriptions.Item>
@@ -148,6 +206,8 @@ export default function AdminCustomerDetailPage() {
               <Descriptions.Item label="Company">{customer.companyName || '—'}</Descriptions.Item>
               <Descriptions.Item label="GSTIN">{customer.gstin || '—'}</Descriptions.Item>
               <Descriptions.Item label="Branch">{customer.branch?.name || '—'}</Descriptions.Item>
+              <Descriptions.Item label="State">{customer.stateName || '—'}</Descriptions.Item>
+              <Descriptions.Item label="Country">{(customer as any).country || '—'}</Descriptions.Item>
               <Descriptions.Item label="Address" span={3}>
                 {customer.address || '—'}
               </Descriptions.Item>
@@ -262,6 +322,58 @@ export default function AdminCustomerDetailPage() {
           ]}
         />
       </Card>
+
+      {/* Edit Customer Profile Modal */}
+      <Modal
+        title="Edit Customer Profile"
+        open={editProfileOpen}
+        onOk={handleSaveProfile}
+        confirmLoading={updateCustomer.isPending}
+        onCancel={() => setEditProfileOpen(false)}
+        width={560}
+        destroyOnClose
+      >
+        <Form form={editProfileForm} layout="vertical" preserve={false}>
+          <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
+            <Input />
+          </Form.Item>
+          <CountryStateFields form={editProfileForm} stateOptions={stateOptions} />
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="phone" label="Phone" style={{ flex: 1 }}>
+              <Input
+                addonBefore={
+                  <Form.Item name="phoneCode" noStyle>
+                    <Select showSearch style={{ width: 80 }} options={PHONE_CODE_OPTIONS} />
+                  </Form.Item>
+                }
+                placeholder="Mobile number"
+              />
+            </Form.Item>
+            <Form.Item name="email" label="Email" style={{ flex: 1 }}>
+              <Input placeholder="name@example.com" />
+            </Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="companyName" label="Company name" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+            <Form.Item name="gstin" label="GSTIN" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="city" label="City" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+            <Form.Item name="address" label="Address" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+          </div>
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }

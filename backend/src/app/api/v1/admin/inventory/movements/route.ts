@@ -69,22 +69,23 @@ export const POST = route(async (req) => {
   const warehouseId = await resolveWarehouseId(db, branchId, body.warehouseId);
 
   const row = await db.$transaction(async (tx) => {
-    const stock = await tx.inventoryStock.upsert({
+    // Ensure the stock row exists.
+    await tx.inventoryStock.upsert({
       where: { warehouseId_productId: { warehouseId, productId: body.productId } },
       create: { branchId, warehouseId, productId: body.productId, quantity: 0 },
       update: {},
     });
-    const newQty = stock.quantity + body.delta;
-    if (newQty < 0) {
+    // Atomically apply the delta, then check the result for negativity.
+    const updated = await tx.inventoryStock.update({
+      where: { warehouseId_productId: { warehouseId, productId: body.productId } },
+      data: { quantity: { increment: body.delta } },
+    });
+    if (updated.quantity < 0) {
       throw Errors.conflict(
-        `Not enough stock: current ${stock.quantity}, requested ${-body.delta}.`,
+        `Not enough stock: current ${updated.quantity - body.delta}, requested ${-body.delta}.`,
       );
     }
-    await tx.inventoryStock.update({
-      where: { id: stock.id },
-      data: { quantity: newQty },
-    });
-    // Batch-tracked outbound: deplete batch stock FEFO (best-effort).
+    // Batch-tracked outbound: deplete batch stock FEFO.
     if (product.trackBatches && body.delta < 0) {
       await depleteBatchStockFEFO(tx, { productId: body.productId, warehouseId, quantity: -body.delta });
     }

@@ -79,10 +79,24 @@ export interface BookingDetail {
   taxType: string | null;
 }
 
+export interface PackageMasterService {
+  id: string;
+  name: string;
+}
+
+export interface PackageMaster {
+  id: string;
+  name: string;
+  services: PackageMasterService[];
+}
+
 export interface Package {
   id: string;
   customerId: string;
   branchId: string | null;
+  masterId: string | null;
+  master: PackageMaster | null;
+  serviceIdsSnapshot: string;
   treatmentId: string | null;
   name: string;
   totalSessions: number;
@@ -93,6 +107,7 @@ export interface Package {
   status: string;
   notes: string | null;
   createdAt: string;
+  sessionEntries?: SessionEntry[];
 }
 
 /** Package enriched with customer + branch data — returned by the sessions list endpoint. */

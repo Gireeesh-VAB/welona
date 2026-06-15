@@ -6,6 +6,7 @@ import {
   applySessionCookies,
   clearSessionCookies,
   rotateSession,
+  rotateSystemSession,
 } from '@/lib/auth/service';
 import type { SessionResult } from '@shared/types/auth';
 
@@ -23,9 +24,15 @@ export const POST = route(async (req) => {
     if (!refreshToken) {
       throw new ApiError('UNAUTHORIZED', 'No active session', 401);
     }
-    const { accessToken, refreshToken: rotated, user } = await rotateSession(refreshToken);
-    const res = ok<SessionResult>({ user, accessToken });
-    applySessionCookies(res, accessToken, rotated);
+    // Try staff pool first; fall back to SystemUser pool.
+    let rotated: Awaited<ReturnType<typeof rotateSession>>;
+    try {
+      rotated = await rotateSession(refreshToken);
+    } catch {
+      rotated = await rotateSystemSession(refreshToken);
+    }
+    const res = ok<SessionResult>({ user: rotated.user, accessToken: rotated.accessToken });
+    applySessionCookies(res, rotated.accessToken, rotated.refreshToken);
     return res;
   } catch (error) {
     const res =

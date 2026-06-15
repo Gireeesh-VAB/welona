@@ -10,39 +10,31 @@ import { packageUpdateSchema } from '@shared/schemas/customer-modules';
 type Ctx = { params: { id: string; itemId: string } };
 
 /**
- * PATCH /api/v1/admin/customers/[id]/packages/[itemId] — update a package, e.g.
- * record a used session or change its status.
+ * PATCH /api/v1/admin/customers/[id]/packages/[itemId] — update package metadata.
+ * usedSessions is managed via the session-entry workflow, not directly here.
  */
 export const PATCH = route<Ctx>(async (req, { params }) => {
   requireAdminAuth(req);
   const orgId = await resolveOrgId();
 
   const pkg = await db.package.findFirst({
-    where: {
-      id: params.itemId,
-      customerId: params.id,
-      orgId: orgId,
-      
-    },
+    where: { id: params.itemId, customerId: params.id, orgId },
   });
   if (!pkg) throw Errors.notFound('Package');
 
   const body = await parseBody(req, packageUpdateSchema);
-  const totalSessions = body.totalSessions ?? pkg.totalSessions;
-  const usedSessions = body.usedSessions ?? pkg.usedSessions;
-  if (usedSessions > totalSessions) {
-    throw Errors.badRequest('Used sessions cannot exceed total sessions');
+  if (body.totalSessions !== undefined && body.totalSessions < pkg.usedSessions) {
+    throw Errors.badRequest('Total sessions cannot be reduced below the number already used');
   }
 
   const data: Prisma.PackageUpdateInput = {};
-  if (body.name !== undefined) data.name = body.name;
-  if (body.treatmentId !== undefined) data.treatmentId = body.treatmentId || null;
+  if (body.name          !== undefined) data.name          = body.name;
+  if (body.treatmentId   !== undefined) data.treatmentId   = body.treatmentId || null;
   if (body.totalSessions !== undefined) data.totalSessions = body.totalSessions;
-  if (body.usedSessions !== undefined) data.usedSessions = body.usedSessions;
-  if (body.price !== undefined) data.price = body.price;
-  if (body.expiresAt !== undefined) data.expiresAt = new Date(body.expiresAt);
-  if (body.notes !== undefined) data.notes = body.notes || null;
-  if (body.status !== undefined) data.status = body.status;
+  if (body.price         !== undefined) data.price         = body.price;
+  if (body.expiresAt     !== undefined) data.expiresAt     = new Date(body.expiresAt);
+  if (body.notes         !== undefined) data.notes         = body.notes || null;
+  if (body.status        !== undefined) data.status        = body.status;
 
   const updated = await db.package.update({ where: { id: params.itemId }, data });
   return ok(updated);
