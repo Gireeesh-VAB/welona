@@ -25,7 +25,7 @@ const optionalEmail = z.string().email().optional().or(z.literal(''));
 /** Common list query: pagination, search and an optional status filter. */
 export const listQuerySchema = z.object({
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(10000).default(20),
+  limit: z.coerce.number().int().positive().max(9999).default(20),
   search: z.string().trim().optional(),
   status: z.string().trim().optional(),
   branchId: id.optional(),
