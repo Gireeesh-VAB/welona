@@ -4,11 +4,25 @@ import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
 import { sessionEntryUpdateSchema } from '@shared/schemas/customer-modules';
+import { applyServiceSessionStockByIds } from '@/lib/service-inventory';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dba = db as any;
 
 type Ctx = { params: { id: string; itemId: string; sessionId: string } };
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resolveServiceIds(pkg: any): string[] {
+  try {
+    const snapshot: string[] = JSON.parse(pkg.serviceIdsSnapshot ?? '[]');
+    if (snapshot.length > 0) return snapshot;
+  } catch { /* fall through */ }
+  try {
+    return JSON.parse(pkg.master?.serviceIds ?? '[]') as string[];
+  } catch {
+    return [];
+  }
+}
 
 /** PATCH /api/v1/customers/[id]/packages/[itemId]/sessions/[sessionId] — update a session entry. */
 export const PATCH = route<Ctx>(async (req, { params }) => {
@@ -17,6 +31,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
 
   const pkg = await db.package.findFirst({
     where: { id: params.itemId, customerId: params.id, orgId: claims.orgId },
+    include: { master: { select: { serviceIds: true } } },
   });
   if (!pkg) throw Errors.notFound('Package');
 
@@ -51,9 +66,21 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
       const newUsed   = pkg.usedSessions + 1;
       const newStatus = newUsed >= pkg.totalSessions ? 'completed' : pkg.status;
       await tx.package.update({ where: { id: pkg.id }, data: { usedSessions: newUsed, status: newStatus } });
+      if (pkg.branchId) {
+        const serviceIds = resolveServiceIds(pkg);
+        if (serviceIds.length > 0) {
+          await applyServiceSessionStockByIds(tx, { branchId: pkg.branchId, ref: updated.id, serviceIds });
+        }
+      }
     } else if (leavingCompleted) {
       const newUsed = Math.max(0, pkg.usedSessions - 1);
       await tx.package.update({ where: { id: pkg.id }, data: { usedSessions: newUsed, status: 'active' } });
+      if (pkg.branchId) {
+        const serviceIds = resolveServiceIds(pkg);
+        if (serviceIds.length > 0) {
+          await applyServiceSessionStockByIds(tx, { branchId: pkg.branchId, ref: updated.id, serviceIds, reverse: true });
+        }
+      }
     }
 
     return updated;

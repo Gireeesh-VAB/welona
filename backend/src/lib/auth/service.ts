@@ -1,6 +1,6 @@
 import { randomBytes } from 'crypto';
 import { type NextRequest, type NextResponse } from 'next/server';
-import type { AdminUser, Branch, Role, Staff } from '@prisma/client';
+import type { AdminUser, Branch, Employee, Role, Staff, SystemUser } from '@prisma/client';
 import { db } from '@/lib/db';
 import { Errors } from '@/lib/api/errors';
 import type { AdminAuthUser, AuthUser } from '@shared/types/auth';
@@ -12,6 +12,7 @@ import {
   type StaffAuthClaims,
 } from './jwt';
 import { ACCESS_COOKIE, REFRESH_COOKIE } from '@shared/auth-constants';
+import { SYSTEM_ROLES } from '../rbac';
 
 // Re-exported for existing importers; defined in ./constants so client code
 // can use them without importing this server-only module.
@@ -294,5 +295,113 @@ export async function rotateAdminSession(refreshToken: string) {
     throw Errors.unauthorized('Account is no longer active');
   }
   return issueAdminSession(admin);
+}
+
+// ---------------------------------------------------------------------------
+// SystemUser session pool
+//
+// SystemUsers are branch-level login accounts (receptionists, etc.) that log
+// in with a username+password pair rather than email. They use the same JWT
+// type ('staff') so the existing middleware and route guards work unchanged,
+// but their refresh tokens are stored in the separate SystemRefreshToken table.
+// ---------------------------------------------------------------------------
+
+export type SystemUserWithRelations = SystemUser & {
+  branch: Branch | null;
+  employee: Pick<Employee, 'name'> | null;
+};
+
+const BRANCH_ADMIN_PERMISSIONS =
+  SYSTEM_ROLES.find((r) => r.key === 'branch_manager')?.permissions ?? [];
+
+/** Load a SystemUser by username or email, including branch + employee name. */
+export function findSystemUser(identifier: string) {
+  return db.systemUser.findFirst({
+    where: { OR: [{ userName: identifier }, { email: identifier }] },
+    include: { branch: true, employee: { select: { name: true } } },
+  });
+}
+
+/** Load a SystemUser by ID, including branch + employee name. */
+export function findSystemUserById(id: string) {
+  return db.systemUser.findUnique({
+    where: { id },
+    include: { branch: true, employee: { select: { name: true } } },
+  });
+}
+
+function buildSystemUserClaims(su: SystemUserWithRelations): StaffAuthClaims {
+  return {
+    sub: su.id,
+    type: 'staff',
+    orgId: su.branch?.orgId ?? '',
+    branchIds: su.branchId ? [su.branchId] : [],
+    role: 'branch_manager',
+    permissions: BRANCH_ADMIN_PERMISSIONS,
+  };
+}
+
+export function toSystemAuthUser(su: SystemUserWithRelations): AuthUser {
+  return {
+    id: su.id,
+    name: su.employee?.name ?? su.userName,
+    email: su.email ?? '',
+    phone: null,
+    avatarUrl: null,
+    role: 'branch_manager',
+    roleName: 'Branch Admin',
+    orgId: su.branch?.orgId ?? '',
+    branchId: su.branchId ?? null,
+    branchName: su.branch?.name ?? null,
+    branchIds: su.branchId ? [su.branchId] : [],
+    permissions: BRANCH_ADMIN_PERMISSIONS,
+  };
+}
+
+/** Issue a session for a SystemUser; stores the refresh token in SystemRefreshToken. */
+export async function issueSystemSession(su: SystemUserWithRelations) {
+  const accessToken = signAccessToken(buildSystemUserClaims(su));
+  const refreshToken = randomBytes(48).toString('hex');
+
+  await db.systemRefreshToken.create({
+    data: {
+      systemUserId: su.id,
+      token: refreshToken,
+      expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
+    },
+  });
+  await db.systemUser.update({ where: { id: su.id }, data: { lastLoginAt: new Date() } });
+
+  return { accessToken, refreshToken, user: toSystemAuthUser(su) };
+}
+
+/** Rotate a SystemUser refresh token. Throws `UNAUTHORIZED` if invalid/expired. */
+export async function rotateSystemSession(refreshToken: string) {
+  const existing = await db.systemRefreshToken.findUnique({ where: { token: refreshToken } });
+  if (!existing || existing.revokedAt || existing.expiresAt < new Date()) {
+    throw Errors.unauthorized('Session expired, please sign in again');
+  }
+  await db.systemRefreshToken.update({
+    where: { id: existing.id },
+    data: { revokedAt: new Date() },
+  });
+
+  const su = await db.systemUser.findUnique({
+    where: { id: existing.systemUserId },
+    include: { branch: true, employee: { select: { name: true } } },
+  });
+  if (!su || !su.isActive) {
+    throw Errors.unauthorized('Account is no longer active');
+  }
+  return issueSystemSession(su);
+}
+
+/** Revoke a SystemUser refresh token (silent no-op if not found). */
+export async function revokeSystemSession(refreshToken: string | undefined) {
+  if (!refreshToken) return;
+  await db.systemRefreshToken.updateMany({
+    where: { token: refreshToken, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
 }
 

@@ -54,6 +54,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
   if (body.stateId !== undefined) {
     data.state = body.stateId ? { connect: { id: body.stateId } } : { disconnect: true };
   }
+  if (body.country !== undefined) data.country = body.country || null;
 
   const updated = await db.customer.update({
     where: { id: params.id },

@@ -50,14 +50,10 @@ export async function applyDeliverySaleStock(
     const productId = productOf.get(line.orderItemId);
     if (!productId) continue;
     const delta = reverse ? line.quantity : -line.quantity;
-    const stock = await tx.inventoryStock.upsert({
+    await tx.inventoryStock.upsert({
       where: { warehouseId_productId: { warehouseId, productId } },
-      create: { branchId, warehouseId, productId, quantity: 0 },
-      update: {},
-    });
-    await tx.inventoryStock.update({
-      where: { id: stock.id },
-      data: { quantity: stock.quantity + delta },
+      create: { branchId, warehouseId, productId, quantity: delta },
+      update: { quantity: { increment: delta } },
     });
     // Batch-tracked forward sale: deplete batches FEFO. (Returns don't re-add to
     // a specific batch — InventoryStock stays authoritative.)

@@ -1,13 +1,14 @@
 'use client';
 
 import { useRouter, usePathname } from 'next/navigation';
-import { Avatar, Badge, Breadcrumb, Button, Dropdown, Layout, Space, Typography } from 'antd';
+import { Avatar, Badge, Breadcrumb, Button, Dropdown, Layout, Popover, Space, Tag, Typography } from 'antd';
 import {
   BellOutlined,
   LogoutOutlined,
   SafetyOutlined,
   AppstoreOutlined,
   MenuOutlined,
+  InboxOutlined,
 } from '@ant-design/icons';
 import { useAuthStore } from '@/store/authStore';
 import { useAdminAuthStore } from '@/store/adminAuthStore';
@@ -16,6 +17,7 @@ import { useAdminLogout } from '@/hooks/useAdminAuth';
 import { getNavItemByPath } from '@/config/navigation';
 import { getAdminNavItemByPath } from '@/config/adminNavigation';
 import { useBrandColors } from '@/hooks/useBrandColors';
+import { useAdminPendingIndentCount } from '@/hooks/useAdminIndents';
 
 const { Header: AntHeader } = Layout;
 const { Text } = Typography;
@@ -41,6 +43,10 @@ export default function Header({ onMobileMenuClick, isMobile = false }: HeaderPr
 
   const displayName = onAdminSide ? admin?.name ?? 'Administrator' : user?.name ?? 'Branch User';
   const displayRole = onAdminSide ? 'Administrator' : user?.roleName ?? 'Branch Staff';
+
+  const { data: pendingData } = useAdminPendingIndentCount(onAdminSide);
+  const pendingCount = pendingData?.meta.total ?? 0;
+  const recentPending = pendingData?.items ?? [];
 
   const handleLogout = async () => {
     if (onAdminSide) {
@@ -112,9 +118,77 @@ export default function Header({ onMobileMenuClick, isMobile = false }: HeaderPr
           </Button>
         )}
 
-        <Badge count={0} showZero={false}>
-          <BellOutlined style={{ fontSize: 18, color: colors.text.secondary }} />
-        </Badge>
+        {onAdminSide ? (
+          <Popover
+            trigger="click"
+            placement="bottomRight"
+            arrow={false}
+            content={
+              <div style={{ width: 320 }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <Typography.Text strong style={{ color: colors.text.primary }}>Stock Requests</Typography.Text>
+                  <Button
+                    type="link"
+                    size="small"
+                    style={{ color: colors.gold.primary, padding: 0 }}
+                    onClick={() => router.push('/admin/inventory/stock-requests')}
+                  >
+                    View all
+                  </Button>
+                </div>
+                {recentPending.length === 0 ? (
+                  <div style={{ textAlign: 'center', padding: '20px 0', color: colors.text.placeholder }}>
+                    <InboxOutlined style={{ fontSize: 24, display: 'block', marginBottom: 6 }} />
+                    No pending requests
+                  </div>
+                ) : (
+                  recentPending.map((indent) => (
+                    <div
+                      key={indent.id}
+                      style={{
+                        padding: '8px 0',
+                        borderBottom: `1px solid ${colors.border}`,
+                        cursor: 'pointer',
+                      }}
+                      onClick={() => router.push('/admin/inventory/stock-requests')}
+                    >
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+                        <Typography.Text style={{ color: colors.text.primary, fontWeight: 600, fontSize: 13 }}>
+                          {indent.product.name}
+                        </Typography.Text>
+                        <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>Pending</Tag>
+                      </div>
+                      <div style={{ color: colors.text.placeholder, fontSize: 12, marginTop: 2 }}>
+                        {indent.branchName} · Qty: {indent.requestedQty} {indent.product.uom}
+                      </div>
+                      {indent.reason && (
+                        <div style={{ color: colors.text.placeholder, fontSize: 11, marginTop: 2 }}>
+                          {indent.reason}
+                        </div>
+                      )}
+                    </div>
+                  ))
+                )}
+                {pendingCount > 5 && (
+                  <div
+                    style={{ textAlign: 'center', paddingTop: 8, color: colors.gold.primary, fontSize: 12, cursor: 'pointer' }}
+                    onClick={() => router.push('/admin/inventory/stock-requests')}
+                  >
+                    +{pendingCount - 5} more pending requests
+                  </div>
+                )}
+              </div>
+            }
+          >
+            <Badge count={pendingCount} size="small" offset={[-2, 2]}>
+              <BellOutlined style={{ fontSize: 18, color: pendingCount > 0 ? colors.gold.primary : colors.text.secondary, cursor: 'pointer' }} />
+            </Badge>
+          </Popover>
+        ) : (
+          <Badge count={0} showZero={false}>
+            <BellOutlined style={{ fontSize: 18, color: colors.text.secondary }} />
+          </Badge>
+        )}
 
         <Dropdown
           menu={{

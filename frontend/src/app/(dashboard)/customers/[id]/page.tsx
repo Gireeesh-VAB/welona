@@ -10,6 +10,7 @@ import {
   Descriptions,
   Divider,
   Empty,
+  Form,
   Input,
   Modal,
   Row,
@@ -24,6 +25,7 @@ import {
 import {
   AppstoreOutlined,
   CalendarOutlined,
+  EditOutlined,
   FileTextOutlined,
   FolderOpenOutlined,
   HistoryOutlined,
@@ -35,8 +37,9 @@ import {
   WarningOutlined,
 } from '@ant-design/icons';
 import { useMemo, useState, useEffect, useRef } from 'react';
-import { useCustomers, useCustomer, useCustomerSales, useCustomerFollowUps, useCreateCustomer } from '@/hooks/useSales';
-import { useBranchServices, useBranchEmployees, useBranchComplimentaryConfig, useLookupCoupon, type BranchInventoryItem } from '@/hooks/useBranchPortal';
+import { useCustomers, useCustomer, useCustomerSales, useCustomerFollowUps, useCreateCustomer, useUpdateCustomer } from '@/hooks/useSales';
+import { useStates } from '@/hooks/useStates';
+import { useBranchServices, useBranchEmployees, useBranchComplimentaryConfig, useLookupCoupon, useBranchCurrentInfo, type BranchInventoryItem } from '@/hooks/useBranchPortal';
 import { useRaiseIndent } from '@/hooks/useIndents';
 import type { CouponLookupResult } from '@/hooks/useBranchPortal';
 import { useCreateAppointment } from '@/hooks/useAppointments';
@@ -45,6 +48,7 @@ import {
   useBookings,
   useBookingAction,
   usePackages,
+  useAddPackageSession,
   useOffers,
   usePrescriptions,
   useCreatePrescription,
@@ -60,10 +64,385 @@ import StatusTag from '@/components/sales/StatusTag';
 import ModuleCard from '@/components/customers/ModuleCard';
 import AvatarUpload from '@/components/customers/AvatarUpload';
 import PackagesTab from '@/components/customers/PackagesTab';
+import CountryStateFields from '@/components/customers/CountryStateFields';
+import { PHONE_CODE_OPTIONS, COUNTRY_PHONE_CODE_MAP, buildPhone } from '@/components/customers/countryData';
 import { formatDate, formatMoney } from '@shared/format';
 import { colors } from '@/theme/colors';
 
 const { Title, Text } = Typography;
+
+// ─── History Timeline ────────────────────────────────────────────────────────
+
+const HISTORY_TYPE_CONFIG: Record<string, { color: string; bg: string; label: string; icon: JSX.Element }> = {
+  booking: {
+    color: '#1677ff', bg: '#e6f4ff', label: 'Booking',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/>
+      </svg>
+    ),
+  },
+  invoice: {
+    color: '#389e0d', bg: '#f6ffed', label: 'Invoice',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/>
+      </svg>
+    ),
+  },
+  enquiry: {
+    color: '#d46b08', bg: '#fff7e6', label: 'Enquiry',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+    ),
+  },
+  followup: {
+    color: '#531dab', bg: '#f9f0ff', label: 'Follow-up',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6A19.79 19.79 0 0 1 2.12 4.18 2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 22 16.92z"/>
+      </svg>
+    ),
+  },
+  prescription: {
+    color: '#3730a3', bg: '#eef2ff', label: 'Prescription',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M9 3H5a2 2 0 0 0-2 2v4m6-6h10a2 2 0 0 1 2 2v4M9 3v18m0 0h10a2 2 0 0 0 2-2V9M9 21H5a2 2 0 0 1-2-2V9m0 0h18"/>
+      </svg>
+    ),
+  },
+  report: {
+    color: '#08979c', bg: '#e6fffb', label: 'Medical Report',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+      </svg>
+    ),
+  },
+  feedback: {
+    color: '#d48806', bg: '#fffbe6', label: 'Feedback',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>
+      </svg>
+    ),
+  },
+  document: {
+    color: '#595959', bg: '#f5f5f5', label: 'Document',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>
+      </svg>
+    ),
+  },
+  package: {
+    color: '#d4380d', bg: '#fff2e8', label: 'Package',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <line x1="16.5" y1="9.4" x2="7.5" y2="4.21"/><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/>
+      </svg>
+    ),
+  },
+  offer: {
+    color: '#5b8c00', bg: '#f9ffe6', label: 'Offer',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/>
+      </svg>
+    ),
+  },
+  order: {
+    color: '#0050b3', bg: '#e6f7ff', label: 'Order',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+      </svg>
+    ),
+  },
+  customer: {
+    color: '#ad6800', bg: '#fffbe6', label: 'Profile',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/>
+      </svg>
+    ),
+  },
+};
+
+function getHistoryDateLabel(isoStr: string): string {
+  const d = new Date(isoStr);
+  const today = new Date();
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const sameDay = (a: Date, b: Date) =>
+    a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+  if (sameDay(d, today)) return 'Today';
+  if (sameDay(d, yesterday)) return 'Yesterday';
+  return d.toLocaleDateString('en-IN', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+}
+
+function getHistoryDateKey(isoStr: string): string {
+  const d = new Date(isoStr);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
+function getHistoryTime(isoStr: string): string {
+  return new Date(isoStr).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', hour12: true });
+}
+
+interface HistoryTimelineProps {
+  history: any[];
+  selectedDetail: any;
+  detailType: string | null;
+  setSelectedDetail: (v: any) => void;
+  setDetailType: (v: any) => void;
+  formatDate: (s: string) => string;
+}
+
+function HistoryTimeline({ history, selectedDetail, detailType, setSelectedDetail, setDetailType, formatDate }: HistoryTimelineProps) {
+  const [activeFilter, setActiveFilter] = useState<string>('all');
+
+  if (!history || history.length === 0) {
+    return <Empty description="No activity recorded yet" style={{ marginTop: 60 }} />;
+  }
+
+  const uniqueTypes = Array.from(new Set((history as any[]).map((h: any) => h.type))).filter(Boolean);
+  const filtered = activeFilter === 'all' ? history : (history as any[]).filter((h: any) => h.type === activeFilter);
+
+  // Group by calendar day
+  const groups: { label: string; key: string; items: any[] }[] = [];
+  const seenKeys: Record<string, number> = {};
+  filtered.forEach((item: any) => {
+    const key = getHistoryDateKey(item.at);
+    const label = getHistoryDateLabel(item.at);
+    if (seenKeys[key] === undefined) {
+      seenKeys[key] = groups.length;
+      groups.push({ label, key, items: [] });
+    }
+    groups[seenKeys[key]].items.push(item);
+  });
+
+  const accentColor = '#c8a84b';
+
+  return (
+    <div>
+      {/* Header row */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+        <span style={{ fontSize: 12, color: '#8c8c8c' }}>
+          {filtered.length} event{filtered.length !== 1 ? 's' : ''}{activeFilter !== 'all' ? ` · filtered` : ''}
+        </span>
+      </div>
+
+      {/* Type filter chips */}
+      {uniqueTypes.length > 1 && (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
+          {(['all', ...uniqueTypes] as string[]).map((t) => {
+            const cfg = HISTORY_TYPE_CONFIG[t] ?? null;
+            const isActive = activeFilter === t;
+            return (
+              <button
+                key={t}
+                onClick={() => setActiveFilter(t)}
+                style={{
+                  fontSize: 11, fontWeight: 600, cursor: 'pointer',
+                  padding: '3px 10px', borderRadius: 20,
+                  border: isActive
+                    ? `1.5px solid ${t === 'all' ? accentColor : (cfg?.color ?? '#8c8c8c')}`
+                    : '1.5px solid #e8e8e8',
+                  background: isActive
+                    ? (t === 'all' ? '#fdf5e0' : (cfg?.bg ?? '#f5f5f5'))
+                    : '#fff',
+                  color: isActive
+                    ? (t === 'all' ? accentColor : (cfg?.color ?? '#595959'))
+                    : '#8c8c8c',
+                  transition: 'all 0.15s',
+                  textTransform: 'capitalize',
+                }}
+              >
+                {t === 'all' ? 'All' : (cfg?.label ?? t)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {filtered.length === 0 ? (
+        <Empty description="No events of this type" style={{ marginTop: 40 }} />
+      ) : (
+        <div>
+          {groups.map((group) => (
+            <div key={group.key} style={{ marginBottom: 28 }}>
+              {/* Day header */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 }}>
+                <span style={{
+                  fontSize: 11, fontWeight: 700, color: '#595959',
+                  letterSpacing: '0.03em', whiteSpace: 'nowrap',
+                }}>
+                  {group.label}
+                </span>
+                <div style={{ flex: 1, height: 1, background: '#f0f0f0' }} />
+                <span style={{
+                  fontSize: 10, color: '#bbb', background: '#fafafa',
+                  border: '1px solid #f0f0f0',
+                  padding: '1px 7px', borderRadius: 10, flexShrink: 0,
+                }}>
+                  {group.items.length}
+                </span>
+              </div>
+
+              {/* Timeline rows */}
+              <div style={{ position: 'relative', paddingLeft: 40 }}>
+                {/* Vertical line */}
+                {group.items.length > 1 && (
+                  <div style={{
+                    position: 'absolute', left: 14, top: 14, bottom: 14, width: 1,
+                    background: 'linear-gradient(to bottom, #e8e8e8 0%, transparent 100%)',
+                  }} />
+                )}
+
+                {group.items.map((item: any) => {
+                  const cfg: { color: string; bg: string; label: string; icon: JSX.Element } = HISTORY_TYPE_CONFIG[item.type] ?? {
+                    color: '#8c8c8c', bg: '#f5f5f5', label: item.type,
+                    icon: <span style={{ fontSize: 10 }}>•</span>,
+                  };
+                  const isOpen = selectedDetail?.id === item.id && detailType === 'history';
+
+                  return (
+                    <div
+                      key={item.id}
+                      style={{ position: 'relative', marginBottom: 8 }}
+                    >
+                      {/* Icon dot on timeline */}
+                      <div style={{
+                        position: 'absolute', left: -40, top: 10,
+                        width: 28, height: 28, borderRadius: '50%',
+                        background: cfg.bg,
+                        border: `1.5px solid ${cfg.color}30`,
+                        display: 'flex', alignItems: 'center', justifyContent: 'center',
+                        color: cfg.color,
+                        zIndex: 2,
+                        boxShadow: isOpen ? `0 0 0 3px ${cfg.color}15` : 'none',
+                        transition: 'box-shadow 0.15s',
+                      }}>
+                        {cfg.icon}
+                      </div>
+
+                      {/* Event card */}
+                      <div
+                        onClick={() => {
+                          setSelectedDetail(isOpen ? null : item);
+                          setDetailType(isOpen ? null : 'history');
+                        }}
+                        style={{
+                          background: isOpen ? cfg.bg : '#fafafa',
+                          border: `1px solid ${isOpen ? cfg.color + '40' : '#efefef'}`,
+                          borderLeft: `3px solid ${isOpen ? cfg.color : '#e8e8e8'}`,
+                          borderRadius: 6,
+                          padding: '9px 14px',
+                          cursor: 'pointer',
+                          transition: 'all 0.15s',
+                        }}
+                        onMouseEnter={e => {
+                          const el = e.currentTarget as HTMLDivElement;
+                          el.style.background = cfg.bg;
+                          el.style.borderLeftColor = cfg.color;
+                          el.style.borderColor = `${cfg.color}30`;
+                        }}
+                        onMouseLeave={e => {
+                          if (!isOpen) {
+                            const el = e.currentTarget as HTMLDivElement;
+                            el.style.background = '#fafafa';
+                            el.style.borderLeftColor = '#e8e8e8';
+                            el.style.borderColor = '#efefef';
+                          }
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 }}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {/* Type badge */}
+                            <div style={{ marginBottom: 4 }}>
+                              <span style={{
+                                display: 'inline-block', fontSize: 9, fontWeight: 700,
+                                color: cfg.color, background: '#fff',
+                                border: `1px solid ${cfg.color}30`,
+                                padding: '1px 7px', borderRadius: 10,
+                                textTransform: 'uppercase', letterSpacing: '0.07em',
+                              }}>
+                                {cfg.label}
+                              </span>
+                            </div>
+                            {/* Title */}
+                            <div style={{
+                              fontSize: 13, fontWeight: 600, color: '#1a1a1a',
+                              lineHeight: 1.35, marginBottom: item.detail ? 3 : 0,
+                              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                            }}>
+                              {item.title}
+                            </div>
+                            {/* Detail */}
+                            {item.detail && !isOpen && (
+                              <div style={{
+                                fontSize: 12, color: '#8c8c8c', marginTop: 2,
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                              }}>
+                                {item.detail}
+                              </div>
+                            )}
+                            {/* Expanded detail */}
+                            {isOpen && (
+                              <div style={{
+                                marginTop: 10, paddingTop: 10,
+                                borderTop: `1px solid ${cfg.color}20`,
+                              }}>
+                                {item.detail && (
+                                  <p style={{ fontSize: 12, color: '#595959', margin: '0 0 8px 0', lineHeight: 1.5 }}>
+                                    {item.detail}
+                                  </p>
+                                )}
+                                <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                                  <div>
+                                    <div style={{ fontSize: 9, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Date</div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: '#333' }}>{formatDate(item.at)}</div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 9, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Time</div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: '#333' }}>{getHistoryTime(item.at)}</div>
+                                  </div>
+                                  <div>
+                                    <div style={{ fontSize: 9, fontWeight: 700, color: '#bbb', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 2 }}>Category</div>
+                                    <div style={{ fontSize: 12, fontWeight: 600, color: cfg.color }}>{cfg.label}</div>
+                                  </div>
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                          {/* Time */}
+                          <div style={{ flexShrink: 0, textAlign: 'right', paddingTop: 2 }}>
+                            <div style={{ fontSize: 11, color: '#aaa', fontVariantNumeric: 'tabular-nums' }}>
+                              {getHistoryTime(item.at)}
+                            </div>
+                            <div style={{ fontSize: 10, color: '#ccc', marginTop: 1 }}>
+                              {isOpen ? '▲' : '▼'}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── End History Timeline ─────────────────────────────────────────────────────
 
 export default function CustomerDetailPage() {
   const router = useRouter();
@@ -154,6 +533,45 @@ export default function CustomerDetailPage() {
   const { data: customer, isLoading } = useCustomer(id);
   const { data: sales, isLoading: salesLoading } = useCustomerSales(id);
 
+  // Edit profile modal
+  const [editProfileOpen, setEditProfileOpen] = useState(false);
+  const [editProfileForm] = Form.useForm();
+  const updateCustomer = useUpdateCustomer(id);
+  const { data: statesData } = useStates({ limit: 100 });
+  const stateOptions = (statesData?.items ?? []).map((s) => ({ value: s.id, label: `${s.name} (${s.code})` }));
+
+  const openEditProfile = () => {
+    if (!customer) return;
+    const country = (customer as any).country || 'India';
+    editProfileForm.setFieldsValue({
+      name: customer.name,
+      phoneCode: COUNTRY_PHONE_CODE_MAP[country] || '+91',
+      phone: customer.phone || '',
+      email: customer.email || '',
+      companyName: customer.companyName || '',
+      gstin: customer.gstin || '',
+      address: customer.address || '',
+      city: customer.city || '',
+      stateId: customer.stateId || undefined,
+      country,
+      notes: customer.notes || '',
+    });
+    setEditProfileOpen(true);
+  };
+
+  const handleSaveProfile = async () => {
+    const values = await editProfileForm.validateFields();
+    const phone = buildPhone(values.phoneCode, values.phone);
+    delete values.phoneCode;
+    try {
+      await updateCustomer.mutateAsync({ ...values, phone });
+      message.success('Customer profile updated');
+      setEditProfileOpen(false);
+    } catch (err) {
+      message.error(err instanceof ApiClientError ? err.message : 'Could not update customer');
+    }
+  };
+
   // Auto-fill fields when customer data loads
   useEffect(() => {
     if (customer) {
@@ -185,6 +603,13 @@ export default function CustomerDetailPage() {
   const [bSearch, setBSearch] = useState('');
   const [bPage, setBPage] = useState(1);
   const { data: packages, isLoading: packagesLoading } = usePackages(id);
+  const [sessionModalPkg, setSessionModalPkg] = useState<any>(null);
+  const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
+  const [sessionStaff, setSessionStaff] = useState('');
+  const [sessionRemarks, setSessionRemarks] = useState('');
+  const [sessionStatus, setSessionStatus] = useState<'completed' | 'no_show' | 'cancelled' | 'rescheduled'>('completed');
+  const [sessionSaving, setSessionSaving] = useState(false);
+  const addSession = useAddPackageSession(id, sessionModalPkg?.id ?? '');
   const { data: offers, isLoading: offersLoading } = useOffers(id);
   const { data: prescriptions, isLoading: prescriptionsLoading } = usePrescriptions(id);
   const { data: medicalReports, isLoading: medicalReportsLoading } = useMedicalReports(id);
@@ -199,6 +624,8 @@ export default function CustomerDetailPage() {
 
   // Branch-assigned services (admin-assigned) drive the booking service picker.
   const { data: branchServices, isLoading: branchServicesLoading } = useBranchServices();
+  const { data: branchCurrentInfo } = useBranchCurrentInfo();
+  const branchStateId = branchCurrentInfo?.stateId ?? null;
   const { data: complimentaryConfig } = useBranchComplimentaryConfig();
   const branchPercentage = complimentaryConfig?.branchPercentage ?? null;
   const limitIsActive = complimentaryConfig?.limitIsActive ?? false;
@@ -415,20 +842,17 @@ export default function CustomerDetailPage() {
   };
 
   const handleComplementaryRowChange = (id: number, field: string, value: any) => {
+    const fmt = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+    const paidTotal = bookingRows.filter(r => r.service).reduce((s, r) => s + r.quantity * r.amount, 0);
+    const maxAllowed = paidTotal * 0.20;
+
     if (field === 'service' && value) {
       const svc = (branchServices ?? []).find(s => s.name === value);
-      const paidTotal = bookingRows.filter(r => r.service).reduce((s, r) => s + r.quantity * r.amount, 0);
       const newAmount = svc ? svc.minPrice / 100 : 0;
-      const currentComp = complimentaryRows
-        .filter(r => r.id !== id)
-        .reduce((s, r) => s + r.quantity * r.amount, 0);
-      if (branchPercentage !== null && limitIsActive && branchPercentage > 0) {
-        const maxAllowed = (paidTotal * branchPercentage) / 100;
-        if (currentComp + newAmount > maxAllowed) {
-          const fmt = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-          message.error(`Complimentary limit exceeded. Max allowed: ₹${fmt(maxAllowed)} (${branchPercentage}% of ₹${fmt(paidTotal)}).`);
-          return;
-        }
+      const currentComp = complimentaryRows.filter(r => r.id !== id).reduce((s, r) => s + r.quantity * r.amount, 0);
+      if (currentComp + newAmount > maxAllowed) {
+        message.error(`Exceeds complimentary limit. Max allowed: ₹${fmt(maxAllowed)} (20% of ₹${fmt(paidTotal)}).`);
+        return;
       }
       setComplimentaryRows(complimentaryRows.map(r =>
         r.id === id ? { ...r, service: value, amount: newAmount } : r
@@ -438,18 +862,11 @@ export default function CustomerDetailPage() {
     if (field === 'quantity') {
       const row = complimentaryRows.find(r => r.id === id);
       const newQty = Number(value) || 1;
-      const paidTotal = bookingRows.filter(r => r.service).reduce((s, r) => s + r.quantity * r.amount, 0);
-      const currentComp = complimentaryRows
-        .filter(r => r.id !== id)
-        .reduce((s, r) => s + r.quantity * r.amount, 0);
+      const currentComp = complimentaryRows.filter(r => r.id !== id).reduce((s, r) => s + r.quantity * r.amount, 0);
       const thisAmt = (row?.amount ?? 0) * newQty;
-      if (branchPercentage !== null && limitIsActive && branchPercentage > 0) {
-        const maxAllowed = (paidTotal * branchPercentage) / 100;
-        if (currentComp + thisAmt > maxAllowed) {
-          const fmt = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
-          message.error(`Complimentary limit exceeded. Max allowed: ₹${fmt(maxAllowed)} (${branchPercentage}% of ₹${fmt(paidTotal)}).`);
-          return;
-        }
+      if (currentComp + thisAmt > maxAllowed) {
+        message.error(`Exceeds complimentary limit. Max allowed: ₹${fmt(maxAllowed)} (20% of ₹${fmt(paidTotal)}).`);
+        return;
       }
     }
     setComplimentaryRows(complimentaryRows.map(r =>
@@ -826,6 +1243,11 @@ export default function CustomerDetailPage() {
                   <Tag color={customer.type === 'business' ? 'gold' : 'default'}>
                     {customer.type === 'business' ? 'Business' : 'Individual'}
                   </Tag>
+                  <div style={{ marginTop: 8 }}>
+                    <Button size="small" icon={<EditOutlined />} onClick={openEditProfile}>
+                      Edit Profile
+                    </Button>
+                  </div>
                 </div>
               </Col>
 
@@ -973,208 +1395,14 @@ export default function CustomerDetailPage() {
               >
             {/* History Tab */}
             {activeTab === 'history' && (
-              <div>
-                <style>{`
-                  @keyframes hSlideIn {
-                    from { opacity: 0; transform: translateX(18px); }
-                    to   { opacity: 1; transform: translateX(0); }
-                  }
-                  @keyframes hPulseRing {
-                    0%   { box-shadow: 0 0 0 0 rgba(218,165,32,0.55); }
-                    70%  { box-shadow: 0 0 0 7px rgba(218,165,32,0); }
-                    100% { box-shadow: 0 0 0 0 rgba(218,165,32,0); }
-                  }
-                  @keyframes hLineGrow {
-                    from { transform: scaleY(0); }
-                    to   { transform: scaleY(1); }
-                  }
-                  .h-card { transition: background 0.18s, box-shadow 0.18s, transform 0.18s; }
-                `}</style>
-                {history && history.length > 0 ? (() => {
-                  const typeMap: Record<string, { color: string; bg: string; icon: string; label: string }> = {
-                    booking:      { color: '#1677ff', bg: '#e6f4ff', icon: '📅', label: 'Booking' },
-                    invoice:      { color: '#389e0d', bg: '#f6ffed', icon: '🧾', label: 'Invoice' },
-                    enquiry:      { color: '#d46b08', bg: '#fff7e6', icon: '📋', label: 'Enquiry' },
-                    followup:     { color: '#531dab', bg: '#f9f0ff', icon: '📞', label: 'Follow-up' },
-                    prescription: { color: '#3730a3', bg: '#eef2ff', icon: '💊', label: 'Prescription' },
-                    report:       { color: '#08979c', bg: '#e6fffb', icon: '🔬', label: 'Medical Report' },
-                    feedback:     { color: '#d48806', bg: '#fffbe6', icon: '⭐', label: 'Feedback' },
-                    document:     { color: '#595959', bg: '#f5f5f5', icon: '📄', label: 'Document' },
-                    package:      { color: '#d4380d', bg: '#fff2e8', icon: '📦', label: 'Package' },
-                    offer:        { color: '#5b8c00', bg: '#f9ffe6', icon: '🎁', label: 'Offer' },
-                    quotation:    { color: '#1d39c4', bg: '#f0f5ff', icon: '📝', label: 'Quotation' },
-                    order:        { color: '#0050b3', bg: '#e6f7ff', icon: '🛒', label: 'Order' },
-                    customer:     { color: '#ad6800', bg: '#fffbe6', icon: '👤', label: 'Profile' },
-                  };
-
-                  // Group by month
-                  const groups: { label: string; key: string; items: any[] }[] = [];
-                  const seenKeys: Record<string, number> = {};
-                  (history as any[]).forEach(item => {
-                    const d = new Date(item.at);
-                    const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
-                    const label = d.toLocaleString('en-IN', { month: 'long', year: 'numeric' });
-                    if (seenKeys[key] === undefined) {
-                      seenKeys[key] = groups.length;
-                      groups.push({ label, key, items: [] });
-                    }
-                    groups[seenKeys[key]].items.push(item);
-                  });
-
-                  let runningIdx = 0;
-                  return (
-                    <div>
-                      {groups.map((group) => (
-                        <div key={group.key} style={{ marginBottom: 28 }}>
-                          {/* Month separator */}
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
-                            <span style={{
-                              fontSize: 11, fontWeight: 700, color: colors.gold.primary,
-                              textTransform: 'uppercase', letterSpacing: '0.1em', whiteSpace: 'nowrap',
-                            }}>
-                              {group.label}
-                            </span>
-                            <div style={{ flex: 1, height: 1, background: `linear-gradient(to right, ${colors.gold.primary}60, transparent)` }} />
-                            <span style={{
-                              fontSize: 10, color: colors.text.secondary,
-                              background: '#f5f5f5', padding: '2px 8px', borderRadius: 10, flexShrink: 0,
-                            }}>
-                              {group.items.length} event{group.items.length !== 1 ? 's' : ''}
-                            </span>
-                          </div>
-
-                          {/* Timeline */}
-                          <div style={{ position: 'relative', paddingLeft: 48 }}>
-                            {/* Animated vertical line */}
-                            <div style={{
-                              position: 'absolute', left: 18, top: 10, bottom: 10, width: 2,
-                              background: `linear-gradient(to bottom, ${colors.gold.primary}80, ${colors.gold.light})`,
-                              transformOrigin: 'top',
-                              animation: 'hLineGrow 0.5s ease forwards',
-                            }} />
-
-                            {group.items.map((item: any) => {
-                              const cfg = typeMap[item.type] ?? { color: '#8c8c8c', bg: '#f5f5f5', icon: '•', label: item.type };
-                              const idx = runningIdx++;
-                              const isOpen = selectedDetail?.id === item.id && detailType === 'history';
-                              const d = new Date(item.at);
-                              return (
-                                <div
-                                  key={item.id}
-                                  style={{
-                                    marginBottom: 10, position: 'relative',
-                                    animation: 'hSlideIn 0.32s ease both',
-                                    animationDelay: `${idx * 0.045}s`,
-                                    opacity: 0,
-                                  }}
-                                >
-                                  {/* Dot */}
-                                  <div style={{
-                                    position: 'absolute', left: -36, top: 12,
-                                    width: 24, height: 24, borderRadius: '50%',
-                                    background: cfg.color,
-                                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                                    fontSize: 11,
-                                    boxShadow: `0 2px 8px ${cfg.color}50`,
-                                    zIndex: 2,
-                                    animation: idx === 0 ? 'hPulseRing 2s ease-in-out infinite' : 'none',
-                                  }}>
-                                    {cfg.icon}
-                                  </div>
-
-                                  {/* Card */}
-                                  <div
-                                    className="h-card"
-                                    onClick={() => {
-                                      setSelectedDetail(isOpen ? null : item);
-                                      setDetailType(isOpen ? null : 'history');
-                                    }}
-                                    style={{
-                                      background: isOpen ? cfg.bg : '#fff',
-                                      border: `1px solid ${isOpen ? cfg.color + '60' : '#efefef'}`,
-                                      borderLeft: `4px solid ${cfg.color}`,
-                                      borderRadius: 8,
-                                      padding: '10px 14px',
-                                      cursor: 'pointer',
-                                      boxShadow: isOpen ? `0 4px 16px ${cfg.color}18` : '0 1px 3px rgba(0,0,0,0.05)',
-                                    }}
-                                    onMouseEnter={e => {
-                                      if (!isOpen) {
-                                        (e.currentTarget as HTMLDivElement).style.background = cfg.bg;
-                                        (e.currentTarget as HTMLDivElement).style.boxShadow = `0 4px 14px ${cfg.color}22`;
-                                        (e.currentTarget as HTMLDivElement).style.transform = 'translateX(4px)';
-                                      }
-                                    }}
-                                    onMouseLeave={e => {
-                                      if (!isOpen) {
-                                        (e.currentTarget as HTMLDivElement).style.background = '#fff';
-                                        (e.currentTarget as HTMLDivElement).style.boxShadow = '0 1px 3px rgba(0,0,0,0.05)';
-                                        (e.currentTarget as HTMLDivElement).style.transform = 'translateX(0)';
-                                      }
-                                    }}
-                                  >
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                                      <div style={{ flex: 1, minWidth: 0 }}>
-                                        {/* Type badge */}
-                                        <span style={{
-                                          display: 'inline-block', fontSize: 9, fontWeight: 700,
-                                          color: cfg.color, background: cfg.bg,
-                                          border: `1px solid ${cfg.color}30`,
-                                          padding: '1px 7px', borderRadius: 10,
-                                          textTransform: 'uppercase', letterSpacing: '0.08em',
-                                          marginBottom: 5,
-                                        }}>
-                                          {cfg.label}
-                                        </span>
-                                        <div style={{ fontSize: 13, fontWeight: 600, color: '#1a1a1a', marginBottom: item.detail ? 3 : 0, lineHeight: 1.3 }}>
-                                          {item.title}
-                                        </div>
-                                        {item.detail && (
-                                          <div style={{ fontSize: 12, color: '#777', marginTop: 2 }}>{item.detail}</div>
-                                        )}
-                                        {/* Inline expanded detail */}
-                                        {isOpen && (
-                                          <div style={{
-                                            marginTop: 10, paddingTop: 10,
-                                            borderTop: `1px dashed ${cfg.color}40`,
-                                            animation: 'hSlideIn 0.2s ease both',
-                                          }}>
-                                            <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', fontSize: 12 }}>
-                                              <div>
-                                                <div style={{ fontSize: 10, color: '#aaa', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Date</div>
-                                                <div style={{ fontWeight: 600, color: '#333' }}>{formatDate(item.at)}</div>
-                                              </div>
-                                              <div>
-                                                <div style={{ fontSize: 10, color: '#aaa', fontWeight: 600, textTransform: 'uppercase', marginBottom: 2 }}>Type</div>
-                                                <div style={{ fontWeight: 600, color: cfg.color }}>{cfg.label}</div>
-                                              </div>
-                                            </div>
-                                          </div>
-                                        )}
-                                      </div>
-                                      {/* Day + weekday */}
-                                      <div style={{ textAlign: 'right', marginLeft: 14, flexShrink: 0, paddingTop: 2 }}>
-                                        <div style={{ fontSize: 22, fontWeight: 800, color: cfg.color, lineHeight: 1 }}>
-                                          {d.getDate()}
-                                        </div>
-                                        <div style={{ fontSize: 10, color: '#aaa', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-                                          {d.toLocaleString('en-IN', { weekday: 'short' })}
-                                        </div>
-                                      </div>
-                                    </div>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  );
-                })() : (
-                  <Empty description="No history yet" style={{ marginTop: 60 }} />
-                )}
-              </div>
+              <HistoryTimeline
+                history={history as any[]}
+                selectedDetail={selectedDetail}
+                detailType={detailType}
+                setSelectedDetail={setSelectedDetail}
+                setDetailType={setDetailType}
+                formatDate={formatDate}
+              />
             )}
 
               {/* Feedback Tab */}
@@ -1757,6 +1985,95 @@ export default function CustomerDetailPage() {
 
               {expandedModuleView === 'packages' && (
                 <div>
+                  {/* Add Session Modal */}
+                  <Modal
+                    title={`Add Session — ${sessionModalPkg?.name ?? ''}`}
+                    open={!!sessionModalPkg}
+                    onCancel={() => {
+                      setSessionModalPkg(null);
+                      setSessionDate(new Date().toISOString().split('T')[0]);
+                      setSessionStaff('');
+                      setSessionRemarks('');
+                      setSessionStatus('completed');
+                    }}
+                    confirmLoading={sessionSaving}
+                    okText="Save Session"
+                    onOk={async () => {
+                      if (!sessionDate) { message.error('Select a session date'); return; }
+                      setSessionSaving(true);
+                      try {
+                        await addSession.mutateAsync({
+                          sessionDate: new Date(sessionDate).toISOString(),
+                          staffName: sessionStaff || undefined,
+                          status: sessionStatus,
+                          remarks: sessionRemarks || undefined,
+                        });
+                        const successMsg = sessionStatus === 'completed'
+                          ? 'Session completed — token deducted'
+                          : sessionStatus === 'no_show'
+                          ? 'No-show recorded'
+                          : sessionStatus === 'cancelled'
+                          ? 'Session cancelled'
+                          : 'Session rescheduled';
+                        message.success(successMsg);
+                        setSessionModalPkg(null);
+                        setSessionDate(new Date().toISOString().split('T')[0]);
+                        setSessionStaff('');
+                        setSessionRemarks('');
+                        setSessionStatus('completed');
+                      } catch (e) {
+                        message.error(e instanceof ApiClientError ? e.message : 'Could not save session');
+                      } finally {
+                        setSessionSaving(false);
+                      }
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Session Status <span style={{ color: 'red' }}>*</span></label>
+                        <select
+                          value={sessionStatus}
+                          onChange={(e) => setSessionStatus(e.target.value as typeof sessionStatus)}
+                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13, background: '#fff' }}
+                        >
+                          <option value="completed">Completed</option>
+                          <option value="no_show">No Show</option>
+                          <option value="cancelled">Cancelled</option>
+                          <option value="rescheduled">Rescheduled</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Session Date <span style={{ color: 'red' }}>*</span></label>
+                        <input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)}
+                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Staff / Therapist</label>
+                        <input type="text" value={sessionStaff} onChange={(e) => setSessionStaff(e.target.value)}
+                          placeholder="Name of staff who performed"
+                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13 }} />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Remarks</label>
+                        <textarea value={sessionRemarks} onChange={(e) => setSessionRemarks(e.target.value)} rows={2}
+                          placeholder="Optional notes about this session"
+                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }} />
+                      </div>
+                      {sessionModalPkg && (
+                        <div style={{
+                          background: sessionStatus === 'completed' ? '#f6ffed' : '#fff7e6',
+                          border: `1px solid ${sessionStatus === 'completed' ? '#b7eb8f' : '#ffd591'}`,
+                          borderRadius: 4, padding: '8px 12px', fontSize: 12,
+                        }}>
+                          {sessionStatus === 'completed'
+                            ? <>Remaining sessions: <strong>{(sessionModalPkg.totalSessions ?? 0) - (sessionModalPkg.usedSessions ?? 0)}</strong> of {sessionModalPkg.totalSessions ?? 0} — 1 will be deducted</>
+                            : <>Remaining sessions: <strong>{(sessionModalPkg.totalSessions ?? 0) - (sessionModalPkg.usedSessions ?? 0)}</strong> of {sessionModalPkg.totalSessions ?? 0} — no deduction for {sessionStatus.replace('_', ' ')}</>
+                          }
+                        </div>
+                      )}
+                    </div>
+                  </Modal>
+
                   {packagesLoading ? (
                     <div style={{ textAlign: 'center', padding: '40px 20px' }}>
                       <Spin size="large" />
@@ -1767,48 +2084,107 @@ export default function CustomerDetailPage() {
                       <p style={{ marginBottom: 16, color: colors.text.secondary }}>
                         Total Packages: <strong>{packages.length}</strong>
                       </p>
-                      {packages.map((pkg: any) => (
-                        <Card key={pkg.id} style={{ marginBottom: 12 }} styles={{ body: { padding: '12px 16px' } }}>
-                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                            <div>
-                              <p style={{ fontWeight: 600, margin: 0, fontSize: 14 }}>{pkg.name || 'Package'}</p>
-                              {pkg.notes && (
-                                <p style={{ fontSize: 12, color: colors.text.secondary, margin: '2px 0 0 0' }}>{pkg.notes}</p>
+                      {packages.map((pkg: any) => {
+                        const inv = (pkg.invoices ?? [])[0];
+                        const total    = inv ? inv.total    : (pkg.price ?? 0);
+                        const paid     = inv ? inv.amountPaid : 0;
+                        const balance  = Math.max(0, total - paid);
+                        const remaining = (pkg.totalSessions ?? 0) - (pkg.usedSessions ?? 0);
+                        const statusColors: Record<string, { bg: string; color: string; border: string }> = {
+                          active:    { bg: '#f6ffed', color: '#52c41a', border: '#b7eb8f' },
+                          completed: { bg: '#e6f7ff', color: '#1677ff', border: '#91caff' },
+                          expired:   { bg: '#fff1f0', color: '#f5222d', border: '#ffa39e' },
+                          cancelled: { bg: '#fff2e8', color: '#fa8c16', border: '#ffbb96' },
+                        };
+                        const sc = statusColors[pkg.status] ?? statusColors.active;
+                        return (
+                          <Card key={pkg.id} style={{ marginBottom: 12 }} styles={{ body: { padding: '14px 16px' } }}>
+                            {/* Header row */}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 }}>
+                              <div>
+                                <p style={{ fontWeight: 700, margin: 0, fontSize: 14 }}>{pkg.name || 'Package'}</p>
+                                {pkg.notes && <p style={{ fontSize: 12, color: colors.text.secondary, margin: '2px 0 0' }}>{pkg.notes}</p>}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                <span style={{ fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600, background: sc.bg, color: sc.color, border: `1px solid ${sc.border}` }}>
+                                  {pkg.status ? pkg.status.charAt(0).toUpperCase() + pkg.status.slice(1) : '—'}
+                                </span>
+                                {remaining > 0 && pkg.status === 'active' && (
+                                  <Button size="small" type="primary"
+                                    style={{ fontSize: 11, height: 24, padding: '0 10px', background: colors.gold.primary, borderColor: colors.gold.primary }}
+                                    onClick={() => { setSessionModalPkg(pkg); setSessionDate(new Date().toISOString().split('T')[0]); setSessionStaff(''); setSessionRemarks(''); }}>
+                                    + Use Session
+                                  </Button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Sessions progress bar */}
+                            <div style={{ marginBottom: 12 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 4 }}>
+                                <span style={{ color: colors.text.secondary }}>Sessions Used</span>
+                                <span style={{ fontWeight: 700 }}>{pkg.usedSessions ?? 0} / {pkg.totalSessions ?? 0}</span>
+                              </div>
+                              <div style={{ height: 6, background: '#f0f0f0', borderRadius: 3, overflow: 'hidden' }}>
+                                <div style={{
+                                  height: '100%', borderRadius: 3,
+                                  width: `${pkg.totalSessions ? Math.min(100, ((pkg.usedSessions ?? 0) / pkg.totalSessions) * 100) : 0}%`,
+                                  background: remaining === 0 ? '#52c41a' : colors.gold.primary,
+                                  transition: 'width 0.3s',
+                                }} />
+                              </div>
+                              <div style={{ fontSize: 11, color: remaining > 0 ? colors.gold.primary : '#52c41a', marginTop: 3, fontWeight: 600 }}>
+                                {remaining > 0 ? `${remaining} session${remaining !== 1 ? 's' : ''} remaining` : 'All sessions completed'}
+                              </div>
+                            </div>
+
+                            {/* Amount details */}
+                            <div style={{ display: 'flex', gap: 16, fontSize: 13, padding: '10px 0', borderTop: '1px dashed #e8e8e8', borderBottom: '1px dashed #e8e8e8', marginBottom: 10 }}>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 11, color: colors.text.secondary }}>Package Total</div>
+                                <div style={{ fontWeight: 700, fontSize: 14 }}>₹{Math.round(total / 100).toLocaleString('en-IN')}</div>
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 11, color: colors.text.secondary }}>Amount Paid</div>
+                                <div style={{ fontWeight: 700, fontSize: 14, color: '#1a6b3c' }}>₹{Math.round(paid / 100).toLocaleString('en-IN')}</div>
+                              </div>
+                              <div style={{ flex: 1 }}>
+                                <div style={{ fontSize: 11, color: colors.text.secondary }}>Balance Due</div>
+                                <div style={{ fontWeight: 700, fontSize: 14, color: balance > 0 ? '#e53935' : '#1a6b3c' }}>
+                                  ₹{Math.round(balance / 100).toLocaleString('en-IN')}
+                                </div>
+                              </div>
+                              {pkg.expiresAt && (
+                                <div style={{ flex: 1 }}>
+                                  <div style={{ fontSize: 11, color: colors.text.secondary }}>Expires</div>
+                                  <div style={{ fontWeight: 600 }}>{new Date(pkg.expiresAt).toLocaleDateString('en-GB')}</div>
+                                </div>
                               )}
                             </div>
-                            <span style={{
-                              fontSize: 11, padding: '2px 8px', borderRadius: 10, fontWeight: 600,
-                              background: pkg.status === 'active' ? '#f6ffed' : pkg.status === 'completed' ? '#e6f7ff' : '#fff2e8',
-                              color: pkg.status === 'active' ? '#52c41a' : pkg.status === 'completed' ? '#1677ff' : '#fa8c16',
-                              border: `1px solid ${pkg.status === 'active' ? '#b7eb8f' : pkg.status === 'completed' ? '#91caff' : '#ffbb96'}`,
-                            }}>
-                              {pkg.status ? pkg.status.charAt(0).toUpperCase() + pkg.status.slice(1) : '—'}
-                            </span>
-                          </div>
-                          <div style={{ display: 'flex', gap: 24, marginTop: 10, fontSize: 13 }}>
-                            <div>
-                              <span style={{ color: colors.text.secondary, fontSize: 11 }}>Sessions</span>
-                              <div style={{ fontWeight: 600 }}>{pkg.usedSessions ?? 0} / {pkg.totalSessions ?? 0} used</div>
-                            </div>
-                            <div>
-                              <span style={{ color: colors.text.secondary, fontSize: 11 }}>Price</span>
-                              <div style={{ fontWeight: 600 }}>₹{Math.round((pkg.price ?? 0) / 100).toLocaleString('en-IN')}</div>
-                            </div>
-                            {pkg.expiresAt && (
+
+                            {/* Session history */}
+                            {pkg.sessionEntries && pkg.sessionEntries.length > 0 && (
                               <div>
-                                <span style={{ color: colors.text.secondary, fontSize: 11 }}>Expires</span>
-                                <div style={{ fontWeight: 600 }}>{new Date(pkg.expiresAt).toLocaleDateString('en-GB')}</div>
+                                <p style={{ fontSize: 12, fontWeight: 600, color: colors.text.secondary, margin: '0 0 6px' }}>Session History</p>
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                                  {pkg.sessionEntries.map((se: any) => (
+                                    <div key={se.id} style={{ display: 'flex', gap: 12, fontSize: 12, padding: '4px 8px', background: '#fafafa', borderRadius: 4 }}>
+                                      <span style={{ color: colors.text.secondary, minWidth: 20 }}>#{se.sessionNumber}</span>
+                                      <span style={{ fontWeight: 500 }}>{new Date(se.sessionDate).toLocaleDateString('en-GB')}</span>
+                                      {se.staffName && <span style={{ color: colors.text.secondary }}>{se.staffName}</span>}
+                                      <span style={{
+                                        marginLeft: 'auto', fontSize: 11, padding: '1px 6px', borderRadius: 8, fontWeight: 600,
+                                        background: se.status === 'completed' ? '#f6ffed' : '#fff7e6',
+                                        color: se.status === 'completed' ? '#52c41a' : '#fa8c16',
+                                      }}>{se.status}</span>
+                                    </div>
+                                  ))}
+                                </div>
                               </div>
                             )}
-                            {pkg.purchasedAt && (
-                              <div>
-                                <span style={{ color: colors.text.secondary, fontSize: 11 }}>Purchased</span>
-                                <div style={{ fontWeight: 600 }}>{new Date(pkg.purchasedAt).toLocaleDateString('en-GB')}</div>
-                              </div>
-                            )}
-                          </div>
-                        </Card>
-                      ))}
+                          </Card>
+                        );
+                      })}
                     </div>
                   ) : (
                     <Empty description="No packages" />
@@ -3138,27 +3514,15 @@ export default function CustomerDetailPage() {
                       <Spin size="large" />
                       <p style={{ marginTop: 16, color: colors.text.secondary }}>Loading history...</p>
                     </div>
-                  ) : history && history.length > 0 ? (
-                    <div>
-                      <p style={{ marginBottom: 16, color: colors.text.secondary }}>
-                        Total History: <strong>{history.length}</strong>
-                      </p>
-                      {history.map((item: any) => (
-                        <Card key={item.id} style={{ marginBottom: 12 }}>
-                          <p style={{ fontWeight: 600, margin: 0 }}>{item.title || 'History Item'}</p>
-                          <p style={{ fontSize: 12, color: colors.text.secondary, margin: '4px 0 0 0' }}>
-                            {formatDate(item.createdAt)}
-                          </p>
-                          {item.description && (
-                            <p style={{ fontSize: 12, color: colors.text.secondary, margin: '6px 0 0 0' }}>
-                              {item.description}
-                            </p>
-                          )}
-                        </Card>
-                      ))}
-                    </div>
                   ) : (
-                    <Empty description="No history" />
+                    <HistoryTimeline
+                      history={history as any[]}
+                      selectedDetail={selectedDetail}
+                      detailType={detailType}
+                      setSelectedDetail={setSelectedDetail}
+                      setDetailType={setDetailType}
+                      formatDate={formatDate}
+                    />
                   )}
                 </div>
               )}
@@ -3473,9 +3837,10 @@ export default function CustomerDetailPage() {
                                   {effectiveFlags.hasQuantity && (
                                   <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
                                     <input
-                                      type="number" min="1"
+                                      type="text"
+                                      inputMode="numeric"
                                       value={row.quantity}
-                                      onChange={(e) => handleRowChange(row.id, 'quantity', parseInt(e.target.value) || 1)}
+                                      onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); handleRowChange(row.id, 'quantity', v === '' ? 1 : parseInt(v)); }}
                                       style={{ width: 60, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }}
                                     />
                                   </td>
@@ -3576,45 +3941,84 @@ export default function CustomerDetailPage() {
 
                       {/* ── Complimentary Section ── */}
                       {(() => {
-                        const compServices = (branchServices ?? []).filter(s => s.hasComplementary && s.isActive);
+                        const COMP_PCT = 20;
+                        const allCompServices = (branchServices ?? []).filter(s => s.hasComplementary && s.isActive);
                         const paidTotal = bookingRows.filter(r => r.service).reduce((s, r) => s + r.quantity * r.amount, 0);
                         const usedComp = complimentaryRows.reduce((s, r) => s + r.quantity * r.amount, 0);
-                        const maxAllowed = branchPercentage !== null && limitIsActive ? (paidTotal * branchPercentage) / 100 : null;
-                        const pct = maxAllowed && maxAllowed > 0 ? Math.min(100, (usedComp / maxAllowed) * 100) : 0;
+                        const maxAllowed = paidTotal * (COMP_PCT / 100);
+                        const remaining = Math.max(0, maxAllowed - usedComp);
+                        const pct = maxAllowed > 0 ? Math.min(100, (usedComp / maxAllowed) * 100) : 0;
+                        const limitReached = paidTotal > 0 && usedComp >= maxAllowed;
+                        // Only show services whose per-unit price fits within the remaining limit
+                        const eligibleServices = allCompServices.filter(s => (s.minPrice / 100) <= remaining && s.minPrice > 0);
                         const fmt = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+
+                        // Determine status
+                        const noBillYet = paidTotal === 0;
+                        const noCompConfigured = allCompServices.length === 0;
+                        const noneEligible = !noBillYet && !noCompConfigured && eligibleServices.length === 0 && complimentaryRows.length === 0;
+                        const canAdd = !noBillYet && !limitReached && eligibleServices.length > 0;
+
                         return (
                           <div style={{ borderBottom: `1px dashed ${colors.border}`, background: '#f9fbe7' }}>
                             {/* Header */}
                             <div style={{ padding: '8px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: `1px solid #dcedc8` }}>
                               <span style={{ fontSize: 13, fontWeight: 700, color: '#33691e' }}>🎁 Complimentary Items</span>
                               <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-                                {maxAllowed !== null && (
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 260 }}>
+                                {/* Limit progress bar — only when bill has items */}
+                                {paidTotal > 0 && (
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 280 }}>
                                     <div style={{ flex: 1, background: '#c5e1a5', borderRadius: 4, height: 7, overflow: 'hidden' }}>
                                       <div style={{ height: '100%', width: `${pct}%`, background: pct >= 100 ? '#e53935' : '#558b2f', transition: 'width 0.3s' }} />
                                     </div>
                                     <span style={{ fontSize: 11, color: pct >= 100 ? '#e53935' : '#33691e', whiteSpace: 'nowrap' }}>
-                                      ₹{fmt(usedComp)} / ₹{fmt(maxAllowed)} ({branchPercentage}%)
+                                      ₹{fmt(usedComp)} / ₹{fmt(maxAllowed)} ({COMP_PCT}% of bill)
                                     </span>
                                   </div>
                                 )}
-                                <button
-                                  onClick={handleAddComplementaryRow}
-                                  disabled={compServices.length === 0}
-                                  style={{ fontSize: 12, color: compServices.length === 0 ? '#aaa' : '#33691e', background: 'none', border: '1px dashed #aed581', borderRadius: 4, cursor: compServices.length === 0 ? 'not-allowed' : 'pointer', padding: '3px 10px', fontWeight: 600 }}
-                                >
-                                  + Add Complimentary Item
-                                </button>
+                                {canAdd && (
+                                  <button
+                                    onClick={handleAddComplementaryRow}
+                                    style={{ fontSize: 12, color: '#33691e', background: 'none', border: '1px dashed #aed581', borderRadius: 4, cursor: 'pointer', padding: '3px 10px', fontWeight: 600 }}
+                                  >
+                                    + Add Complimentary Item
+                                  </button>
+                                )}
+                                {limitReached && (
+                                  <span style={{ fontSize: 11, background: '#e53935', color: '#fff', padding: '3px 10px', borderRadius: 4, fontWeight: 600 }}>
+                                    Limit Reached
+                                  </span>
+                                )}
                               </div>
                             </div>
 
-                            {complimentaryRows.length === 0 ? (
-                              <div style={{ padding: '10px 16px', fontSize: 12, color: '#888' }}>
-                                {compServices.length === 0
-                                  ? 'No complimentary-enabled services available. Admin must enable Complimentary on services.'
-                                  : 'No complimentary items added. Click "+ Add Complimentary Item" above.'}
+                            {/* Status messages */}
+                            {noBillYet && (
+                              <div style={{ padding: '10px 16px', fontSize: 12, color: '#888', fontStyle: 'italic' }}>
+                                Add billing services above to calculate complimentary eligibility.
                               </div>
-                            ) : (
+                            )}
+                            {!noBillYet && noCompConfigured && (
+                              <div style={{ padding: '10px 16px', fontSize: 12, color: '#888' }}>
+                                No complimentary-enabled services configured. Ask admin to enable Complimentary on services.
+                              </div>
+                            )}
+                            {noneEligible && (
+                              <div style={{ padding: '10px 14px', margin: '8px 16px', fontSize: 12, borderRadius: 6, background: '#fff3e0', border: '1px solid #ffcc80', color: '#e65100' }}>
+                                ⚠️ No eligible complimentary items available for this billing amount.<br />
+                                <span style={{ fontSize: 11, color: '#888', marginTop: 2, display: 'block' }}>
+                                  Eligible limit: ₹{fmt(maxAllowed)} ({COMP_PCT}% of ₹{fmt(paidTotal)}). No configured service fits within this amount.
+                                </span>
+                              </div>
+                            )}
+                            {!noBillYet && !noCompConfigured && complimentaryRows.length === 0 && !noneEligible && !limitReached && (
+                              <div style={{ padding: '10px 16px', fontSize: 12, color: '#888' }}>
+                                Click &quot;+ Add Complimentary Item&quot; to apply (up to ₹{fmt(maxAllowed)}).
+                              </div>
+                            )}
+
+                            {/* Rows table */}
+                            {complimentaryRows.length > 0 && (
                               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                                 <thead>
                                   <tr style={{ background: '#f1f8e9' }}>
@@ -3627,40 +4031,46 @@ export default function CustomerDetailPage() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {complimentaryRows.map((cr, idx) => (
-                                    <tr key={cr.id} style={{ borderTop: `1px solid #dcedc8`, background: '#fff' }}>
-                                      <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid #dcedc8`, color: '#558b2f', fontWeight: 700 }}>{idx + 1}</td>
-                                      <td style={{ padding: '6px 8px', borderRight: `1px solid #dcedc8` }}>
-                                        <select
-                                          value={cr.service}
-                                          onChange={(e) => handleComplementaryRowChange(cr.id, 'service', e.target.value)}
-                                          style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, fontSize: 12, background: '#fff' }}
-                                        >
-                                          <option value="">— Select service —</option>
-                                          {compServices.map(s => (
-                                            <option key={s.id} value={s.name}>{s.name}</option>
-                                          ))}
-                                        </select>
-                                      </td>
-                                      <td style={{ padding: '6px 8px', borderRight: `1px solid #dcedc8` }}>
-                                        <input
-                                          type="number" min="1"
-                                          value={cr.quantity}
-                                          onChange={(e) => handleComplementaryRowChange(cr.id, 'quantity', parseInt(e.target.value) || 1)}
-                                          style={{ width: 55, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }}
-                                        />
-                                      </td>
-                                      <td style={{ padding: '6px 10px', textAlign: 'right', borderRight: `1px solid #dcedc8`, color: '#555' }}>
-                                        {cr.amount > 0 ? `₹${(cr.quantity * cr.amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : '—'}
-                                      </td>
-                                      <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid #dcedc8` }}>
-                                        <span style={{ fontSize: 11, background: '#2e7d32', color: '#fff', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>FREE</span>
-                                      </td>
-                                      <td style={{ padding: '6px 10px', textAlign: 'center' }}>
-                                        <div onClick={() => handleRemoveComplementaryRow(cr.id)} style={{ width: 20, height: 20, borderRadius: '50%', background: '#f44336', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>✕</div>
-                                      </td>
-                                    </tr>
-                                  ))}
+                                  {complimentaryRows.map((cr, idx) => {
+                                    // For an already-selected row, allow switching within eligibility
+                                    const rowRemaining = maxAllowed - usedComp + (cr.quantity * cr.amount);
+                                    const rowOptions = allCompServices.filter(s => s.minPrice > 0 && (s.name === cr.service || (s.minPrice / 100) <= rowRemaining));
+                                    return (
+                                      <tr key={cr.id} style={{ borderTop: `1px solid #dcedc8`, background: '#fff' }}>
+                                        <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid #dcedc8`, color: '#558b2f', fontWeight: 700 }}>{idx + 1}</td>
+                                        <td style={{ padding: '6px 8px', borderRight: `1px solid #dcedc8` }}>
+                                          <select
+                                            value={cr.service}
+                                            onChange={(e) => handleComplementaryRowChange(cr.id, 'service', e.target.value)}
+                                            style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, fontSize: 12, background: '#fff' }}
+                                          >
+                                            <option value="">— Select service —</option>
+                                            {rowOptions.map(s => (
+                                              <option key={s.id} value={s.name}>{s.name} (₹{fmt(s.minPrice / 100)})</option>
+                                            ))}
+                                          </select>
+                                        </td>
+                                        <td style={{ padding: '6px 8px', borderRight: `1px solid #dcedc8` }}>
+                                          <input
+                                            type="text"
+                                            inputMode="numeric"
+                                            value={cr.quantity}
+                                            onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); handleComplementaryRowChange(cr.id, 'quantity', v === '' ? 1 : parseInt(v)); }}
+                                            style={{ width: 55, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }}
+                                          />
+                                        </td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'right', borderRight: `1px solid #dcedc8`, color: '#555' }}>
+                                          {cr.amount > 0 ? `₹${fmt(cr.quantity * cr.amount)}` : '—'}
+                                        </td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid #dcedc8` }}>
+                                          <span style={{ fontSize: 11, background: '#2e7d32', color: '#fff', padding: '2px 8px', borderRadius: 10, fontWeight: 700 }}>FREE</span>
+                                        </td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                          <div onClick={() => handleRemoveComplementaryRow(cr.id)} style={{ width: 20, height: 20, borderRadius: '50%', background: '#f44336', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 12, fontWeight: 700 }}>✕</div>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             )}
@@ -3681,10 +4091,12 @@ export default function CustomerDetailPage() {
                           Refresh
                         </button>
 
-                        {/* Totals block with auto GST */}
+                        {/* Totals block with auto GST — IGST vs CGST+SGST based on branch/customer states */}
                         {(() => {
+                          const customerStateId = customer?.stateId ?? null;
+                          const isIntraState = !!(branchStateId && customerStateId && branchStateId === customerStateId);
                           const filledRows = bookingRows.filter(r => r.service);
-                          let aggTaxable = 0, aggTax = 0;
+                          let aggTaxable = 0, aggCgst = 0, aggSgst = 0, aggIgst = 0, aggTax = 0;
                           for (const row of filledRows) {
                             const linePaise = Math.round(row.quantity * row.amount * 100);
                             const pct = row.taxPercent ?? 0;
@@ -3698,12 +4110,14 @@ export default function CustomerDetailPage() {
                               : Math.round((linePaise * pct) / 100);
                             aggTaxable += taxableAmt;
                             aggTax += taxAmt;
-                            // grossTotal = aggTaxable + aggTax covers both inclusive (price = base+tax)
-                            // and exclusive (price = base, tax added on top) correctly.
+                            if (isIntraState) {
+                              aggCgst += Math.ceil(taxAmt / 2);
+                              aggSgst += taxAmt - Math.ceil(taxAmt / 2);
+                            } else {
+                              aggIgst += taxAmt;
+                            }
                           }
                           const hasGst = aggTax > 0;
-                          // True gross: for inclusive items the price already contains tax,
-                          // for exclusive items tax is on top — aggTaxable+aggTax handles both.
                           const grossTotal = (aggTaxable + aggTax) / 100;
                           const fmt = (p: number) => (p / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 });
                           return (
@@ -3714,10 +4128,23 @@ export default function CustomerDetailPage() {
                                     <span style={{ color: colors.text.secondary }}>Taxable Amount :</span>
                                     <span style={{ minWidth: 60, textAlign: 'right' }}>{fmt(aggTaxable)}</span>
                                   </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                                    <span style={{ color: '#7b1fa2', fontWeight: 500 }}>GST :</span>
-                                    <span style={{ minWidth: 60, textAlign: 'right', color: '#7b1fa2' }}>+{fmt(aggTax)}</span>
-                                  </div>
+                                  {isIntraState ? (
+                                    <>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                        <span style={{ color: '#1565c0', fontWeight: 500 }}>CGST :</span>
+                                        <span style={{ minWidth: 60, textAlign: 'right', color: '#1565c0' }}>+{fmt(aggCgst)}</span>
+                                      </div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                        <span style={{ color: '#1565c0', fontWeight: 500 }}>SGST :</span>
+                                        <span style={{ minWidth: 60, textAlign: 'right', color: '#1565c0' }}>+{fmt(aggSgst)}</span>
+                                      </div>
+                                    </>
+                                  ) : (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                      <span style={{ color: '#7b1fa2', fontWeight: 500 }}>IGST :</span>
+                                      <span style={{ minWidth: 60, textAlign: 'right', color: '#7b1fa2' }}>+{fmt(aggIgst)}</span>
+                                    </div>
+                                  )}
                                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `1px dashed ${colors.border}`, paddingTop: 2 }}>
                                     <span style={{ color: colors.text.secondary, fontWeight: 600 }}>Total Amount :</span>
                                     <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 600 }}>{grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
@@ -3781,7 +4208,7 @@ export default function CustomerDetailPage() {
                               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `2px solid #7b1fa2`, paddingTop: 4 }}>
                                 <span style={{ color: '#7b1fa2', fontWeight: 700 }}>Final Bill Amount :</span>
                                 <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 700, color: '#7b1fa2' }}>
-                                  {(grossTotal + (bookingData.roundOff || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                  {(grossTotal - (appliedCoupon?.discountPaise ?? 0) / 100 + (bookingData.roundOff || 0)).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                                 </span>
                               </div>
                             </div>
@@ -3915,7 +4342,10 @@ export default function CustomerDetailPage() {
                   {/* ── Step 2: Package Details ── */}
                   {packageOfferStep === 2 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
-                    const filledRows = bookingRows.filter(r => r.service);
+                    const filledRows = [
+                      ...bookingRows.filter(r => r.service),
+                      ...complimentaryRows.filter(r => r.service).map(r => ({ ...r, complementary: true, amount: 0, taxPercent: 0 })),
+                    ];
                     let aggTaxable2 = 0, aggTax2 = 0;
                     for (const row of filledRows) {
                       const lp = Math.round(row.quantity * row.amount * 100);
@@ -3928,6 +4358,10 @@ export default function CustomerDetailPage() {
                     }
                     const hasGst2 = aggTax2 > 0;
                     const grossTotal2 = (aggTaxable2 + aggTax2) / 100;
+                    const couponDiscount2 = (appliedCoupon?.discountPaise ?? 0) / 100;
+                    const manualDiscPct2 = Number(bookingData.discount) || 0;
+                    const manualDiscount2 = manualDiscPct2 > 0 ? (grossTotal2 * manualDiscPct2) / 100 : 0;
+                    const netTotal2 = grossTotal2 - couponDiscount2 - manualDiscount2 + (bookingData.roundOff || 0);
                     return (
                       <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 6 }}>
                         <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 14, color: colors.text.primary }}>
@@ -4025,7 +4459,7 @@ export default function CustomerDetailPage() {
                         {/* Total summary */}
                         <div style={{ padding: '12px 18px', background: '#fafafa', display: 'flex', justifyContent: 'flex-end', borderBottom: `1px solid ${colors.border}` }}>
                           <div style={{ minWidth: 260, fontSize: 13 }}>
-                            {hasGst2 ? (
+                            {hasGst2 && (
                               <>
                                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
                                   <span style={{ color: '#666' }}>Taxable Amount</span>
@@ -4035,17 +4469,28 @@ export default function CustomerDetailPage() {
                                   <span style={{ color: '#7b1fa2' }}>GST</span>
                                   <span style={{ color: '#7b1fa2' }}>+ ₹{(aggTax2 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                                 </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: `2px solid #333`, marginTop: 4 }}>
-                                  <span style={{ fontWeight: 700 }}>Total Amount</span>
-                                  <span style={{ fontWeight: 700 }}>₹{grossTotal2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                </div>
                               </>
-                            ) : (
-                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0' }}>
-                                <span style={{ fontWeight: 700 }}>Total Amount</span>
-                                <span style={{ fontWeight: 700 }}>₹{grossTotal2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed #e0e0e0' }}>
+                              <span style={{ color: '#666' }}>Total Amount</span>
+                              <span style={{ fontWeight: 600 }}>₹{grossTotal2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                            </div>
+                            {manualDiscount2 > 0 && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed #e0e0e0' }}>
+                                <span style={{ color: '#e53935' }}>Discount ({manualDiscPct2}%)</span>
+                                <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{manualDiscount2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                               </div>
                             )}
+                            {couponDiscount2 > 0 && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed #e0e0e0' }}>
+                                <span style={{ color: '#e53935' }}>Coupon ({appliedCoupon?.couponCode})</span>
+                                <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{couponDiscount2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: `2px solid #333`, marginTop: 4 }}>
+                              <span style={{ fontWeight: 700 }}>Net Amount</span>
+                              <span style={{ fontWeight: 700, color: colors.gold.primary }}>₹{netTotal2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                            </div>
                           </div>
                         </div>
 
@@ -4063,7 +4508,10 @@ export default function CustomerDetailPage() {
                   {/* ── Step 3: Payment Receipt ── */}
                   {packageOfferStep === 3 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
-                    const filledRows = bookingRows.filter(r => r.service);
+                    const filledRows = [
+                      ...bookingRows.filter(r => r.service),
+                      ...complimentaryRows.filter(r => r.service).map(r => ({ ...r, complementary: true, amount: 0, taxPercent: 0 })),
+                    ];
                     let aggTaxable3 = 0, aggTax3 = 0;
                     for (const row of filledRows) {
                       const lp = Math.round(row.quantity * row.amount * 100);
@@ -4076,7 +4524,10 @@ export default function CustomerDetailPage() {
                     }
                     const hasGst3 = aggTax3 > 0;
                     const grossTotal3 = (aggTaxable3 + aggTax3) / 100;
-                    const netAmt = grossTotal3 + (bookingData.roundOff || 0);
+                    const couponDiscount3 = (appliedCoupon?.discountPaise ?? 0) / 100;
+                    const manualDiscPct3 = Number(bookingData.discount) || 0;
+                    const manualDiscount3 = manualDiscPct3 > 0 ? (grossTotal3 * manualDiscPct3) / 100 : 0;
+                    const netAmt = grossTotal3 - couponDiscount3 - manualDiscount3 + (bookingData.roundOff || 0);
                     return (
                       <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 6 }}>
                         <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 14, color: colors.text.primary }}>
@@ -4160,6 +4611,18 @@ export default function CustomerDetailPage() {
                               <span style={{ color: '#666' }}>Total Amount</span>
                               <span style={{ fontWeight: 600 }}>₹{grossTotal3.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                             </div>
+                            {manualDiscount3 > 0 && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
+                                <span style={{ color: '#e53935' }}>Discount ({manualDiscPct3}%)</span>
+                                <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{manualDiscount3.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
+                            {couponDiscount3 > 0 && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
+                                <span style={{ color: '#e53935' }}>Coupon ({appliedCoupon?.couponCode})</span>
+                                <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{couponDiscount3.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
                             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
                               <span style={{ color: '#666' }}>Round Off</span>
                               <span>{(bookingData.roundOff || 0) >= 0 ? '+' : ''}{(bookingData.roundOff || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
@@ -4190,7 +4653,10 @@ export default function CustomerDetailPage() {
                   {/* ── Step 4: Print ── */}
                   {packageOfferStep === 4 && (() => {
                     const consultantObj = (branchStaff ?? []).find((e: any) => e.id === bookingData.consultant);
-                    const filledRows = bookingRows.filter(r => r.service);
+                    const filledRows = [
+                      ...bookingRows.filter(r => r.service),
+                      ...complimentaryRows.filter(r => r.service).map(r => ({ ...r, complementary: true, amount: 0, taxPercent: 0 })),
+                    ];
                     let aggTaxable4 = 0, aggTax4 = 0;
                     for (const row of filledRows) {
                       const lp = Math.round(row.quantity * row.amount * 100);
@@ -4203,7 +4669,10 @@ export default function CustomerDetailPage() {
                     }
                     const hasGst4 = aggTax4 > 0;
                     const grossTotal4 = (aggTaxable4 + aggTax4) / 100;
-                    const netAmt = grossTotal4 + (bookingData.roundOff || 0);
+                    const couponDiscount4 = (appliedCoupon?.discountPaise ?? 0) / 100;
+                    const manualDiscPct4 = Number(bookingData.discount) || 0;
+                    const manualDiscount4 = manualDiscPct4 > 0 ? (grossTotal4 * manualDiscPct4) / 100 : 0;
+                    const netAmt = grossTotal4 - couponDiscount4 - manualDiscount4 + (bookingData.roundOff || 0);
                     return (
                       <div>
                         {/* Action bar — hidden on print */}
@@ -4321,6 +4790,18 @@ export default function CustomerDetailPage() {
                                 <span style={{ color: '#666' }}>Total Amount</span>
                                 <span style={{ fontWeight: 600 }}>₹{grossTotal4.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                               </div>
+                              {manualDiscount4 > 0 && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
+                                  <span style={{ color: '#e53935' }}>Discount ({manualDiscPct4}%)</span>
+                                  <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{manualDiscount4.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                </div>
+                              )}
+                              {couponDiscount4 > 0 && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
+                                  <span style={{ color: '#e53935' }}>Coupon ({appliedCoupon?.couponCode})</span>
+                                  <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{couponDiscount4.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                </div>
+                              )}
                               <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
                                 <span style={{ color: '#666' }}>Round Off</span>
                                 <span>{(bookingData.roundOff || 0) >= 0 ? '+' : ''}{(bookingData.roundOff || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
@@ -4409,6 +4890,58 @@ export default function CustomerDetailPage() {
         <p style={{ fontSize: 12, color: '#888', margin: 0 }}>
           Checked items will have a stock indent raised automatically. The booking will be created regardless.
         </p>
+      </Modal>
+
+      {/* Edit Customer Profile Modal */}
+      <Modal
+        title="Edit Customer Profile"
+        open={editProfileOpen}
+        onOk={handleSaveProfile}
+        confirmLoading={updateCustomer.isPending}
+        onCancel={() => setEditProfileOpen(false)}
+        width={560}
+        destroyOnClose
+      >
+        <Form form={editProfileForm} layout="vertical" preserve={false}>
+          <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
+            <Input />
+          </Form.Item>
+          <CountryStateFields form={editProfileForm} stateOptions={stateOptions} />
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="phone" label="Phone" style={{ flex: 1 }}>
+              <Input
+                addonBefore={
+                  <Form.Item name="phoneCode" noStyle>
+                    <Select showSearch style={{ width: 80 }} options={PHONE_CODE_OPTIONS} />
+                  </Form.Item>
+                }
+                placeholder="Mobile number"
+              />
+            </Form.Item>
+            <Form.Item name="email" label="Email" style={{ flex: 1 }}>
+              <Input placeholder="name@example.com" />
+            </Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="companyName" label="Company name" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+            <Form.Item name="gstin" label="GSTIN" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <Form.Item name="city" label="City" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+            <Form.Item name="address" label="Address" style={{ flex: 1 }}>
+              <Input />
+            </Form.Item>
+          </div>
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea rows={2} />
+          </Form.Item>
+        </Form>
       </Modal>
 
     </div>

@@ -1,6 +1,7 @@
 import type { Prisma } from '@prisma/client';
 import { getDefaultWarehouseId } from '@/lib/warehouse';
 import { depleteBatchStockFEFO } from '@/lib/batch';
+import { Errors } from '@/lib/api/errors';
 
 type Tx = Prisma.TransactionClient;
 
@@ -139,15 +140,21 @@ export async function applyServiceSessionStock(
   const warehouseId = await getDefaultWarehouseId(tx, branchId);
 
   for (const [productId, { qty, trackBatches }] of toDeduct) {
-    const stock = await tx.inventoryStock.upsert({
+    // Ensure the stock row exists, then atomically decrement.
+    await tx.inventoryStock.upsert({
       where: { warehouseId_productId: { warehouseId, productId } },
       create: { branchId, warehouseId, productId, quantity: 0 },
       update: {},
     });
-    await tx.inventoryStock.update({
-      where: { id: stock.id },
-      data: { quantity: stock.quantity - qty },
+    const updated = await tx.inventoryStock.update({
+      where: { warehouseId_productId: { warehouseId, productId } },
+      data: { quantity: { decrement: qty } },
     });
+    if (updated.quantity < 0) {
+      throw Errors.conflict(
+        `Insufficient stock: required ${qty}, available ${updated.quantity + qty}.`,
+      );
+    }
     if (trackBatches) {
       await depleteBatchStockFEFO(tx, { productId, warehouseId, quantity: qty });
     }
@@ -160,6 +167,97 @@ export async function applyServiceSessionStock(
         delta: -qty,
         reason: 'Service booking consumption',
         ref: bookingRef,
+        createdByAdminId: null,
+      },
+    });
+  }
+}
+
+/**
+ * Deduct (or restore) inventory for a list of service IDs — used when a
+ * package session is completed or un-completed. Each service contributes 1
+ * session's worth of inventory items.
+ */
+export async function applyServiceSessionStockByIds(
+  tx: Tx,
+  opts: {
+    branchId: string;
+    ref: string;
+    serviceIds: string[];
+    reverse?: boolean;
+  },
+): Promise<void> {
+  const { branchId, ref, serviceIds, reverse = false } = opts;
+  if (serviceIds.length === 0 || !branchId) return;
+
+  const services = await tx.service.findMany({
+    where: { id: { in: serviceIds }, isActive: true },
+    select: {
+      id: true,
+      inventoryItems: {
+        select: {
+          productId: true,
+          quantityPerSession: true,
+          product: { select: { id: true, trackBatches: true } },
+        },
+      },
+    },
+  });
+
+  const toDeduct = new Map<string, { qty: number; trackBatches: boolean }>();
+  for (const svc of services) {
+    for (const item of svc.inventoryItems) {
+      const existing = toDeduct.get(item.productId);
+      if (existing) {
+        existing.qty += item.quantityPerSession;
+      } else {
+        toDeduct.set(item.productId, {
+          qty: item.quantityPerSession,
+          trackBatches: item.product.trackBatches,
+        });
+      }
+    }
+  }
+  if (toDeduct.size === 0) return;
+
+  const warehouseId = await getDefaultWarehouseId(tx, branchId);
+
+  for (const [productId, { qty, trackBatches }] of toDeduct) {
+    await tx.inventoryStock.upsert({
+      where: { warehouseId_productId: { warehouseId, productId } },
+      create: { branchId, warehouseId, productId, quantity: 0 },
+      update: {},
+    });
+
+    if (reverse) {
+      await tx.inventoryStock.update({
+        where: { warehouseId_productId: { warehouseId, productId } },
+        data: { quantity: { increment: qty } },
+      });
+    } else {
+      const updated = await tx.inventoryStock.update({
+        where: { warehouseId_productId: { warehouseId, productId } },
+        data: { quantity: { decrement: qty } },
+      });
+      if (updated.quantity < 0) {
+        throw Errors.conflict(
+          `Insufficient stock: required ${qty}, available ${updated.quantity + qty}.`,
+        );
+      }
+      if (trackBatches) {
+        await depleteBatchStockFEFO(tx, { productId, warehouseId, quantity: qty });
+      }
+    }
+
+    await tx.inventoryMovement.create({
+      data: {
+        branchId,
+        warehouseId,
+        productId,
+        type: 'service_consumption',
+        delta: reverse ? qty : -qty,
+        reason: reverse ? 'Package session reversal' : 'Package session consumption',
+        ref,
         createdByAdminId: null,
       },
     });

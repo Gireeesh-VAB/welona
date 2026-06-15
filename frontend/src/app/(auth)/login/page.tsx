@@ -24,8 +24,8 @@ interface PendingChallenge {
 }
 
 const TEST_CREDENTIALS = {
-  identifier: 'teststaff@welona.com',
-  password: 'Test@123',
+  identifier: 'rohit.sharma',
+  password: 'welona@123',
 };
 
 /**
@@ -157,10 +157,10 @@ export default function LoginPage() {
         >
           <Form.Item
             name="identifier"
-            label="Email or Phone"
-            rules={[{ required: true, message: 'Enter your email or phone' }]}
+            label="Username"
+            rules={[{ required: true, message: 'Enter your username' }]}
           >
-            <Input prefix={<UserOutlined />} placeholder="admin@welona.com" autoComplete="username" />
+            <Input prefix={<UserOutlined />} placeholder="rohit.sharma" autoComplete="username" />
           </Form.Item>
 
           <Form.Item

@@ -60,3 +60,27 @@ export type AdminInventoryStockQuery = z.infer<typeof adminInventoryStockQuerySc
 export type AdminInventoryMovementCreateInput = z.infer<typeof adminInventoryMovementCreateSchema>;
 export type AdminInventoryMovementListQuery = z.infer<typeof adminInventoryMovementListQuerySchema>;
 export type AdminInventoryOpeningStockInput = z.infer<typeof adminInventoryOpeningStockSchema>;
+
+/** Service inventory — shows service-to-product mapping + current stock per branch. */
+export const adminServiceInventoryQuerySchema = z.object({
+  branchId: z.string().min(1, 'branchId is required'),
+  search: z.string().trim().optional(),
+  categoryId: z.string().optional(),
+  /** Filter by readiness: ready | low | blocked | no_items */
+  readiness: z.enum(['ready', 'low', 'blocked', 'no_items']).optional(),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(50),
+});
+export type AdminServiceInventoryQuery = z.infer<typeof adminServiceInventoryQuerySchema>;
+
+/** Product inventory — product master + live stock in one view. */
+export const adminProductInventoryQuerySchema = z.object({
+  branchId: z.string().min(1, 'branchId is required'),
+  search: z.string().trim().optional(),
+  categoryId: z.string().optional(),
+  /** Filter by stock level. */
+  stockStatus: z.enum(['all', 'in_stock', 'low_stock', 'out_of_stock']).default('all'),
+  page: z.coerce.number().int().positive().default(1),
+  limit: z.coerce.number().int().positive().max(200).default(50),
+});
+export type AdminProductInventoryQuery = z.infer<typeof adminProductInventoryQuerySchema>;

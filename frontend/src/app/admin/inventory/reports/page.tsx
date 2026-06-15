@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useMemo, useState } from 'react';
 import { Card, Col, Input, Row, Segmented, Select, Space, Statistic, Table, Tag, Typography } from 'antd';
 import { SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
@@ -38,8 +38,6 @@ export default function AdminInventoryReportsPage() {
   const [search, setSearch] = useState('');
   const [classFilter, setClassFilter] = useState<MovementClass | 'all'>('all');
 
-  useEffect(() => {
-  }, []);
   const { data, isLoading } = useInventoryReports({ branchId: branchId || undefined, days });
   const summary = data?.summary;
 

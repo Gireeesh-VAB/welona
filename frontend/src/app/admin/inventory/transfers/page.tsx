@@ -81,9 +81,10 @@ export default function AdminStockTransfersPage() {
   const { message } = App.useApp();
 
   const [status, setStatus] = useState<StockTransferStatus | undefined>();
+  const [filterBranchId, setFilterBranchId] = useState<string | undefined>();
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(10);
-  const { data, isLoading } = useStockTransfers({ status, page, limit });
+  const { data, isLoading } = useStockTransfers({ status, branchId: filterBranchId, page, limit });
 
   const { data: productsData } = useProducts({ isActive: true, limit: 200 });
   const { data: branchesData } = useAdminBranches({ limit: 200 });
@@ -240,16 +241,26 @@ export default function AdminStockTransfersPage() {
       </Space>
 
       <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }} styles={{ body: { padding: 16 } }}>
-        <div style={{ marginBottom: 12 }}>
+        <Space style={{ marginBottom: 12 }} wrap>
           <Select
             allowClear
             placeholder="All statuses"
             value={status}
             onChange={(v) => { setStatus(v); setPage(1); }}
-            style={{ width: 200 }}
+            style={{ width: 180 }}
             options={STOCK_TRANSFER_STATUSES.map((s) => ({ value: s, label: STATUS_LABEL[s] }))}
           />
-        </div>
+          <Select
+            allowClear
+            showSearch
+            placeholder="All branches"
+            value={filterBranchId}
+            onChange={(v) => { setFilterBranchId(v); setPage(1); }}
+            style={{ width: 240 }}
+            options={branchOptions}
+            filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())}
+          />
+        </Space>
         <Table<AdminStockTransfer>
           rowKey="id"
           loading={isLoading}
@@ -280,7 +291,19 @@ export default function AdminStockTransfersPage() {
               </Form.Item>
             </Col>
             <Col span={12}>
-              <Form.Item label="To branch" name="toBranchId" rules={[{ required: true, message: 'Destination branch' }]}>
+              <Form.Item
+                label="To branch"
+                name="toBranchId"
+                rules={[
+                  { required: true, message: 'Destination branch' },
+                  ({ getFieldValue }) => ({
+                    validator(_, value) {
+                      if (!value || getFieldValue('fromBranchId') !== value) return Promise.resolve();
+                      return Promise.reject(new Error('Source and destination branch cannot be the same'));
+                    },
+                  }),
+                ]}
+              >
                 <Select showSearch placeholder="Destination" options={branchOptions} filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
               </Form.Item>
             </Col>

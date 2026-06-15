@@ -1,4 +1,5 @@
 import type { Prisma } from '@prisma/client';
+import { Errors } from '@/lib/api/errors';
 
 type Tx = Prisma.TransactionClient;
 
@@ -36,19 +37,16 @@ export async function receiveBatchStock(
     },
   });
 
-  const stock = await tx.batchStock.upsert({
+  if (input.quantity <= 0) throw Errors.badRequest('Batch receive quantity must be positive.');
+  await tx.batchStock.upsert({
     where: { warehouseId_batchId: { warehouseId: input.warehouseId, batchId: batch.id } },
     create: {
       branchId: input.branchId,
       warehouseId: input.warehouseId,
       batchId: batch.id,
-      quantity: 0,
+      quantity: input.quantity,
     },
-    update: {},
-  });
-  await tx.batchStock.update({
-    where: { id: stock.id },
-    data: { quantity: stock.quantity + input.quantity },
+    update: { quantity: { increment: input.quantity } },
   });
   return batch.id;
 }
@@ -85,9 +83,17 @@ export async function depleteBatchStockFEFO(
   for (const row of rows) {
     if (remaining <= 0) break;
     const take = Math.min(row.quantity, remaining);
-    await tx.batchStock.update({ where: { id: row.id }, data: { quantity: row.quantity - take } });
+    await tx.batchStock.update({
+      where: { id: row.id },
+      data: { quantity: { decrement: take } },
+    });
     consumed.push({ batchId: row.batchId, quantity: take });
     remaining -= take;
+  }
+  if (remaining > 0) {
+    throw Errors.conflict(
+      `Insufficient batch stock: could not fulfil ${remaining} unit(s) from tracked batches.`,
+    );
   }
   return consumed;
 }

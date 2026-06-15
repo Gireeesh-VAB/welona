@@ -766,6 +766,7 @@ model Customer {
   city        String?
   stateId     String?
   state       State?   @relation(fields: [stateId], references: [id])
+  country     String?
   notes       String?
   avatarUrl   String? // profile photo (data URL)
   tags        String       @default("[]") // JSON string: string[]
@@ -983,6 +984,8 @@ model Invoice {
   customer   Customer     @relation(fields: [customerId], references: [id])
   orderId    String?
   order      SalesOrder?  @relation(fields: [orderId], references: [id])
+  packageId  String?
+  package    Package?     @relation(fields: [packageId], references: [id])
   status     String       @default("draft")
   issuedAt   DateTime?
   dueAt      DateTime?
@@ -1147,9 +1150,10 @@ model Package {
   customer      Customer              @relation(fields: [customerId], references: [id], onDelete: Cascade)
   branchId      String?
   branch        Branch?               @relation(fields: [branchId], references: [id])
-  masterId      String?
-  master        PackageSessionMaster? @relation(fields: [masterId], references: [id])
-  treatmentId   String? // optional link to a Treatment (not enforced)
+  masterId             String?
+  master               PackageSessionMaster? @relation(fields: [masterId], references: [id])
+  serviceIdsSnapshot   String    @default("[]") // JSON snapshot of master.serviceIds at purchase time
+  treatmentId          String? // optional link to a Treatment (not enforced)
   name          String
   totalSessions Int
   usedSessions  Int       @default(0)
@@ -1162,6 +1166,7 @@ model Package {
   createdAt     DateTime  @default(now())
   updatedAt     DateTime  @updatedAt
   sessionEntries SessionEntry[]
+  invoices       Invoice[]
 
   @@index([orgId])
   @@index([customerId])

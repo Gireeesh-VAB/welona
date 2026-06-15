@@ -12,6 +12,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Popover,
   Row,
   Select,
   Space,
@@ -121,20 +122,19 @@ export default function AdminMasterServicesPage() {
     limit,
   });
 
-  // Categories for the filter + form dropdown — large limit so we get them all.
-  const { data: categoriesData } = useAdminCategories({ active: 'active', limit: 200 });
-  const categoryOptions = useMemo(
-    () =>
-      (categoriesData?.items ?? []).map((c) => ({
-        value: c.id,
-        label: c.name,
-      })),
-    [categoriesData],
-  );
-
   // --- Modal ---
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<AdminService | null>(null);
+
+  // Categories for the filter + form dropdown — large limit so we get them all.
+  const { data: categoriesData } = useAdminCategories({ active: 'active', limit: 200 });
+  const categoryOptions = useMemo(() => {
+    const opts = (categoriesData?.items ?? []).map((c) => ({ value: c.id, label: c.name }));
+    if (editing?.category && !opts.find((o) => o.value === editing.category!.id)) {
+      opts.unshift({ value: editing.category.id, label: editing.category.name });
+    }
+    return opts;
+  }, [categoriesData, editing]);
   const [form] = Form.useForm<ServiceFormValues>();
 
   const watchedTaxPercent = Form.useWatch('taxPercent', form);
@@ -379,32 +379,44 @@ export default function AdminMasterServicesPage() {
       {
         title: 'Inventory Items',
         key: 'inventoryItems',
-        width: 220,
+        width: 130,
         render: (_: unknown, row: AdminService) => {
           if (!row.inventoryItems?.length) {
             return <Text style={{ fontSize: 12, color: colors.text.placeholder }}>—</Text>;
           }
-          return (
-            <Space direction="vertical" size={2}>
+          const content = (
+            <div style={{ minWidth: 240, maxWidth: 340 }}>
+              <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 8, color: colors.text.primary }}>
+                Inventory Per Session
+              </div>
               {row.inventoryItems.map((item) => (
-                <Space key={item.productId} size={4}>
-                  <Tag
-                    style={{
-                      fontSize: 11,
-                      margin: 0,
-                      background: 'rgba(91,44,139,0.1)',
-                      border: '1px solid rgba(91,44,139,0.25)',
-                      color: colors.text.primary,
-                    }}
-                  >
+                <div key={item.productId} style={{
+                  display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+                  padding: '5px 0', borderBottom: '1px dashed #f0f0f0',
+                }}>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text.primary }}>
                     {item.productName}
-                  </Tag>
-                  <Text style={{ fontSize: 11, color: colors.text.placeholder }}>
+                  </span>
+                  <span style={{ fontSize: 12, color: colors.text.placeholder, marginLeft: 12, whiteSpace: 'nowrap' }}>
                     ×{item.quantityPerSession} {item.productUom}
-                  </Text>
-                </Space>
+                  </span>
+                </div>
               ))}
-            </Space>
+            </div>
+          );
+          return (
+            <Popover content={content} trigger="click" placement="left">
+              <Tag
+                style={{
+                  cursor: 'pointer', fontSize: 12, margin: 0,
+                  background: 'rgba(91,44,139,0.1)',
+                  border: '1px solid rgba(91,44,139,0.3)',
+                  color: colors.text.primary,
+                }}
+              >
+                {row.inventoryItems.length} item{row.inventoryItems.length > 1 ? 's' : ''} ▾
+              </Tag>
+            </Popover>
           );
         },
       },
@@ -750,91 +762,91 @@ export default function AdminMasterServicesPage() {
               <Divider orientation="left" style={{ fontSize: 13, marginTop: 8 }}>
                 Inventory Consumed Per Session
               </Divider>
-              {/* Column headers */}
-              <Row gutter={8} style={{ marginBottom: 4 }}>
-                <Col flex="auto">
-                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>PRODUCT</Text>
-                </Col>
-                <Col style={{ width: 120 }}>
-                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>QTY / SESSION</Text>
-                </Col>
-                <Col style={{ width: 140 }}>
-                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>LOW STOCK LEVEL</Text>
-                </Col>
-                <Col style={{ width: 36 }} />
-              </Row>
               <Form.List name="inventoryItems">
                 {(fields, { add, remove: removeField }) => (
-                  <>
+                  <div style={{ overflowX: 'auto' }}>
+                    {/* Header row */}
+                    <div style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 112px 132px 36px',
+                      gap: 8,
+                      padding: '0 0 6px',
+                      borderBottom: '1px solid #f0f0f0',
+                      marginBottom: 6,
+                    }}>
+                      <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>PRODUCT</Text>
+                      <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>QTY / SESSION</Text>
+                      <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>LOW STOCK LEVEL</Text>
+                      <span />
+                    </div>
+
+                    {/* Data rows */}
                     {fields.map(({ key, name, ...restField }) => (
-                      <Row key={key} gutter={8} align="middle" style={{ marginBottom: 8 }}>
-                        <Col flex="auto">
-                          <Form.Item
-                            {...restField}
-                            name={[name, 'productId']}
-                            rules={[{ required: true, message: 'Select product' }]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <Select
-                              showSearch
-                              placeholder="Select product (type to search)"
-                              options={productSelectOptions}
-                              filterOption={(input, opt) =>
-                                (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                              }
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col style={{ width: 120 }}>
-                          <Form.Item
-                            {...restField}
-                            name={[name, 'quantityPerSession']}
-                            rules={[{ required: true, message: 'Required' }]}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <InputNumber
-                              min={1}
-                              style={{ width: '100%' }}
-                              placeholder="e.g. 30"
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col style={{ width: 140 }}>
-                          <Form.Item
-                            {...restField}
-                            name={[name, 'lowStockThreshold']}
-                            style={{ marginBottom: 0 }}
-                          >
-                            <InputNumber
-                              min={0}
-                              style={{ width: '100%' }}
-                              placeholder="e.g. 100"
-                            />
-                          </Form.Item>
-                        </Col>
-                        <Col>
+                      <div key={key} style={{
+                        display: 'grid',
+                        gridTemplateColumns: '1fr 112px 132px 36px',
+                        gap: 8,
+                        alignItems: 'flex-start',
+                        marginBottom: 4,
+                      }}>
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'productId']}
+                          rules={[{ required: true, message: 'Select product' }]}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <Select
+                            showSearch
+                            placeholder="Select product"
+                            options={productSelectOptions}
+                            filterOption={(input, opt) =>
+                              (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                            }
+                          />
+                        </Form.Item>
+
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'quantityPerSession']}
+                          rules={[{ required: true, message: 'Required' }]}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 30" />
+                        </Form.Item>
+
+                        <Form.Item
+                          {...restField}
+                          name={[name, 'lowStockThreshold']}
+                          style={{ marginBottom: 0 }}
+                        >
+                          <InputNumber min={0} style={{ width: '100%' }} placeholder="e.g. 100" />
+                        </Form.Item>
+
+                        <div style={{ paddingTop: 4 }}>
                           <Button
                             type="text"
                             danger
                             icon={<MinusCircleOutlined />}
                             onClick={() => removeField(name)}
+                            style={{ padding: '4px 6px' }}
                           />
-                        </Col>
-                      </Row>
+                        </div>
+                      </div>
                     ))}
+
                     <Button
                       type="dashed"
                       onClick={() => add({ quantityPerSession: 1 })}
                       icon={<PlusOutlined />}
                       size="small"
-                      style={{ marginBottom: 8 }}
+                      style={{ marginTop: 4, marginBottom: 8 }}
                     >
                       Add Inventory Item
                     </Button>
                     <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
-                      Qty/Session: units consumed per service session. Low Stock Level: warn badge when on-hand falls to or below this number (leave blank to use product's reorder level).
+                      Qty/Session: units consumed per service session. Low Stock Level: warn when on-hand falls to or below this number.
                     </div>
-                  </>
+                  </div>
                 )}
               </Form.List>
             </>

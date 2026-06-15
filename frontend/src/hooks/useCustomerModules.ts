@@ -92,6 +92,17 @@ export function usePackageCheckout(customerId: string) {
   });
 }
 
+export function useAddPackageSession(customerId: string, packageId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Body) =>
+      api.post(`/customers/${customerId}/packages/${packageId}/sessions`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-packages', customerId] });
+    },
+  });
+}
+
 const offers = makeModuleHooks<Offer>('offers', 'customer-offers');
 export const useOffers = offers.useList;
 export const useCreateOffer = offers.useCreate;

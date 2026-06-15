@@ -4,7 +4,13 @@ import { db } from '@/lib/db';
 import { route, parseBody } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
-import { applySessionCookies, findStaff, issueSession } from '@/lib/auth/service';
+import {
+  applySessionCookies,
+  findStaff,
+  findSystemUser,
+  issueSession,
+  issueSystemSession,
+} from '@/lib/auth/service';
 import type { SessionResult, TwoFactorChallenge } from '@shared/types/auth';
 
 /**
@@ -29,10 +35,28 @@ function maskEmail(email: string): string {
 export const POST = route(async (req) => {
   const { identifier, password } = await parseBody(req, loginSchema);
 
+  // Generic message — never reveal whether the account exists.
+  const invalid = Errors.unauthorized('Invalid credentials');
+
   const staff = await findStaff({ email: identifier.toLowerCase() });
-  // Generic message — never reveal whether the email exists.
-  const invalid = Errors.unauthorized('Invalid email or password');
-  if (!staff) throw invalid;
+
+  // Not a staff email — try SystemUser (branch portal login with username).
+  if (!staff) {
+    const systemUser = await findSystemUser(identifier);
+    if (!systemUser) throw invalid;
+
+    const passwordOk = await bcrypt.compare(password, systemUser.passwordHash);
+    if (!passwordOk) throw invalid;
+
+    if (!systemUser.isActive) {
+      throw Errors.forbidden('This account has been suspended. Contact your administrator.');
+    }
+
+    const { accessToken, refreshToken, user } = await issueSystemSession(systemUser);
+    const res = ok<SessionResult>({ user, accessToken });
+    applySessionCookies(res, accessToken, refreshToken);
+    return res;
+  }
 
   const passwordOk = await bcrypt.compare(password, staff.passwordHash);
   if (!passwordOk) throw invalid;

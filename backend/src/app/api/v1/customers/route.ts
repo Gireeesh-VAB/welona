@@ -54,10 +54,12 @@ export const POST = route(async (req) => {
   requirePermission(claims, 'customers:create');
   const body = await parseBody(req, customerCreateSchema);
 
+  const staffBranchId = claims.branchIds[0] ?? null;
+
   const customer = await db.customer.create({
     data: {
       orgId: claims.orgId,
-      branchId: body.branchId ?? null,
+      branchId: body.branchId ?? staffBranchId,
       type: body.type,
       name: body.name,
       email: body.email || null,
@@ -67,6 +69,8 @@ export const POST = route(async (req) => {
       address: body.address || null,
       city: body.city || null,
       stateId: body.stateId ?? null,
+      country: body.country || null,
+      avatarUrl: body.avatarUrl ?? null,
       notes: body.notes || null,
       tags: JSON.stringify(body.tags ?? []),
       createdById: claims.sub,

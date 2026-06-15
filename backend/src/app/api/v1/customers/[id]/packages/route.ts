@@ -13,7 +13,17 @@ async function requireCustomer(orgId: string, id: string) {
   return customer;
 }
 
-// Resolve master services from JSON serviceIds
+/** Resolve master serviceIds to a snapshotable JSON string. */
+async function resolveServiceIdsJson(masterId: string | null | undefined): Promise<string> {
+  if (!masterId) return '[]';
+  const master = await (db as any).packageSessionMaster.findUnique({
+    where: { id: masterId },
+    select: { serviceIds: true },
+  });
+  return master?.serviceIds ?? '[]';
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function enrichMaster(pkg: any) {
   if (!pkg.masterId) return pkg;
   const master = await (db as any).packageSessionMaster.findUnique({
@@ -30,6 +40,19 @@ async function enrichMaster(pkg: any) {
   return { ...pkg, master: { id: master.id, name: master.name, services } };
 }
 
+/** Auto-expire packages whose expiresAt has passed. Run inline on GET to avoid needing a cron job. */
+async function autoExpirePackages(packageIds: string[]): Promise<void> {
+  if (packageIds.length === 0) return;
+  await db.package.updateMany({
+    where: {
+      id: { in: packageIds },
+      status: 'active',
+      expiresAt: { lt: new Date() },
+    },
+    data: { status: 'expired' },
+  });
+}
+
 /** GET /api/v1/customers/[id]/packages — packages for a customer. */
 export const GET = route<Ctx>(async (req, { params }) => {
   const claims = requireAuth(req);
@@ -39,7 +62,27 @@ export const GET = route<Ctx>(async (req, { params }) => {
   const packages = await (db as any).package.findMany({
     where: { customerId: params.id },
     orderBy: { createdAt: 'desc' },
+    include: {
+      sessionEntries: { orderBy: { sessionNumber: 'asc' } },
+      invoices: { select: { id: true, number: true, total: true, amountPaid: true, status: true } },
+    },
   });
+
+  // Auto-expire any active packages whose expiry date has passed.
+  const activeIds = packages
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((p: any) => p.status === 'active' && p.expiresAt && new Date(p.expiresAt) < new Date())
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((p: any) => p.id);
+  if (activeIds.length > 0) {
+    await autoExpirePackages(activeIds);
+    // Reflect the new status in the in-memory list so the response is accurate.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    for (const p of packages) {
+      if (activeIds.includes(p.id)) p.status = 'expired';
+    }
+  }
+
   const enriched = await Promise.all(packages.map(enrichMaster));
   return ok(enriched);
 });
@@ -55,23 +98,29 @@ export const POST = route<Ctx>(async (req, { params }) => {
     throw Errors.badRequest('Used sessions cannot exceed total sessions');
   }
   const branchId = claims.branchIds?.[0] ?? null;
+
+  // Snapshot the master's serviceIds at creation time so future edits to the
+  // master don't retroactively change this package's inventory mapping.
+  const serviceIdsSnapshot = await resolveServiceIdsJson(body.masterId);
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const pkg = await (db as any).package.create({
     data: {
-      orgId: claims.orgId,
-      customerId: customer.id,
+      orgId:               claims.orgId,
+      customerId:          customer.id,
       branchId,
-      masterId:      body.masterId ?? null,
-      treatmentId:   body.treatmentId ?? null,
-      name:          body.name,
-      totalSessions: body.totalSessions,
-      usedSessions:  body.usedSessions,
-      price:         body.price,
-      purchasedAt:   body.purchasedAt ? new Date(body.purchasedAt) : new Date(),
-      expiresAt:     body.expiresAt ? new Date(body.expiresAt) : null,
-      status:        body.status ?? 'active',
-      notes:         body.notes || null,
-      createdById:   claims.sub,
+      masterId:            body.masterId ?? null,
+      serviceIdsSnapshot,
+      treatmentId:         body.treatmentId ?? null,
+      name:                body.name,
+      totalSessions:       body.totalSessions,
+      usedSessions:        body.usedSessions,
+      price:               body.price,
+      purchasedAt:         body.purchasedAt ? new Date(body.purchasedAt) : new Date(),
+      expiresAt:           body.expiresAt ? new Date(body.expiresAt) : null,
+      status:              body.status ?? 'active',
+      notes:               body.notes || null,
+      createdById:         claims.sub,
     },
   });
   const enriched = await enrichMaster(pkg);

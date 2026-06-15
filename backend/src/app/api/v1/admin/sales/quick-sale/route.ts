@@ -8,6 +8,7 @@ import { quickSaleSchema } from '@shared/schemas/sales';
 import { computeTotals, nextDocumentNumber } from '@/lib/sales/service';
 import { orderDetailInclude } from '@/lib/sales/includes';
 import { serializeDelivery } from '@/lib/sales/serializers';
+import { applyDeliverySaleStock } from '@/lib/sales/inventory';
 
 /**
  * POST /api/v1/admin/sales/quick-sale — the unified "New Sale".
@@ -25,20 +26,24 @@ export const POST = route(async (req) => {
   const ownerStaffId = body.ownerStaffId;
   if (!ownerStaffId) throw Errors.badRequest('Select a salesperson');
 
-  const [customer, owner] = await Promise.all([
-    db.customer.findFirst({
-      where: { id: body.customerId, orgId },
-    }),
-    // Branch sessions may only assign a salesperson from their own branch.
-    db.staff.findFirst({
-      where: { id: ownerStaffId, orgId },
-    }),
-  ]);
-  if (!customer) throw Errors.badRequest('Selected customer does not exist');
+  const owner = await db.staff.findFirst({ where: { id: ownerStaffId, orgId } });
   if (!owner) throw Errors.badRequest('Selected salesperson does not exist');
 
+  // Find existing customer by name or auto-create a walk-in record.
+  let customer = await db.customer.findFirst({
+    where: { orgId, name: body.customerName },
+  });
+  if (!customer) {
+    customer = await db.customer.create({
+      data: {
+        orgId,
+        branchId: body.branchId ?? owner.branchId ?? null,
+        name: body.customerName,
+      },
+    });
+  }
+
   const totals = computeTotals(body.items);
-  // Branch sessions pin everything to their branch.
   const branchId = body.branchId ?? customer.branchId;
 
   const result = await db.$transaction(async (tx) => {
@@ -48,7 +53,7 @@ export const POST = route(async (req) => {
         orgId,
         branchId,
         number: orderNumber,
-        customerId: body.customerId,
+        customerId: customer.id,
         ownerStaffId,
         status: 'confirmed',
         paymentStatus: 'unpaid',
@@ -70,7 +75,7 @@ export const POST = route(async (req) => {
           orgId,
           branchId,
           number: invoiceNumber,
-          customerId: body.customerId,
+          customerId: customer.id,
           orderId: order.id,
           status: 'issued',
           issuedAt: new Date(),
@@ -81,6 +86,10 @@ export const POST = route(async (req) => {
         },
       });
     }
+
+    // Deduct inventory for product lines immediately — quick-sale is point-of-sale.
+    const stockLines = order.items.map((item) => ({ orderItemId: item.id, quantity: item.quantity }));
+    await applyDeliverySaleStock(tx, { branchId, lines: stockLines, ref: orderNumber });
 
     return { order, invoice };
   });

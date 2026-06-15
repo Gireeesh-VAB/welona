@@ -74,14 +74,15 @@ export const packageCreateSchema = z.object({
 });
 
 export const packageUpdateSchema = z.object({
-  name: z.string().trim().min(1).optional(),
-  treatmentId: id.optional(),
+  name:          z.string().trim().min(1).optional(),
+  treatmentId:   id.optional(),
   totalSessions: z.number().int().positive().optional(),
-  usedSessions: nonNegInt.optional(),
-  price: nonNegInt.optional(),
-  expiresAt: z.string().datetime().optional(),
-  status: z.enum(PACKAGE_STATUSES).optional(),
-  notes: optionalText,
+  // usedSessions is intentionally excluded — it is managed exclusively via
+  // session entries (POST/PATCH /sessions) to maintain the audit trail.
+  price:         nonNegInt.optional(),
+  expiresAt:     z.string().datetime().optional(),
+  status:        z.enum(PACKAGE_STATUSES).optional(),
+  notes:         optionalText,
 });
 
 export const packageCheckoutSchema = z.object({

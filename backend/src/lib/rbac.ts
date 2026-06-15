@@ -78,6 +78,7 @@ export const SYSTEM_ROLES: SystemRole[] = [
         'promotions',
         'notifications',
       ]),
+      'bookings:override_stock',
       'dashboard:read',
       'staff:read',
       'branches:read',
@@ -97,6 +98,7 @@ export const SYSTEM_ROLES: SystemRole[] = [
     permissions: [
       'dashboard:read',
       ...fullAccess(['bookings']),
+      'bookings:override_stock',
       'sales:read',
       'sales:create',
       'sales:update',

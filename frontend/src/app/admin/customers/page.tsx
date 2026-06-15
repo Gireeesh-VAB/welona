@@ -19,6 +19,9 @@ import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useAdminCustomers, useCreateAdminCustomer } from '@/hooks/useAdminCustomers';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
+import { useAdminStates } from '@/hooks/useAdminStates';
+import CountryStateFields from '@/components/customers/CountryStateFields';
+import { PHONE_CODE_OPTIONS, buildPhone } from '@/components/customers/countryData';
 import { ApiClientError } from '@/lib/api-client';
 import { formatDate } from '@shared/format';
 import type { Customer } from '@shared/types/sales';
@@ -48,10 +51,18 @@ export default function CustomersPage() {
     label: `${b.branchName} (${b.branchCode})`,
   }));
 
+  const { data: statesData } = useAdminStates({ limit: 200 });
+  const stateOptions = (statesData?.items ?? []).map((s) => ({
+    value: s.id,
+    label: `${s.name} (${s.code})`,
+  }));
+
   const handleCreate = async () => {
     const values = await form.validateFields();
+    const phone = buildPhone(values.phoneCode, values.phone);
+    delete values.phoneCode;
     try {
-      await createCustomer.mutateAsync(values);
+      await createCustomer.mutateAsync({ ...values, phone });
       message.success('Customer created');
       setModalOpen(false);
       form.resetFields();
@@ -171,7 +182,7 @@ export default function CustomersPage() {
         width={560}
         destroyOnClose
       >
-        <Form form={form} layout="vertical" preserve={false} initialValues={{ type: 'individual' }}>
+        <Form form={form} layout="vertical" preserve={false} initialValues={{ type: 'individual', country: 'India', phoneCode: '+91' }}>
           <Form.Item name="type" label="Customer type">
             <Select
               options={[
@@ -183,22 +194,30 @@ export default function CustomersPage() {
           <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
             <Input placeholder="Customer or company name" />
           </Form.Item>
-            <Form.Item
-              name="branchId"
-              label="Branch"
-              rules={[{ required: true, message: 'Assign the customer to a branch' }]}
-              extra="The branch whose team will see and manage this customer."
-            >
-              <Select
-                showSearch
-                optionFilterProp="label"
-                placeholder="Select a branch"
-                options={branchOptions}
-              />
-            </Form.Item>
+          <Form.Item
+            name="branchId"
+            label="Branch"
+            rules={[{ required: true, message: 'Assign the customer to a branch' }]}
+            extra="The branch whose team will see and manage this customer."
+          >
+            <Select
+              showSearch
+              optionFilterProp="label"
+              placeholder="Select a branch"
+              options={branchOptions}
+            />
+          </Form.Item>
+          <CountryStateFields form={form} stateOptions={stateOptions} />
           <div style={{ display: 'flex', gap: 12 }}>
             <Form.Item name="phone" label="Phone" style={{ flex: 1 }}>
-              <Input placeholder="+91 …" />
+              <Input
+                addonBefore={
+                  <Form.Item name="phoneCode" noStyle>
+                    <Select showSearch style={{ width: 80 }} options={PHONE_CODE_OPTIONS} />
+                  </Form.Item>
+                }
+                placeholder="Mobile number"
+              />
             </Form.Item>
             <Form.Item name="email" label="Email" style={{ flex: 1 }}>
               <Input placeholder="name@example.com" />

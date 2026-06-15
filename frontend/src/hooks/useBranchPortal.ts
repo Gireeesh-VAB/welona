@@ -1,6 +1,6 @@
 'use client';
 
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiList } from '@/lib/api-client';
 import type { CouponLookupResult } from '@shared/types/admin-coupon';
 
@@ -83,7 +83,9 @@ export function useBranchStock(params: StockParams = {}) {
           limit: params.limit ?? 100,
         },
       }),
-    staleTime: 60 * 1000,
+    staleTime: 0,
+    refetchOnWindowFocus: true,
+    refetchInterval: 60_000,
   });
 }
 
@@ -212,6 +214,56 @@ export function useBranchComplimentaryConfig() {
     queryKey: ['branch-complimentary'],
     queryFn: () => api.get<BranchComplimentaryConfig>('/complimentary'),
     staleTime: 5 * 60 * 1000,
+  });
+}
+
+// ---- Stock Indents (restock requests from branch) ---------------------------
+
+export interface BranchIndent {
+  id: string;
+  product: { id: string; name: string; sku: string; uom: string };
+  requestedQty: number;
+  status: 'pending' | 'approved' | 'rejected' | 'fulfilled';
+  reason: string | null;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RaiseIndentInput {
+  productId: string;
+  requestedQty: number;
+  reason?: string;
+  notes?: string;
+}
+
+export function useBranchIndents(status?: string) {
+  return useQuery({
+    queryKey: ['branch-indents', status ?? null],
+    queryFn: () =>
+      apiList<BranchIndent>('/indents', { query: { status, limit: 100 } }),
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useRaiseIndent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RaiseIndentInput) =>
+      api.post<{ id: string; status: string }>('/indents', input),
+    onSuccess: () => qc.refetchQueries({ queryKey: ['branch-indents'] }),
+  });
+}
+
+// ---- Branch info (for GST routing) -----------------------------------------
+
+/** Returns the current branch's stateId — used to determine IGST vs CGST+SGST. */
+export function useBranchCurrentInfo() {
+  return useQuery<{ stateId: string | null }>({
+    queryKey: ['branch-current-info'],
+    queryFn: () => api.get<{ stateId: string | null }>('/branches/current'),
+    staleTime: 10 * 60 * 1000,
   });
 }
 
