@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Alert, Button, Card, Form, Input, Typography, App } from 'antd';
 import { LockOutlined, SafetyOutlined, UserOutlined } from '@ant-design/icons';
 import { useLogin, useVerifyOtp, isTwoFactorChallenge } from '@/hooks/useAuth';
@@ -52,7 +53,8 @@ export default function LoginPage() {
 
   const handleAutoFill = () => {
     form.setFieldsValue(TEST_CREDENTIALS);
-    message.success('Credentials auto-filled');
+    // Submit immediately so it works in one click on live
+    setTimeout(() => form.submit(), 50);
   };
 
   const onSubmitCredentials = async (values: CredentialsForm) => {
@@ -186,9 +188,10 @@ export default function LoginPage() {
               type="dashed"
               block
               onClick={handleAutoFill}
+              loading={login.isPending}
               style={{ color: colors.text.placeholder, borderColor: colors.border }}
             >
-              Auto-fill credentials
+              Use test credentials
             </Button>
           </Form.Item>
 
@@ -198,10 +201,28 @@ export default function LoginPage() {
               fontSize: 12,
               display: 'block',
               textAlign: 'center',
+              marginTop: 8,
             }}
           >
             Roles with 2FA enabled will be prompted after sign-in.
           </Text>
+
+          <div style={{
+            marginTop: 20,
+            paddingTop: 16,
+            borderTop: `1px solid ${colors.border}`,
+            textAlign: 'center',
+          }}>
+            <Link href="/admin/login" style={{
+              fontSize: 12,
+              color: colors.gold.primary,
+              fontWeight: 600,
+              letterSpacing: '0.04em',
+              textDecoration: 'none',
+            }}>
+              Admin Panel Login →
+            </Link>
+          </div>
         </Form>
       )}
     </Card>

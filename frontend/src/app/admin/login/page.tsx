@@ -1,6 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 import { Button, Card, Form, Input, Typography, App } from 'antd';
 import { LockOutlined, SafetyOutlined, UserOutlined } from '@ant-design/icons';
 import { useAdminLogin } from '@/hooks/useAdminAuth';
@@ -40,7 +41,8 @@ export default function AdminLoginPage() {
 
   const handleAutoFill = () => {
     form.setFieldsValue(TEST_CREDENTIALS);
-    message.success('Credentials auto-filled');
+    // Submit immediately so it works in one click on live
+    setTimeout(() => form.submit(), 50);
   };
 
   const onSubmit = async (values: CredentialsForm) => {
@@ -128,20 +130,25 @@ export default function AdminLoginPage() {
               type="dashed"
               block
               onClick={handleAutoFill}
+              loading={login.isPending}
               style={{ color: colors.text.placeholder, borderColor: colors.border }}
             >
-              Auto-fill credentials
+              Use test credentials
             </Button>
           </Form.Item>
 
-          <div style={{ textAlign: 'center' }}>
-            <Button
-              type="link"
-              onClick={() => router.push('/login')}
-              style={{ color: colors.text.placeholder, fontSize: 12 }}
-            >
-              Employee login →
-            </Button>
+          <div style={{
+            paddingTop: 16,
+            borderTop: `1px solid ${colors.border}`,
+            textAlign: 'center',
+          }}>
+            <Link href="/login" style={{
+              fontSize: 12,
+              color: colors.text.placeholder,
+              textDecoration: 'none',
+            }}>
+              ← Branch Portal Login
+            </Link>
           </div>
         </Form>
       </Card>
