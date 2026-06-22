@@ -14,6 +14,7 @@ export const LEAD_STATUSES = [
   'unqualified',
   'converted',
   'lost',
+  'transferred',
 ] as const;
 export type LeadStatus = (typeof LEAD_STATUSES)[number];
 
@@ -196,8 +197,16 @@ export const INVENTORY_MOVEMENT_TYPES = [
 ] as const;
 export type InventoryMovementType = (typeof INVENTORY_MOVEMENT_TYPES)[number];
 
-export const STOCK_INDENT_STATUSES = ['pending', 'approved', 'rejected', 'fulfilled'] as const;
+export const STOCK_INDENT_STATUSES = ['pending', 'approved', 'dispatched', 'delivered', 'closed', 'rejected'] as const;
 export type StockIndentStatus = (typeof STOCK_INDENT_STATUSES)[number];
+
+/** Procurement RFQ lifecycle. */
+export const RFQ_STATUSES = ['draft', 'sent', 'comparing', 'ordered', 'cancelled'] as const;
+export type RFQStatus = (typeof RFQ_STATUSES)[number];
+
+/** Supplier quote status within an RFQ. */
+export const SUPPLIER_QUOTE_STATUSES = ['pending', 'submitted', 'accepted', 'rejected'] as const;
+export type SupplierQuoteStatus = (typeof SUPPLIER_QUOTE_STATUSES)[number];
 
 /** Lifecycle states of a Purchase Order. */
 export const PURCHASE_ORDER_STATUSES = [
@@ -224,15 +233,44 @@ export const SHIPMENT_PIPELINE = ['ordered', 'in_transit', 'received', 'qc', 'st
 export const SHIPMENT_STAGES = [...SHIPMENT_PIPELINE, 'cancelled'] as const;
 export type ShipmentStage = (typeof SHIPMENT_STAGES)[number];
 
-/** UOM (unit of measure) options for a product. */
+/** Purchase / stock unit options — how a product is ordered and received. */
 export const PRODUCT_UOMS = [
   'unit',
   'pack',
   'box',
   'bottle',
+  'strip',
+  'jar',
+  'tube',
+  'sachet',
+  'roll',
+  'bag',
   'ml',
   'litre',
   'gm',
   'kg',
 ] as const;
 export type ProductUom = (typeof PRODUCT_UOMS)[number];
+
+/**
+ * Consumption unit options — the unit in which a product is actually used
+ * during services/sessions (the "smallest unit"). When a product has a
+ * `consumptionUom` set, stock is stored and deducted in this unit.
+ */
+export const CONSUMPTION_UOMS = [
+  'unit',
+  'ml',
+  'litre',
+  'gm',
+  'kg',
+  'tablet',
+  'capsule',
+  'piece',
+  'sachet',
+  'drop',
+  'scoop',
+  'puff',
+  'strip',
+  'application',
+] as const;
+export type ConsumptionUom = (typeof CONSUMPTION_UOMS)[number];

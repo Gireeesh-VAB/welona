@@ -14,7 +14,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider = "sqlite"
   url      = env("DATABASE_URL")
 }
 
@@ -95,6 +95,7 @@ model Branch {
   couponBranches           CouponBranch[]
   packages                 Package[]
   stockIndents             StockIndent[]
+  consumableUnits          ConsumableUnit[]
   createdAt                DateTime      @default(now())
   updatedAt                DateTime      @updatedAt
 
@@ -253,6 +254,7 @@ model AdminUser {
   createdWarehouses    Warehouse[]
   createdCoupons       Coupon[]
   createdPackageSessionMasters PackageSessionMaster[]
+  createdRFQs          ProcurementRFQ[]
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 }
@@ -670,6 +672,7 @@ model Service {
   taxType           String      @default("exclusive") // "inclusive" | "exclusive"
   hasMeasurements   Boolean     @default(false)
   hasComplementary  Boolean     @default(false)
+  sessions          Int         @default(1)
   isActive          Boolean     @default(true)
   createdByAdminId  String?
   createdByAdmin       AdminUser?           @relation(fields: [createdByAdminId], references: [id])
@@ -813,7 +816,11 @@ model Lead {
   media          String?
   callType       String?
   healthStatus   String?
-  leadTransfer   Boolean      @default(false)
+  leadTransfer      Boolean   @default(false)
+  transferredFromId String?
+  transferredToId   String?
+  transferredAt     DateTime?
+  transferNotes     String?
   estimatedValue Int? // minor units
   ownerStaffId   String
   owner          Staff        @relation("LeadOwner", fields: [ownerStaffId], references: [id])
@@ -1083,6 +1090,7 @@ model Booking {
   roundOff          Int           @default(0) // minor units (may be negative)
   netAmount         Int           @default(0) // minor units
   paidAmount        Int           @default(0) // minor units — cumulative payments recorded
+  paymentMode       String?                   // Cash | Card | UPI | Net Banking | Cheque | Mixed
   notes             String?
   gstRateId    String?
   gstRate      GstRate?  @relation(fields: [gstRateId], references: [id])
@@ -1096,6 +1104,7 @@ model Booking {
   taxType      String?   // "inclusive" | "exclusive"
   items             BookingItem[]
   sessionEntries    SessionEntry[]
+  bookingSessions   BookingSession[]
   createdById       String?
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
@@ -1106,17 +1115,62 @@ model Booking {
 
 /// A single service line on a booking.
 model BookingItem {
-  id        String  @id @default(cuid())
-  bookingId String
-  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
-  category  String?
-  service   String
-  quantity  Int     @default(1)
-  amount    Int     @default(0) // unit amount, minor units
-  lineTotal Int     @default(0) // amount × quantity
-  sortOrder Int     @default(0)
+  id              String  @id @default(cuid())
+  bookingId       String
+  booking         Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  category        String?
+  service         String
+  quantity        Int     @default(1)
+  amount          Int     @default(0) // unit amount, minor units
+  lineTotal       Int     @default(0) // amount × quantity
+  paidAmount               Int     @default(0) // allocated payment in minor units
+  sortOrder                Int     @default(0)
+  isSessionBased           Boolean @default(false)
+  packageSessionMasterId   String?
+  isPackageSummaryLine     Boolean @default(false) // true = display-only header row; false = per-service sub-row
 
   @@index([bookingId])
+}
+
+/// A single visit/session recorded against a direct service booking.
+model BookingSession {
+  id            String   @id @default(cuid())
+  orgId         String
+  bookingId     String
+  booking       Booking  @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  bookingItemId String?  // BookingItem.id — which service this session is for
+  serviceName   String?  // denormalised for display
+  sessionNumber Int
+  sessionDate   DateTime
+  staffId       String?  // Employee.id — doctor/therapist who performed the session
+  staffName     String?  // resolved name stored for display even if employee is later removed
+  status        String   @default("pending") // pending | in_progress | completed | no_show | cancelled | rescheduled
+  remarks       String?
+  startTime       DateTime?
+  endTime         DateTime?
+  durationMinutes Int?
+  products      BookingSessionProduct[]
+  createdById   String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([bookingId])
+  @@index([bookingItemId])
+  @@index([orgId])
+}
+
+/// Extra products consumed during a booking session.
+model BookingSessionProduct {
+  id          String         @id @default(cuid())
+  sessionId   String
+  session     BookingSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  productId   String
+  productName String
+  quantity    Float          @default(1)
+  uom         String?
+  createdAt   DateTime       @default(now())
+
+  @@index([sessionId])
 }
 
 /// A session-based treatment package purchased by a customer.
@@ -1129,9 +1183,15 @@ model PackageSessionMaster {
   org              Organization @relation(fields: [orgId], references: [id])
   name             String
   description      String?
-  serviceIds       String     @default("[]") // JSON array of Service IDs
+  serviceIds          String     @default("[]") // JSON array of Service IDs
+  serviceSnapshotsJson String  @default("[]") // JSON snapshot of service prices at save time
+  inventoryItemsJson  String   @default("[]") // JSON array of { productId, productName, quantityPerSession, chargeType }
   defaultSessions  Int        @default(1)
   price            Int        @default(0)    // minor units (paise)
+  taxPercent       Int        @default(0)   // whole percent: 0, 5, 12, 18, 28
+  taxType          String     @default("exclusive") // "inclusive" | "exclusive"
+  collectAdvance   Boolean    @default(false)
+  advancePercent   Int        @default(0)   // 0-100; % of price to collect as advance when collectAdvance=true
   isActive         Boolean    @default(true)
   createdByAdminId String?
   createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
@@ -1534,16 +1594,40 @@ model Supplier {
   gstin            String?
   address          String?
   paymentTerms     String?    // free text, e.g. "Net 30"
+  deliveryLeadTime Int?       // default delivery days
+  rating           Float?     // computed from PO history, stored for display
   isActive         Boolean    @default(true)
   ipAddress        String?
   createdByAdminId String?
   createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
   purchaseOrders   PurchaseOrder[]
   goodsReceipts    GoodsReceipt[]
+  supplierProducts SupplierProduct[]
+  supplierQuotes   SupplierQuote[]
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
 
   @@index([isActive])
+}
+
+/// Maps which products a supplier can supply, with their pricing and lead time.
+model SupplierProduct {
+  id           String   @id @default(cuid())
+  supplierId   String
+  supplier     Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
+  unitPrice    Int?     // paise per UOM
+  leadTimeDays Int?     // delivery days for this specific product
+  moq          Int?     // minimum order quantity
+  notes        String?
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  @@unique([supplierId, productId])
+  @@index([productId])
+  @@index([supplierId])
 }
 
 // =============================================================================
@@ -1573,6 +1657,7 @@ model PurchaseOrder {
   createdByAdmin   AdminUser?          @relation(fields: [createdByAdminId], references: [id])
   items            PurchaseOrderItem[]
   goodsReceipts    GoodsReceipt[]
+  indents          StockIndent[]
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
 
@@ -1614,6 +1699,7 @@ model GoodsReceipt {
   createdByAdminId String?
   createdByAdmin   AdminUser?         @relation(fields: [createdByAdminId], references: [id])
   items            GoodsReceiptItem[]
+  consumableUnits  ConsumableUnit[]
   createdAt        DateTime           @default(now())
 
   @@unique([orgId, number])
@@ -1706,14 +1792,23 @@ model Product {
   /// Product photo — a data URL (no upload backend) or an external image URL.
   imageUrl         String?
   /// When true, receipts capture a batch number; FEFO depletion on outbound.
-  trackBatches     Boolean  @default(false)
+  trackBatches          Boolean  @default(false)
   /// When true, batches carry an expiry date (drives expiry alerts).
-  trackExpiry      Boolean  @default(false)
-  hasComplementary Boolean  @default(false)
-  isActive         Boolean  @default(true)
-  ipAddress        String?
-  createdByAdminId String?
-  createdByAdmin   AdminUser? @relation(fields: [createdByAdminId], references: [id])
+  trackExpiry           Boolean  @default(false)
+  hasComplementary      Boolean  @default(false)
+  /// How the product is consumed in services (e.g. "ml", "Tablet", "gm"). Null = same as uom.
+  consumptionUom        String?
+  /// How many consumption units are in 1 purchase/stock unit (e.g. 50 tablets per strip).
+  /// For consumable products: one ConsumableUnit is created per purchase unit received; stock stays in purchase units and decrements only when a unit is fully consumed.
+  unitsPerPurchase      Float    @default(1.0)
+  /// Controls whether this product appears in service-to-product mappings and service inventory.
+  availableForServices  Boolean  @default(true)
+  /// Controls whether this product appears in product inventory and retail billing.
+  availableForProducts  Boolean  @default(true)
+  isActive              Boolean  @default(true)
+  ipAddress             String?
+  createdByAdminId      String?
+  createdByAdmin        AdminUser? @relation(fields: [createdByAdminId], references: [id])
   stocks           InventoryStock[]
   movements        InventoryMovement[]
   branchProducts   BranchProduct[]
@@ -1723,6 +1818,11 @@ model Product {
   batches                    ProductBatch[]
   serviceInventoryItems      ServiceInventoryItem[]
   stockIndents               StockIndent[]
+  stockIndentItems           StockIndentItem[]
+  consumableUnits            ConsumableUnit[]
+  supplierProducts           SupplierProduct[]
+  rfqItems                   RFQItem[]
+  supplierQuoteItems         SupplierQuoteItem[]
   createdAt                  DateTime @default(now())
   updatedAt                  DateTime @updatedAt
 
@@ -1745,6 +1845,7 @@ model Warehouse {
   stocks           InventoryStock[]
   movements        InventoryMovement[]
   batchStocks      BatchStock[]
+  consumableUnits  ConsumableUnit[]
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
 
@@ -1763,7 +1864,8 @@ model InventoryStock {
   warehouse   Warehouse @relation(fields: [warehouseId], references: [id], onDelete: Cascade)
   productId   String
   product     Product  @relation(fields: [productId], references: [id], onDelete: Cascade)
-  quantity    Int      @default(0)
+  /// Stored in purchase units for consumable products (bottles, strips, boxes); in consumption units for non-consumable products.
+  quantity    Float    @default(0)
   updatedAt   DateTime @updatedAt
   createdAt   DateTime @default(now())
 
@@ -1788,7 +1890,8 @@ model InventoryMovement {
   /// Optional batch this movement applied to (batch-tracked products only).
   batchId          String?
   type             String   // opening | purchase | sale | adjustment | transfer_in | transfer_out
-  delta            Int      // signed change applied to InventoryStock
+  /// Signed change in consumption units (positive = in, negative = out).
+  delta            Float    // signed change applied to InventoryStock
   reason           String?
   ref              String?  // optional external reference (invoice no, PO no)
   createdByAdminId String?
@@ -1931,7 +2034,9 @@ model ServiceInventoryItem {
   service            Service  @relation(fields: [serviceId], references: [id], onDelete: Cascade)
   productId          String
   product            Product  @relation(fields: [productId], references: [id], onDelete: Restrict)
-  quantityPerSession Int      @default(1)
+  /// Quantity in consumption units (e.g. 3 tablets, 100 ml) deducted per session.
+  quantityPerSession Float    @default(1)
+  chargeType         String   @default("consume_only") // "collect_amount" | "consume_only"
   lowStockThreshold  Int?     // null → fall back to Product.reorderLevel
   sortOrder          Int      @default(0)
   createdAt          DateTime @default(now())
@@ -1943,25 +2048,67 @@ model ServiceInventoryItem {
 }
 
 /// A stock indent (purchase requisition) raised by a branch when inventory
-/// is running low. Admin reviews and approves/rejects. Fulfilling the indent
-/// does not auto-add stock — staff must create a GRN/adjustment separately.
+/// is running low. Admin reviews, approves, dispatches, and the branch
+/// confirms receipt — inventory is credited only at the received stage.
+/// Status: pending | approved | dispatched | received | closed | rejected
 model StockIndent {
-  id                   String   @id @default(cuid())
+  id                   String            @id @default(cuid())
   orgId                String
+  number               String?           // IND-0001 — nullable for backward compat with old records
   branchId             String
-  branch               Branch   @relation(fields: [branchId], references: [id])
-  productId            String
-  product              Product  @relation(fields: [productId], references: [id])
-  requestedQty         Int
-  status               String   @default("pending") // pending | approved | rejected | fulfilled
+  branch               Branch            @relation(fields: [branchId], references: [id])
+  status               String            @default("pending")
+
   reason               String?
   notes                String?
+
+  // Delivery tracking — populated on dispatch
+  vehicleNumber        String?
+  driverName           String?
+  driverMobile         String?
+  dispatchedAt         DateTime?
+  expectedDeliveryAt   DateTime?
+  deliveryNotes        String?
+
+  // Lifecycle timestamps
+  approvedAt           DateTime?
+  receivedAt           DateTime?
+  closedAt             DateTime?
+  rejectedAt           DateTime?
+
   raisedBySystemUserId String?
   raisedByAdminId      String?
-  createdAt            DateTime @default(now())
-  updatedAt            DateTime @updatedAt
+  poId                 String?
+  po                   PurchaseOrder?    @relation(fields: [poId], references: [id])
+
+  // Legacy single-product fields — null on all new records, kept for backward compat
+  productId            String?
+  product              Product?          @relation(fields: [productId], references: [id])
+  requestedQty         Int?
+
+  items                StockIndentItem[]
+  rfqs                 ProcurementRFQ[]
+  createdAt            DateTime          @default(now())
+  updatedAt            DateTime          @updatedAt
 
   @@index([orgId, branchId, status])
+  @@index([poId])
+}
+
+model StockIndentItem {
+  id               String      @id @default(cuid())
+  indentId         String
+  indent           StockIndent @relation(fields: [indentId], references: [id], onDelete: Cascade)
+  productId        String
+  product          Product     @relation(fields: [productId], references: [id])
+  requestedQty     Int
+  approvedQty      Int?        // set on approve action
+  rejectedQty      Int?        // requestedQty - approvedQty; set on partial approve
+  rejectionReason  String?     // reason for partial rejection
+  fulfilledQty     Int?        // set on dispatch action (qty actually sent)
+  receivedQty      Int?        // set on receive action (qty actually received)
+
+  @@index([indentId])
   @@index([productId])
 }
 
@@ -2137,4 +2284,123 @@ model ComplimentaryServiceBranch {
 
   @@unique([ruleId, branchId])
   @@index([branchId])
+}
+
+/// One physical purchase unit received at a branch (e.g., one bottle, one strip, one box).
+/// Created by GRN for products where consumptionUom is set AND unitsPerPurchase > 1.
+/// FIFO: oldest sealed unit is opened first; when fully consumed, InventoryStock decrements by 1.
+model ConsumableUnit {
+  id            String        @id @default(cuid())
+  orgId         String
+  productId     String
+  product       Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  branchId      String
+  branch        Branch        @relation(fields: [branchId], references: [id])
+  warehouseId   String
+  warehouse     Warehouse     @relation(fields: [warehouseId], references: [id])
+  grnId         String?
+  grn           GoodsReceipt? @relation(fields: [grnId], references: [id])
+  /// Capacity in consumption units (= Product.unitsPerPurchase at receipt time, e.g. 500 ml)
+  totalCapacity Float
+  /// Accumulated usage in consumption units
+  usedQuantity  Float         @default(0)
+  /// sealed = not yet opened | open = currently in use | exhausted = fully consumed | discarded = wasted early
+  status        String        @default("sealed")
+  openedAt      DateTime?
+  exhaustedAt   DateTime?
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+
+  usageLogs     ConsumableUsageLog[]
+
+  @@index([productId, branchId, status])
+  @@index([grnId])
+  @@index([warehouseId])
+}
+
+/// One usage event — a session drawing from a specific ConsumableUnit.
+model ConsumableUsageLog {
+  id               String         @id @default(cuid())
+  consumableUnitId String
+  consumableUnit   ConsumableUnit @relation(fields: [consumableUnitId], references: [id], onDelete: Cascade)
+  branchId         String
+  bookingId        String?
+  sessionRef       String?        // human-readable session / booking reference
+  quantityUsed     Float          // in consumption units
+  createdAt        DateTime       @default(now())
+
+  @@index([consumableUnitId])
+  @@index([branchId])
+  @@index([bookingId])
+}
+
+// =============================================================================
+// Procurement RFQ (Request for Quotation)
+// Internal workflow: create RFQ for required products, collect supplier quotes,
+// compare and recommend, then convert winner to a Purchase Order.
+// =============================================================================
+
+model ProcurementRFQ {
+  id               String          @id @default(cuid())
+  orgId            String
+  number           String?         // RFQ-0001
+  status           String          @default("draft")
+  reason           String?
+  notes            String?
+  indentId         String?
+  indent           StockIndent?    @relation(fields: [indentId], references: [id])
+  items            RFQItem[]
+  supplierQuotes   SupplierQuote[]
+  createdByAdminId String?
+  createdByAdmin   AdminUser?      @relation(fields: [createdByAdminId], references: [id])
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  @@index([orgId, status])
+}
+
+model RFQItem {
+  id          String         @id @default(cuid())
+  rfqId       String
+  rfq         ProcurementRFQ @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product        @relation(fields: [productId], references: [id])
+  requiredQty Int
+
+  @@index([rfqId])
+  @@index([productId])
+}
+
+model SupplierQuote {
+  id          String             @id @default(cuid())
+  rfqId       String
+  rfq         ProcurementRFQ     @relation(fields: [rfqId], references: [id], onDelete: Cascade)
+  supplierId  String
+  supplier    Supplier           @relation(fields: [supplierId], references: [id])
+  status      String             @default("pending")
+  submittedAt DateTime?
+  validUntil  DateTime?
+  notes       String?
+  items       SupplierQuoteItem[]
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@unique([rfqId, supplierId])
+  @@index([rfqId])
+  @@index([supplierId])
+}
+
+model SupplierQuoteItem {
+  id           String        @id @default(cuid())
+  quoteId      String
+  quote        SupplierQuote @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+  productId    String
+  product      Product       @relation(fields: [productId], references: [id])
+  unitPrice    Int
+  deliveryDays Int           @default(7)
+  moq          Int?
+  notes        String?
+
+  @@unique([quoteId, productId])
+  @@index([quoteId])
 }

@@ -19,7 +19,6 @@ import { recordAudit, actorFromClaims } from '@/lib/audit';
  * POST /api/v1/admin/suppliers
  */
 export const GET = route(async (req) => {
-  // Org-wide reference data; branch sessions read it. Writes stay admin-only.
   requireAdminAuth(req);
   const { search, active, page, limit } = parseQuery(req, adminSupplierListQuerySchema);
 
@@ -41,7 +40,10 @@ export const GET = route(async (req) => {
   const [items, total] = await Promise.all([
     db.supplier.findMany({
       where,
-      include: { createdByAdmin: true },
+      include: {
+        createdByAdmin: true,
+        _count: { select: { supplierProducts: true } },
+      },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
       take: limit,
@@ -58,22 +60,44 @@ export const POST = route(async (req) => {
   const ip = readClientIp(req);
 
   try {
-    const row = await db.supplier.create({
-      data: {
-        name: body.name,
-        code: body.code,
-        contactPerson: body.contactPerson ?? null,
-        phone: body.phone ?? null,
-        email: body.email ?? null,
-        gstin: body.gstin ?? null,
-        address: body.address ?? null,
-        paymentTerms: body.paymentTerms ?? null,
-        isActive: body.isActive,
-        ipAddress: ip,
-        createdByAdminId: claims.sub,
-      },
-      include: { createdByAdmin: true },
+    const row = await db.$transaction(async (tx) => {
+      const supplier = await tx.supplier.create({
+        data: {
+          name: body.name,
+          code: body.code,
+          contactPerson: body.contactPerson ?? null,
+          phone: body.phone ?? null,
+          email: body.email ?? null,
+          gstin: body.gstin ?? null,
+          address: body.address ?? null,
+          paymentTerms: body.paymentTerms ?? null,
+          isActive: body.isActive,
+          ipAddress: ip,
+          createdByAdminId: claims.sub,
+        },
+        include: {
+          createdByAdmin: true,
+          _count: { select: { supplierProducts: true } },
+        },
+      });
+
+      if (body.products && body.products.length > 0) {
+        await tx.supplierProduct.createMany({
+          data: body.products.map((p) => ({
+            supplierId: supplier.id,
+            productId: p.productId,
+            unitPrice: p.unitPrice ?? null,
+            leadTimeDays: p.leadTimeDays ?? null,
+            moq: p.moq ?? null,
+            notes: p.notes ?? null,
+            isActive: p.isActive,
+          })),
+        });
+      }
+
+      return supplier;
     });
+
     await recordAudit({
       actor: actorFromClaims(claims),
       action: 'create',
