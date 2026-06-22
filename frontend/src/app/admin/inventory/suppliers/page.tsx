@@ -1,11 +1,14 @@
 'use client';
 
 import { useMemo, useState } from 'react';
+import { useRouter } from 'next/navigation';
 import {
   App,
   Button,
   Card,
+  Divider,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Select,
@@ -19,6 +22,7 @@ import {
 import {
   DeleteOutlined,
   EditOutlined,
+  MinusCircleOutlined,
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
@@ -30,7 +34,7 @@ import {
   useUpdateSupplier,
 } from '@/hooks/useSuppliers';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { ApiClientError } from '@/lib/api-client';
+import { ApiClientError, apiList } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminSupplier } from '@shared/types/admin-supplier';
 import type { AdminSupplierCreateInput } from '@shared/schemas/admin-suppliers';
@@ -61,6 +65,23 @@ const SUPPLIER_BULK_SAMPLES = [
   },
 ];
 
+interface ProductMappingRow {
+  productId: string;
+  productName: string;
+  productSku: string;
+  productUom: string;
+  unitPrice: number | null;
+  leadTimeDays: number | null;
+  moq: number | null;
+}
+
+interface ProductOption {
+  id: string;
+  name: string;
+  sku: string;
+  uom: string;
+}
+
 interface SupplierFormValues {
   name: string;
   code: string;
@@ -70,6 +91,7 @@ interface SupplierFormValues {
   gstin?: string;
   address?: string;
   paymentTerms?: string;
+  deliveryLeadTime?: number;
   isActive: boolean;
 }
 
@@ -83,6 +105,7 @@ function formatDate(iso: string): string {
 
 export default function AdminSuppliersPage() {
   const colors = useBrandColors();
+  const router = useRouter();
   const navItem = getAdminNavItem('inventory-suppliers')!;
   const { message } = App.useApp();
 
@@ -107,18 +130,53 @@ export default function AdminSuppliersPage() {
   const fail = (err: unknown, fallback: string) =>
     message.error(err instanceof ApiClientError ? err.message : fallback);
 
-  // Single shared form instance via Modal's `forceRender`-free pattern: we set
-  // initial values when opening (matches the products page approach).
   const [formValues, setFormValues] = useState<SupplierFormValues>({
     name: '',
     code: '',
     isActive: true,
   });
 
+  // Product mapping state
+  const [productMappings, setProductMappings] = useState<ProductMappingRow[]>([]);
+  const [productOpts, setProductOpts] = useState<ProductOption[]>([]);
+  const [productOptsLoading, setProductOptsLoading] = useState(false);
+
+  const searchProducts = async (searchVal?: string) => {
+    setProductOptsLoading(true);
+    try {
+      const query: Record<string, string | number> = { isActive: 'true', limit: 50 };
+      if (searchVal && searchVal.length > 0) query.search = searchVal;
+      const result = await apiList<ProductOption>('/admin/products', { query });
+      setProductOpts(result.items ?? []);
+    } catch (err) {
+      message.error(err instanceof ApiClientError ? err.message : 'Failed to load products');
+    } finally {
+      setProductOptsLoading(false);
+    }
+  };
+
+  const addProductMapping = () => {
+    setProductMappings((rows) => [
+      ...rows,
+      { productId: '', productName: '', productSku: '', productUom: '', unitPrice: null, leadTimeDays: null, moq: null },
+    ]);
+  };
+
+  const removeProductMapping = (idx: number) => {
+    setProductMappings((rows) => rows.filter((_, i) => i !== idx));
+  };
+
+  const updateProductMapping = (idx: number, changes: Partial<ProductMappingRow>) => {
+    setProductMappings((rows) => rows.map((r, i) => (i === idx ? { ...r, ...changes } : r)));
+  };
+
   const openCreate = () => {
     setEditing(null);
     setFormValues({ name: '', code: '', isActive: true });
+    setProductMappings([]);
+    setProductOpts([]);
     setModalOpen(true);
+    searchProducts();
   };
 
   const openEdit = (s: AdminSupplier) => {
@@ -132,9 +190,23 @@ export default function AdminSuppliersPage() {
       gstin: s.gstin ?? undefined,
       address: s.address ?? undefined,
       paymentTerms: s.paymentTerms ?? undefined,
+      deliveryLeadTime: s.deliveryLeadTime ?? undefined,
       isActive: s.isActive,
     });
+    setProductMappings(
+      (s.products ?? []).map((p) => ({
+        productId: p.productId,
+        productName: p.productName,
+        productSku: p.productSku,
+        productUom: p.productUom,
+        unitPrice: p.unitPrice != null ? p.unitPrice / 100 : null, // paise → ₹
+        leadTimeDays: p.leadTimeDays,
+        moq: p.moq,
+      })),
+    );
+    setProductOpts([]);
     setModalOpen(true);
+    searchProducts();
   };
 
   const onSubmit = async () => {
@@ -152,7 +224,17 @@ export default function AdminSuppliersPage() {
       gstin: v.gstin?.trim() || undefined,
       address: v.address?.trim() || undefined,
       paymentTerms: v.paymentTerms?.trim() || undefined,
+      deliveryLeadTime: v.deliveryLeadTime,
       isActive: v.isActive,
+      products: productMappings
+        .filter((p) => p.productId)
+        .map((p) => ({
+          productId: p.productId,
+          unitPrice: p.unitPrice != null ? Math.round(p.unitPrice * 100) : undefined, // ₹ → paise
+          leadTimeDays: p.leadTimeDays ?? undefined,
+          moq: p.moq ?? undefined,
+          isActive: true,
+        })),
     };
     try {
       if (editing) {
@@ -425,6 +507,15 @@ export default function AdminSuppliersPage() {
           pagination={pagination}
           size="middle"
           scroll={{ x: 1000 }}
+          onRow={(row) => ({
+            onClick: (e) => {
+              const target = e.target as HTMLElement;
+              // Don't navigate when clicking action buttons or switches
+              if (target.closest('button') || target.closest('.ant-switch')) return;
+              router.push(`/admin/inventory/suppliers/${row.id}`);
+            },
+            style: { cursor: 'pointer' },
+          })}
         />
       </Card>
 
@@ -517,6 +608,85 @@ export default function AdminSuppliersPage() {
             onChange={(e) => setFormValues((f) => ({ ...f, address: e.target.value }))}
           />
         </div>
+        <div style={{ height: 12 }} />
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 4, fontSize: 13, color: colors.text.secondary }}>Delivery Lead Time (days)</div>
+          <InputNumber
+            min={1}
+            max={365}
+            style={{ width: 160 }}
+            value={formValues.deliveryLeadTime}
+            onChange={(val) => setFormValues((f) => ({ ...f, deliveryLeadTime: val ?? undefined }))}
+            placeholder="e.g. 7"
+            addonAfter="days"
+          />
+        </div>
+        <Divider style={{ marginBottom: 12 }}>
+          <span style={{ fontSize: 12, color: colors.text.placeholder }}>Product Mapping (optional)</span>
+        </Divider>
+        {productMappings.length > 0 && (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+            <div style={{ width: 200, fontSize: 11, color: colors.text.placeholder, paddingLeft: 2 }}>Product</div>
+            <div style={{ width: 120, fontSize: 11, color: colors.text.placeholder, paddingLeft: 2 }}>Unit Price (₹)</div>
+            <div style={{ width: 90, fontSize: 11, color: colors.text.placeholder, paddingLeft: 2 }}>Lead Time</div>
+            <div style={{ width: 80, fontSize: 11, color: colors.text.placeholder, paddingLeft: 2 }}>Min Order Qty</div>
+          </div>
+        )}
+        {productMappings.map((row, idx) => (
+          <div key={idx} style={{ display: 'flex', gap: 6, marginBottom: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+            <Select
+              showSearch
+              placeholder="Select product..."
+              filterOption={false}
+              loading={productOptsLoading}
+              onSearch={(val) => searchProducts(val)}
+              value={row.productId || undefined}
+              onChange={(val) => {
+                const opt = productOpts.find((o) => o.id === val);
+                if (opt) updateProductMapping(idx, { productId: opt.id, productName: opt.name, productSku: opt.sku, productUom: opt.uom });
+              }}
+              style={{ width: 200 }}
+              options={productOpts.map((o) => ({ value: o.id, label: `${o.name} (${o.sku})` }))}
+              notFoundContent={productOptsLoading ? 'Loading…' : 'No products found'}
+            />
+            <InputNumber
+              placeholder="0.00"
+              min={0}
+              step={1}
+              precision={2}
+              value={row.unitPrice}
+              onChange={(val) => updateProductMapping(idx, { unitPrice: val })}
+              prefix="₹"
+              style={{ width: 120 }}
+            />
+            <InputNumber
+              placeholder="e.g. 7"
+              min={1}
+              max={365}
+              value={row.leadTimeDays}
+              onChange={(val) => updateProductMapping(idx, { leadTimeDays: val })}
+              addonAfter="days"
+              style={{ width: 90 }}
+            />
+            <InputNumber
+              placeholder="e.g. 10"
+              min={1}
+              value={row.moq}
+              onChange={(val) => updateProductMapping(idx, { moq: val })}
+              style={{ width: 80 }}
+            />
+            <Button type="text" danger icon={<MinusCircleOutlined />} onClick={() => removeProductMapping(idx)} />
+          </div>
+        ))}
+        <Button
+          type="dashed"
+          size="small"
+          icon={<PlusOutlined />}
+          onClick={addProductMapping}
+          style={{ marginBottom: 16, width: '100%' }}
+        >
+          Add Product Mapping
+        </Button>
         <Space align="center">
           <Switch
             checked={formValues.isActive}

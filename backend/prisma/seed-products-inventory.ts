@@ -362,6 +362,128 @@ async function main() {
   }
   console.log(`[prod-inv-seed] Extra movements logged: ${extraMovements}`);
 
+  // ---- Suppliers with product mappings ----
+  const supplierDefs = [
+    {
+      code: 'WNAT01',
+      name: 'Welona Naturals Pvt Ltd',
+      contactPerson: 'Suresh Reddy',
+      phone: '+91-9000001111',
+      email: 'suresh@wellonanaturals.in',
+      gstin: '36AABCW1234P1Z5',
+      address: 'Plot 14, APIIC Industrial Estate, Hyderabad, Telangana - 500032',
+      paymentTerms: 'Net 30',
+      deliveryLeadTime: 5,
+      products: [
+        { sku: 'SH-001', unitPriceRs: 340, leadTimeDays: 5, moq: 24 },
+        { sku: 'SH-002', unitPriceRs: 390, leadTimeDays: 5, moq: 24 },
+        { sku: 'CN-001', unitPriceRs: 305, leadTimeDays: 5, moq: 24 },
+        { sku: 'OL-001', unitPriceRs: 230, leadTimeDays: 7, moq: 36 },
+        { sku: 'SR-001', unitPriceRs: 790, leadTimeDays: 7, moq: 12 },
+        { sku: 'AC-001', unitPriceRs: 120, leadTimeDays: 10, moq: 50 },
+        { sku: 'AC-002', unitPriceRs: 250, leadTimeDays: 10, moq: 30 },
+      ],
+    },
+    {
+      code: 'PSKI01',
+      name: 'ProSkin Distributors',
+      contactPerson: 'Anita Sharma',
+      phone: '+91-9000002222',
+      email: 'anita@proskindist.com',
+      gstin: '29AABCP8765Q1Z3',
+      address: 'Unit 7, Rajajinagar Industrial Area, Bengaluru, Karnataka - 560044',
+      paymentTerms: 'Net 45',
+      deliveryLeadTime: 7,
+      products: [
+        { sku: 'FW-001', unitPriceRs: 198, leadTimeDays: 7, moq: 24 },
+        { sku: 'FW-002', unitPriceRs: 215, leadTimeDays: 7, moq: 24 },
+        { sku: 'SE-001', unitPriceRs: 510, leadTimeDays: 7, moq: 12 },
+        { sku: 'SE-002', unitPriceRs: 650, leadTimeDays: 7, moq: 12 },
+        { sku: 'SE-003', unitPriceRs: 510, leadTimeDays: 7, moq: 12 },
+        { sku: 'MO-001', unitPriceRs: 320, leadTimeDays: 7, moq: 18 },
+        { sku: 'SN-001', unitPriceRs: 420, leadTimeDays: 7, moq: 18 },
+        { sku: 'AC-004', unitPriceRs: 1800, leadTimeDays: 12, moq: 6 },
+        { sku: 'AC-005', unitPriceRs: 355, leadTimeDays: 10, moq: 12 },
+      ],
+    },
+    {
+      code: 'HLTH01',
+      name: 'HealthFirst Wellness LLP',
+      contactPerson: 'Vikram Nair',
+      phone: '+91-9000003333',
+      email: 'vikram@healthfirstwellness.com',
+      gstin: '27AABHW5432R1Z8',
+      address: '302, Sunrise Business Park, Andheri East, Mumbai, Maharashtra - 400093',
+      paymentTerms: 'Net 30',
+      deliveryLeadTime: 10,
+      products: [
+        { sku: 'SP-001', unitPriceRs: 275, leadTimeDays: 10, moq: 36 },
+        { sku: 'SP-002', unitPriceRs: 395, leadTimeDays: 10, moq: 24 },
+        { sku: 'SP-003', unitPriceRs: 545, leadTimeDays: 10, moq: 24 },
+        { sku: 'SP-004', unitPriceRs: 1250, leadTimeDays: 12, moq: 12 },
+        { sku: 'SP-005', unitPriceRs: 760, leadTimeDays: 12, moq: 12 },
+      ],
+    },
+  ];
+
+  const productBySkuMap = new Map(allProducts.map((p) => [p.sku, p]));
+  let suppliersUpserted = 0;
+
+  for (const s of supplierDefs) {
+    const supplier = await db.supplier.upsert({
+      where: { code: s.code },
+      update: {
+        name: s.name,
+        contactPerson: s.contactPerson,
+        phone: s.phone,
+        email: s.email,
+        gstin: s.gstin,
+        address: s.address,
+        paymentTerms: s.paymentTerms,
+        deliveryLeadTime: s.deliveryLeadTime,
+        isActive: true,
+      },
+      create: {
+        name: s.name,
+        code: s.code,
+        contactPerson: s.contactPerson,
+        phone: s.phone,
+        email: s.email,
+        gstin: s.gstin,
+        address: s.address,
+        paymentTerms: s.paymentTerms,
+        deliveryLeadTime: s.deliveryLeadTime,
+        isActive: true,
+        createdByAdminId: admin.id,
+      },
+    });
+
+    // Upsert each product mapping
+    for (const pm of s.products) {
+      const product = productBySkuMap.get(pm.sku);
+      if (!product) continue;
+      await db.supplierProduct.upsert({
+        where: { supplierId_productId: { supplierId: supplier.id, productId: product.id } },
+        update: {
+          unitPrice: Math.round(pm.unitPriceRs * 100),
+          leadTimeDays: pm.leadTimeDays,
+          moq: pm.moq,
+          isActive: true,
+        },
+        create: {
+          supplierId: supplier.id,
+          productId: product.id,
+          unitPrice: Math.round(pm.unitPriceRs * 100),
+          leadTimeDays: pm.leadTimeDays,
+          moq: pm.moq,
+          isActive: true,
+        },
+      });
+    }
+    suppliersUpserted += 1;
+  }
+  console.log(`[prod-inv-seed] Suppliers upserted: ${suppliersUpserted}`);
+
   console.log('[prod-inv-seed] Done.');
 }
 

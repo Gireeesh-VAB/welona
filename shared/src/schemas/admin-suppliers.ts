@@ -7,6 +7,15 @@ import { z } from 'zod';
 const optionalText = (max: number) =>
   z.string().trim().max(max).optional().or(z.literal('').transform(() => undefined));
 
+export const supplierProductMappingSchema = z.object({
+  productId: z.string().min(1),
+  unitPrice: z.coerce.number().int().min(0).optional(),
+  leadTimeDays: z.coerce.number().int().min(1).max(365).optional(),
+  moq: z.coerce.number().int().min(1).optional(),
+  notes: z.string().trim().max(300).optional(),
+  isActive: z.boolean().default(true),
+});
+
 export const adminSupplierCreateSchema = z.object({
   name: z.string().trim().min(1, 'Supplier name is required').max(160),
   code: z
@@ -26,6 +35,8 @@ export const adminSupplierCreateSchema = z.object({
   gstin: optionalText(20),
   address: optionalText(300),
   paymentTerms: optionalText(80),
+  deliveryLeadTime: z.coerce.number().int().min(1).max(365).optional(),
+  products: z.array(supplierProductMappingSchema).optional(),
   isActive: z.boolean().default(true),
 });
 
@@ -41,3 +52,4 @@ export const adminSupplierListQuerySchema = z.object({
 export type AdminSupplierCreateInput = z.infer<typeof adminSupplierCreateSchema>;
 export type AdminSupplierUpdateInput = z.infer<typeof adminSupplierUpdateSchema>;
 export type AdminSupplierListQuery = z.infer<typeof adminSupplierListQuerySchema>;
+export type SupplierProductMappingInput = z.infer<typeof supplierProductMappingSchema>;

@@ -57,3 +57,11 @@ export function useDeleteSupplier() {
     onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
   });
 }
+
+export function useSupplier(id: string | null) {
+  return useQuery({
+    queryKey: [KEY, 'detail', id],
+    queryFn: () => api.get<AdminSupplier & { purchaseOrders: unknown[] }>(`/admin/suppliers/${id}`),
+    enabled: !!id,
+  });
+}

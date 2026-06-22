@@ -3,13 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, apiList, type Paginated } from '@/lib/api-client';
 import type { StockIndent } from '@shared/types/stock-indent';
-import type { StockIndentUpdateInput } from '@shared/schemas/admin-indents';
+import type { StockIndentCreateInput, StockIndentActionInput } from '@shared/schemas/admin-indents';
 
 const KEY = 'admin-indents';
 
 interface IndentListParams {
   branchId?: string;
-  productId?: string;
   status?: string;
   page?: number;
   limit?: number;
@@ -22,7 +21,6 @@ export function useAdminIndents(params: IndentListParams = {}) {
       apiList<StockIndent>('/admin/indents', {
         query: {
           branchId: params.branchId,
-          productId: params.productId,
           status: params.status,
           page: params.page ?? 1,
           limit: params.limit ?? 20,
@@ -31,21 +29,24 @@ export function useAdminIndents(params: IndentListParams = {}) {
   });
 }
 
-export function useUpdateIndent() {
+export function useCreateAdminIndent() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, body }: { id: string; body: StockIndentUpdateInput }) =>
-      api.patch<StockIndent>(`/admin/indents/${id}`, body),
-    onSuccess: () => qc.refetchQueries({ queryKey: [KEY] }),
+    mutationFn: (body: StockIndentCreateInput) => api.post<StockIndent>('/admin/indents', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
   });
 }
 
-export function useAdminRaiseIndent() {
+export function useAdminIndentAction() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (body: { branchId: string; productId: string; requestedQty: number; reason?: string }) =>
-      api.post<StockIndent>('/admin/indents', body),
-    onSuccess: () => qc.refetchQueries({ queryKey: [KEY] }),
+    mutationFn: ({ id, ...body }: { id: string } & StockIndentActionInput) =>
+      api.patch<StockIndent>(`/admin/indents/${id}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [KEY] });
+      qc.invalidateQueries({ queryKey: ['admin-inventory-stock'] });
+      qc.invalidateQueries({ queryKey: ['admin-inventory-movements'] });
+    },
   });
 }
 

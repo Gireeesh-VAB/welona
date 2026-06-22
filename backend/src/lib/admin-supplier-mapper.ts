@@ -2,7 +2,10 @@ import type { Prisma } from '@prisma/client';
 import type { AdminSupplier } from '@shared/types/admin-supplier';
 
 export type SupplierWithRelations = Prisma.SupplierGetPayload<{
-  include: { createdByAdmin: true };
+  include: {
+    createdByAdmin: true;
+    _count: { select: { supplierProducts: true } };
+  };
 }>;
 
 export function toAdminSupplier(row: SupplierWithRelations): AdminSupplier {
@@ -16,6 +19,8 @@ export function toAdminSupplier(row: SupplierWithRelations): AdminSupplier {
     gstin: row.gstin,
     address: row.address,
     paymentTerms: row.paymentTerms,
+    deliveryLeadTime: (row as any).deliveryLeadTime ?? null,
+    rating: (row as any).rating ?? null,
     isActive: row.isActive,
     createdBy: row.createdByAdmin
       ? {
@@ -26,5 +31,7 @@ export function toAdminSupplier(row: SupplierWithRelations): AdminSupplier {
       : null,
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
+    products: [],
+    productCount: row._count?.supplierProducts ?? 0,
   };
 }

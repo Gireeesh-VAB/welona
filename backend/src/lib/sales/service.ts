@@ -19,7 +19,7 @@ export type Db = Prisma.TransactionClient;
 export async function nextDocumentNumber(
   tx: Db,
   orgId: string,
-  key: 'quotation' | 'order' | 'invoice' | 'voucher' | 'booking' | 'po' | 'grn' | 'transfer' | 'shipment',
+  key: 'quotation' | 'order' | 'invoice' | 'voucher' | 'booking' | 'po' | 'grn' | 'transfer' | 'shipment' | 'indent' | 'rfq',
   prefix: string,
 ): Promise<string> {
   const counter = await tx.counter.upsert({
