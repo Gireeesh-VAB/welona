@@ -34,3 +34,15 @@ yarn-error.log*
 # IDE
 /.vscode/
 /.idea/
+
+# Logs
+*.log
+backend/backend*.log
+frontend/frontend*.log
+ngrok-*.log
+
+# Temp/scratch files
+backend/chk.js
+frontend/src/app/admin/inventory/stock-requests/box
+welona-work-report.html
+test-category-flags.ps1
