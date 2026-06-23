@@ -1,15 +1,12 @@
-import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
-import { route, parseBody } from '@/lib/api/handler';
+import { route } from '@/lib/api/handler';
 import { ok } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
-import { bookingUpdateSchema } from '@shared/schemas/customer-modules';
+import { bookingUpdateSchema, bookingPaySchema } from '@shared/schemas/customer-modules';
 
 type Ctx = { params: { id: string; itemId: string } };
-
-const paySchema = z.object({ paidAmount: z.number().int().nonnegative() });
 
 /** PATCH /api/v1/customers/[id]/bookings/[itemId] — update a booking. */
 export const PATCH = route<Ctx>(async (req, { params }) => {
@@ -25,11 +22,64 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
 
   // Payment shorthand: { paidAmount: N }
   if ('paidAmount' in raw) {
-    const { paidAmount } = paySchema.parse(raw);
-    const capped = Math.min(paidAmount, booking.netAmount);
-    const updated = await db.booking.update({
+    const { paidAmount, paymentMode, serviceAllocations } = bookingPaySchema.parse(raw);
+
+    const increment = Math.min(paidAmount, Math.max(0, booking.netAmount - booking.paidAmount));
+    if (increment === 0) return ok(booking);
+
+    // Always fetch items so BookingItem.paidAmount is kept in sync for service-wise reporting
+    const bk = await db.booking.findUnique({
       where: { id: params.itemId },
-      data: { paidAmount: capped },
+      include: { items: true },
+    });
+
+    // Build final allocations: explicit list → or auto-distribute proportionally to remaining balance
+    let finalAllocations: Array<{ bookingItemId: string; amount: number }> = [];
+
+    if (serviceAllocations?.length) {
+      const allocSum = serviceAllocations.reduce((s, a) => s + a.amount, 0);
+      if (allocSum !== increment) throw Errors.badRequest('Allocation total must equal the payment amount');
+
+      const itemMap = new Map(bk!.items.map((i) => [i.id, i]));
+      for (const alloc of serviceAllocations) {
+        const item = itemMap.get(alloc.bookingItemId);
+        if (!item) throw Errors.badRequest('Invalid bookingItemId in allocations');
+        const remaining = item.lineTotal - item.paidAmount;
+        if (alloc.amount > remaining)
+          throw Errors.badRequest(`Allocation for "${item.service}" exceeds its remaining balance`);
+      }
+      finalAllocations = serviceAllocations;
+    } else if (bk && bk.items.length > 0) {
+      // Auto-distribute proportionally to each item's remaining balance
+      const remaining = bk.items.map(i => Math.max(0, i.lineTotal - i.paidAmount));
+      const totalRemaining = remaining.reduce((s, r) => s + r, 0);
+      if (totalRemaining > 0) {
+        let distributed = 0;
+        bk.items.forEach((item, idx) => {
+          const share = idx === bk.items.length - 1
+            ? increment - distributed
+            : Math.round((remaining[idx] / totalRemaining) * increment);
+          const capped = Math.min(share, remaining[idx]);
+          if (capped > 0) finalAllocations.push({ bookingItemId: item.id, amount: capped });
+          distributed += capped;
+        });
+      }
+    }
+
+    const updated = await db.$transaction(async (tx) => {
+      for (const alloc of finalAllocations) {
+        await tx.bookingItem.update({
+          where: { id: alloc.bookingItemId },
+          data: { paidAmount: { increment: alloc.amount } },
+        });
+      }
+      return tx.booking.update({
+        where: { id: params.itemId },
+        data: {
+          paidAmount: { increment },
+          ...(paymentMode !== undefined && { paymentMode }),
+        },
+      });
     });
     return ok(updated);
   }

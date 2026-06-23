@@ -7,6 +7,7 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
   Descriptions,
   Divider,
   InputNumber,
@@ -17,20 +18,26 @@ import {
   Spin,
   Table,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
+  CloseCircleOutlined,
+  FileDoneOutlined,
   PlusOutlined,
   SendOutlined,
+  ShoppingCartOutlined,
 } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
-import { useRFQ, useUpdateRFQ, useUpsertSupplierQuote } from '@/hooks/useRFQ';
+import { useRFQ, useUpdateRFQ, useUpsertSupplierQuote, useAcceptRejectQuote } from '@/hooks/useRFQ';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { ApiClientError, apiList } from '@/lib/api-client';
+import { useAdminBranches } from '@/hooks/useAdminBranches';
+import { ApiClientError, api, apiList } from '@/lib/api-client';
 import { formatMoney } from '@shared/format';
 import type { RFQItem, SupplierQuote, SupplierQuoteItem } from '@shared/types/admin-rfq';
+import type { AdminPurchaseOrderCreateInput } from '@shared/schemas/admin-purchase-orders';
 
 const { Title, Text } = Typography;
 
@@ -95,19 +102,37 @@ export default function AdminRFQDetailPage() {
   const { data: rfq, isLoading } = useRFQ(rfqId);
   const updateRFQ = useUpdateRFQ();
   const upsertQuote = useUpsertSupplierQuote();
+  const acceptReject = useAcceptRejectQuote();
 
+  // Branches for PO creation
+  const { data: branchesPage } = useAdminBranches({ limit: 100 });
+  const branches = branchesPage?.items ?? [];
+
+  // Quote modal state
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
   const [supplierId, setSupplierId] = useState('');
   const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
   const [supplierLoading, setSupplierLoading] = useState(false);
   const [quoteItems, setQuoteItems] = useState<QuoteItemForm[]>([]);
 
+  // PO creation modal state
+  const [poTarget, setPoTarget] = useState<SupplierQuote | null>(null);
+  const [poBranchId, setPoBranchId] = useState('');
+  const [poExpectedAt, setPoExpectedAt] = useState<string | null>(null);
+  const [poNotes, setPoNotes] = useState('');
+  const [poLoading, setPoLoading] = useState(false);
+
   const searchSuppliers = async (searchVal: string) => {
-    if (!searchVal || searchVal.length < 1) return;
     setSupplierLoading(true);
     try {
+      const firstProductId = rfq?.items?.[0]?.productId;
       const result = await apiList<SupplierOption>('/admin/suppliers', {
-        query: { active: 'active', limit: 100, search: searchVal },
+        query: {
+          active: 'active',
+          limit: 100,
+          search: searchVal || undefined,
+          productId: firstProductId,
+        },
       });
       setSupplierOptions(result.items ?? []);
     } catch {
@@ -129,6 +154,8 @@ export default function AdminRFQDetailPage() {
       })),
     );
     setQuoteModalOpen(true);
+    // Pre-load suppliers filtered by the RFQ's products
+    searchSuppliers('');
   };
 
   const updateQuoteItem = (idx: number, changes: Partial<QuoteItemForm>) => {
@@ -162,6 +189,58 @@ export default function AdminRFQDetailPage() {
       setQuoteModalOpen(false);
     } catch (err) {
       message.error(err instanceof ApiClientError ? err.message : 'Failed to save quote');
+    }
+  };
+
+  const handleAcceptReject = async (quoteId: string, action: 'accept' | 'reject') => {
+    try {
+      await acceptReject.mutateAsync({ rfqId, quoteId, action });
+      message.success(action === 'accept' ? 'Quote accepted' : 'Quote rejected');
+    } catch (err) {
+      message.error(err instanceof ApiClientError ? err.message : 'Failed to update quote');
+    }
+  };
+
+  const openPoModal = (quote: SupplierQuote) => {
+    setPoTarget(quote);
+    setPoBranchId(rfq?.indentBranchId ?? '');
+    setPoExpectedAt(null);
+    setPoNotes('');
+  };
+
+  const onCreatePO = async () => {
+    if (!poTarget || !rfq) return;
+    if (!poBranchId) {
+      message.error('Select a branch');
+      return;
+    }
+    setPoLoading(true);
+    try {
+      const body: AdminPurchaseOrderCreateInput = {
+        branchId: poBranchId,
+        supplierId: poTarget.supplierId,
+        expectedAt: poExpectedAt ?? undefined,
+        notes: poNotes || undefined,
+        fromIndentIds: rfq.indentId ? [rfq.indentId] : undefined,
+        items: poTarget.items.map((qi) => {
+          const rfqItem = rfq.items.find((r) => r.productId === qi.productId);
+          return {
+            productId: qi.productId,
+            quantity: rfqItem?.requiredQty ?? 1,
+            unitPrice: qi.unitPrice,
+            taxRate: 0,
+          };
+        }),
+      };
+      await api.post('/admin/purchase-orders', body);
+      // Advance RFQ to ordered
+      await updateRFQ.mutateAsync({ id: rfqId, body: { status: 'ordered' } });
+      message.success('Purchase Order created and RFQ marked as ordered');
+      setPoTarget(null);
+    } catch (err) {
+      message.error(err instanceof ApiClientError ? err.message : 'Failed to create PO');
+    } finally {
+      setPoLoading(false);
     }
   };
 
@@ -255,6 +334,8 @@ export default function AdminRFQDetailPage() {
     }, 0);
 
   const transition = NEXT_STATUS[rfq.status];
+  const canModifyQuotes = rfq.status !== 'ordered' && rfq.status !== 'cancelled';
+  const hasAcceptedQuote = rfq.supplierQuotes.some((q) => q.status === 'accepted');
 
   return (
     <div>
@@ -342,7 +423,7 @@ export default function AdminRFQDetailPage() {
             <Title level={5} style={{ color: colors.text.primary, marginBottom: 0 }}>
               Supplier Quotes ({rfq.supplierQuotes.length})
             </Title>
-            {rfq.status !== 'ordered' && rfq.status !== 'cancelled' && (
+            {canModifyQuotes && (
               <Button type="default" icon={<PlusOutlined />} onClick={openQuoteModal}>
                 Add Supplier Quote
               </Button>
@@ -360,24 +441,228 @@ export default function AdminRFQDetailPage() {
             </Card>
           )}
 
+          {/* ── Quote Comparison Matrix ──────────────────────────────────── */}
+          {(() => {
+            const submittedQuotes = rfq.supplierQuotes.filter((q) =>
+              ['submitted', 'accepted', 'rejected'].includes(q.status),
+            );
+            if (submittedQuotes.length === 0) return null;
+
+            // Per-product minimums for green-highlighting
+            const minPriceByProduct: Record<string, number> = {};
+            const minDeliveryByProduct: Record<string, number> = {};
+            rfq.items.forEach((item) => {
+              const prices: number[] = [];
+              const deliveries: number[] = [];
+              submittedQuotes.forEach((q) => {
+                const qi = q.items.find((i) => i.productId === item.productId);
+                if (qi) { prices.push(qi.unitPrice); deliveries.push(qi.deliveryDays); }
+              });
+              if (prices.length) minPriceByProduct[item.productId] = Math.min(...prices);
+              if (deliveries.length) minDeliveryByProduct[item.productId] = Math.min(...deliveries);
+            });
+
+            // Quote-level aggregates
+            const quoteTotals = submittedQuotes.map((q) => ({
+              quoteId: q.id,
+              total: rfq.items.reduce((sum, item) => {
+                const qi = q.items.find((i) => i.productId === item.productId);
+                return sum + (qi ? qi.unitPrice * item.requiredQty : 0);
+              }, 0),
+              avgDelivery: q.items.length
+                ? Math.round(q.items.reduce((s, i) => s + i.deliveryDays, 0) / q.items.length)
+                : null,
+            }));
+
+            const minTotal = Math.min(...quoteTotals.filter((t) => t.total > 0).map((t) => t.total));
+            const minAvgDel = Math.min(
+              ...quoteTotals.filter((t) => t.avgDelivery != null).map((t) => t.avgDelivery as number),
+            );
+
+            const border = `1px solid ${colors.border}`;
+            const thStyle: React.CSSProperties = {
+              padding: '7px 10px', fontSize: 11, fontWeight: 600,
+              color: colors.text.placeholder, borderBottom: border, textAlign: 'center' as const,
+            };
+
+            return (
+              <Card
+                size="small"
+                title={<span style={{ color: colors.text.primary, fontSize: 13 }}>Quote Comparison</span>}
+                style={{ background: colors.black.secondary, border, marginBottom: 16 }}
+                styles={{ body: { padding: 0, overflowX: 'auto' } }}
+              >
+                <table style={{ width: '100%', borderCollapse: 'collapse', minWidth: 360 }}>
+                  <thead>
+                    <tr>
+                      <th style={{ ...thStyle, textAlign: 'left', width: 160, paddingLeft: 12 }}>PRODUCT</th>
+                      {submittedQuotes.map((q) => {
+                        const accepted = q.status === 'accepted';
+                        const rejected = q.status === 'rejected';
+                        return (
+                          <th key={q.id} style={{
+                            ...thStyle, borderLeft: border, minWidth: 120,
+                            background: accepted ? 'rgba(82,196,26,0.1)' : q.isRecommended ? 'rgba(250,173,20,0.08)' : 'transparent',
+                            opacity: rejected ? 0.55 : 1,
+                          }}>
+                            <div style={{ fontWeight: 700, color: accepted ? '#52c41a' : colors.text.primary, fontSize: 12 }}>
+                              {q.supplierName}
+                            </div>
+                            <div style={{ display: 'flex', gap: 3, justifyContent: 'center', marginTop: 3, flexWrap: 'wrap' }}>
+                              {q.isRecommended && !accepted && !rejected && <Tag color="gold" style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}>⭐ REC</Tag>}
+                              {accepted && <Tag color="success" style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}>✓ Accepted</Tag>}
+                              {rejected && <Tag color="error" style={{ fontSize: 10, margin: 0, padding: '0 4px', lineHeight: '16px' }}>Rejected</Tag>}
+                            </div>
+                          </th>
+                        );
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rfq.items.map((item, rowIdx) => (
+                      <tr key={item.id} style={{ borderTop: border }}>
+                        <td style={{ padding: '7px 12px' }}>
+                          <div style={{ fontWeight: 600, fontSize: 12, color: colors.text.primary }}>{item.productName}</div>
+                          <div style={{ fontSize: 10, color: colors.text.placeholder }}>{item.productUom} · need {item.requiredQty}</div>
+                        </td>
+                        {submittedQuotes.map((q) => {
+                          const qi = q.items.find((i) => i.productId === item.productId);
+                          const accepted = q.status === 'accepted';
+                          const rejected = q.status === 'rejected';
+                          const cheapest = qi != null && minPriceByProduct[item.productId] === qi.unitPrice;
+                          const fastest  = qi != null && minDeliveryByProduct[item.productId] === qi.deliveryDays;
+                          return (
+                            <td key={q.id} style={{
+                              textAlign: 'center', padding: '7px 10px', borderLeft: border,
+                              background: accepted ? 'rgba(82,196,26,0.04)' : 'transparent',
+                              opacity: rejected ? 0.55 : 1,
+                            }}>
+                              {qi ? (
+                                <>
+                                  <div style={{ fontWeight: cheapest ? 700 : 500, fontSize: 12, color: cheapest ? '#52c41a' : colors.text.primary }}>
+                                    {formatMoney(qi.unitPrice)}
+                                  </div>
+                                  <div style={{ fontSize: 10, color: fastest ? '#52c41a' : colors.text.placeholder, marginTop: 1 }}>
+                                    {fastest ? '✓ ' : ''}{qi.deliveryDays}d
+                                  </div>
+                                </>
+                              ) : (
+                                <span style={{ color: colors.text.placeholder, fontSize: 12 }}>—</span>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    {/* Total */}
+                    <tr style={{ borderTop: `2px solid ${colors.border}`, background: 'rgba(0,0,0,0.12)' }}>
+                      <td style={{ padding: '7px 12px', fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>TOTAL COST</td>
+                      {quoteTotals.map((qt) => {
+                        const q = submittedQuotes.find((x) => x.id === qt.quoteId)!;
+                        const cheapest = qt.total > 0 && qt.total === minTotal;
+                        return (
+                          <td key={qt.quoteId} style={{ textAlign: 'center', padding: '7px 10px', borderLeft: border, opacity: q.status === 'rejected' ? 0.55 : 1 }}>
+                            <span style={{ fontWeight: 700, fontSize: 13, color: cheapest ? '#52c41a' : colors.text.primary }}>
+                              {qt.total > 0 ? formatMoney(qt.total) : '—'}
+                            </span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* Avg Delivery */}
+                    <tr style={{ borderTop: border }}>
+                      <td style={{ padding: '5px 12px', fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>AVG DELIVERY</td>
+                      {quoteTotals.map((qt) => {
+                        const q = submittedQuotes.find((x) => x.id === qt.quoteId)!;
+                        const fastest = qt.avgDelivery != null && qt.avgDelivery === minAvgDel;
+                        return (
+                          <td key={qt.quoteId} style={{ textAlign: 'center', padding: '5px 10px', borderLeft: border, opacity: q.status === 'rejected' ? 0.55 : 1 }}>
+                            <span style={{ fontSize: 12, color: fastest ? '#52c41a' : colors.text.primary, fontWeight: fastest ? 700 : 400 }}>
+                              {qt.avgDelivery != null ? `${qt.avgDelivery}d` : '—'}
+                            </span>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                    {/* Score */}
+                    <tr style={{ borderTop: border }}>
+                      <td style={{ padding: '5px 12px', fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>SCORE</td>
+                      {submittedQuotes.map((q) => (
+                        <td key={q.id} style={{ textAlign: 'center', padding: '5px 10px', borderLeft: border, opacity: q.status === 'rejected' ? 0.55 : 1 }}>
+                          {q.score != null ? (
+                            <span style={{ fontWeight: 700, fontSize: 12, color: q.isRecommended ? '#faad14' : colors.text.primary }}>
+                              {q.score.toFixed(1)}{q.isRecommended ? ' ⭐' : ''}
+                            </span>
+                          ) : <span style={{ color: colors.text.placeholder, fontSize: 11 }}>—</span>}
+                        </td>
+                      ))}
+                    </tr>
+                    {/* Action */}
+                    {canModifyQuotes && (
+                      <tr style={{ borderTop: border }}>
+                        <td style={{ padding: '6px 12px', fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>ACTION</td>
+                        {submittedQuotes.map((q) => {
+                          const accepted = q.status === 'accepted';
+                          const rejected = q.status === 'rejected';
+                          return (
+                            <td key={q.id} style={{ textAlign: 'center', padding: '6px 8px', borderLeft: border }}>
+                              {accepted && rfq.status !== 'ordered' && (
+                                <Button size="small" type="primary" icon={<ShoppingCartOutlined />}
+                                  onClick={() => openPoModal(q)}
+                                  style={{ background: '#52c41a', borderColor: '#52c41a', fontSize: 11 }}>
+                                  Create PO
+                                </Button>
+                              )}
+                              {rfq.status === 'ordered' && accepted && (
+                                <Tag icon={<FileDoneOutlined />} color="green" style={{ fontSize: 10 }}>PO Created</Tag>
+                              )}
+                              {!accepted && !rejected && !hasAcceptedQuote && q.status === 'submitted' && (
+                                <Button size="small" type="primary" icon={<CheckCircleOutlined />}
+                                  loading={acceptReject.isPending}
+                                  onClick={() => handleAcceptReject(q.id, 'accept')}
+                                  style={{ fontSize: 11 }}>
+                                  Accept
+                                </Button>
+                              )}
+                              {rejected && <Tag color="error" style={{ fontSize: 10 }}>Rejected</Tag>}
+                              {hasAcceptedQuote && !accepted && !rejected && (
+                                <Text style={{ color: colors.text.placeholder, fontSize: 11 }}>—</Text>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    )}
+                  </tfoot>
+                </table>
+              </Card>
+            );
+          })()}
+
           {rfq.supplierQuotes.map((quote) => {
             const total = computeTotal(quote);
+            const isAccepted = quote.status === 'accepted';
+            const isRejected = quote.status === 'rejected';
+
             return (
               <Card
                 key={quote.id}
                 size="small"
                 style={{
                   background: colors.black.secondary,
-                  border: `1px solid ${quote.isRecommended ? '#52c41a' : colors.border}`,
+                  border: `1px solid ${isAccepted ? '#52c41a' : isRejected ? '#ff4d4f' : quote.isRecommended ? '#faad14' : colors.border}`,
                   marginBottom: 16,
                   position: 'relative',
+                  opacity: isRejected ? 0.65 : 1,
                 }}
                 styles={{ body: { padding: 16 } }}
               >
-                {quote.isRecommended && (
+                {quote.isRecommended && !isAccepted && !isRejected && (
                   <div
                     style={{
-                      background: '#52c41a',
+                      background: '#faad14',
                       color: '#fff',
                       fontSize: 11,
                       fontWeight: 700,
@@ -398,7 +683,7 @@ export default function AdminRFQDetailPage() {
                     alignItems: 'flex-start',
                     justifyContent: 'space-between',
                     marginBottom: 12,
-                    marginTop: quote.isRecommended ? 16 : 0,
+                    marginTop: quote.isRecommended && !isAccepted && !isRejected ? 16 : 0,
                     flexWrap: 'wrap',
                     gap: 8,
                   }}
@@ -409,22 +694,63 @@ export default function AdminRFQDetailPage() {
                     </div>
                     <Text code style={{ fontSize: 11 }}>{quote.supplierCode}</Text>
                   </div>
-                  <Space size={8}>
+                  <Space size={8} wrap>
                     {quoteStatusTag(quote.status)}
                     {quote.score != null && <Tag color="purple">Score: {quote.score}</Tag>}
+                    {/* Accept / Reject / Create PO buttons */}
+                    {canModifyQuotes && quote.status === 'submitted' && !hasAcceptedQuote && (
+                      <>
+                        <Tooltip title="Accept this quote (others will be rejected)">
+                          <Button
+                            size="small"
+                            type="primary"
+                            icon={<CheckCircleOutlined />}
+                            loading={acceptReject.isPending}
+                            onClick={() => handleAcceptReject(quote.id, 'accept')}
+                          >
+                            Accept
+                          </Button>
+                        </Tooltip>
+                        <Tooltip title="Reject this quote">
+                          <Button
+                            size="small"
+                            danger
+                            icon={<CloseCircleOutlined />}
+                            loading={acceptReject.isPending}
+                            onClick={() => handleAcceptReject(quote.id, 'reject')}
+                          >
+                            Reject
+                          </Button>
+                        </Tooltip>
+                      </>
+                    )}
+                    {isAccepted && rfq.status !== 'ordered' && (
+                      <Button
+                        size="small"
+                        type="primary"
+                        icon={<ShoppingCartOutlined />}
+                        onClick={() => openPoModal(quote)}
+                        style={{ background: '#52c41a', borderColor: '#52c41a' }}
+                      >
+                        Create PO
+                      </Button>
+                    )}
+                    {rfq.status === 'ordered' && isAccepted && (
+                      <Tag icon={<FileDoneOutlined />} color="green">PO Created</Tag>
+                    )}
                   </Space>
                 </div>
 
-                {quote.recommendationReason && (
+                {quote.recommendationReason && !isAccepted && !isRejected && (
                   <div
                     style={{
-                      background: '#f6ffed',
-                      border: '1px solid #b7eb8f',
+                      background: '#fffbe6',
+                      border: '1px solid #ffe58f',
                       borderRadius: 4,
                       padding: '4px 8px',
                       marginBottom: 10,
                       fontSize: 12,
-                      color: '#389e0d',
+                      color: '#874d00',
                     }}
                   >
                     {quote.recommendationReason}
@@ -464,6 +790,7 @@ export default function AdminRFQDetailPage() {
         </Col>
       </Row>
 
+      {/* Add Supplier Quote Modal */}
       <Modal
         title="Add Supplier Quote"
         open={quoteModalOpen}
@@ -486,8 +813,13 @@ export default function AdminRFQDetailPage() {
             onChange={(val) => setSupplierId(val)}
             style={{ width: '100%' }}
             options={supplierOptions.map((s) => ({ value: s.id, label: `${s.name} (${s.code})` }))}
-            notFoundContent={supplierLoading ? 'Searching…' : 'Type to search suppliers'}
+            notFoundContent={supplierLoading ? 'Loading suppliers…' : 'No suppliers found — type to search all'}
           />
+          {supplierOptions.length > 0 && (
+            <div style={{ fontSize: 11, color: colors.text.placeholder, marginTop: 4 }}>
+              Showing suppliers who supply the products in this RFQ
+            </div>
+          )}
         </div>
 
         <div style={{ marginBottom: 8, fontSize: 13, color: colors.text.secondary, fontWeight: 600 }}>
@@ -541,6 +873,132 @@ export default function AdminRFQDetailPage() {
             </Space>
           </div>
         ))}
+      </Modal>
+
+      {/* Create PO from Quote Modal */}
+      <Modal
+        title={`Create Purchase Order — ${poTarget?.supplierName ?? ''}`}
+        open={!!poTarget}
+        onCancel={() => setPoTarget(null)}
+        onOk={onCreatePO}
+        okText={<><ShoppingCartOutlined /> Create PO</>}
+        confirmLoading={poLoading}
+        width={600}
+        destroyOnClose
+      >
+        {poTarget && rfq && (
+          <div>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 13, color: colors.text.secondary, marginBottom: 4 }}>Branch *</div>
+              <Select
+                showSearch
+                placeholder="Select branch"
+                value={poBranchId || undefined}
+                onChange={setPoBranchId}
+                style={{ width: '100%' }}
+                filterOption={(input, opt) =>
+                  (opt?.label as string)?.toLowerCase().includes(input.toLowerCase())
+                }
+                options={branches.map((b) => ({ value: b.id, label: b.branchName }))}
+              />
+              {rfq.indentBranchId && (
+                <div style={{ fontSize: 11, color: colors.text.placeholder, marginTop: 4 }}>
+                  Pre-filled from linked indent
+                </div>
+              )}
+            </div>
+
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 13, color: colors.text.secondary, marginBottom: 4 }}>Expected Delivery</div>
+              <DatePicker
+                style={{ width: '100%' }}
+                onChange={(_, dateStr) => setPoExpectedAt(dateStr ? new Date(dateStr as string).toISOString() : null)}
+              />
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <div style={{ fontSize: 13, color: colors.text.secondary, marginBottom: 4 }}>Notes</div>
+              <input
+                value={poNotes}
+                onChange={(e) => setPoNotes(e.target.value)}
+                placeholder="Optional notes"
+                style={{
+                  width: '100%',
+                  padding: '6px 10px',
+                  border: `1px solid ${colors.border}`,
+                  borderRadius: 6,
+                  background: 'transparent',
+                  color: colors.text.primary,
+                }}
+              />
+            </div>
+
+            <div style={{ fontSize: 13, color: colors.text.secondary, fontWeight: 600, marginBottom: 8 }}>
+              Order Items
+            </div>
+            <Table
+              size="small"
+              pagination={false}
+              rowKey="productId"
+              dataSource={poTarget.items.map((qi) => {
+                const rfqItem = rfq.items.find((r) => r.productId === qi.productId);
+                return {
+                  productId: qi.productId,
+                  productName: qi.productName,
+                  productSku: qi.productSku,
+                  qty: rfqItem?.requiredQty ?? 1,
+                  unitPrice: qi.unitPrice,
+                  lineTotal: (rfqItem?.requiredQty ?? 1) * qi.unitPrice,
+                };
+              })}
+              columns={[
+                {
+                  title: 'Product',
+                  dataIndex: 'productName',
+                  render: (v: string, row: any) => (
+                    <div>
+                      <div style={{ fontWeight: 600 }}>{v}</div>
+                      <Text code style={{ fontSize: 10 }}>{row.productSku}</Text>
+                    </div>
+                  ),
+                },
+                { title: 'Qty', dataIndex: 'qty', width: 60, align: 'center' },
+                {
+                  title: 'Unit Price',
+                  dataIndex: 'unitPrice',
+                  width: 110,
+                  align: 'right',
+                  render: (v: number) => formatMoney(v),
+                },
+                {
+                  title: 'Line Total',
+                  dataIndex: 'lineTotal',
+                  width: 110,
+                  align: 'right',
+                  render: (v: number) => <Text strong style={{ color: colors.gold.primary }}>{formatMoney(v)}</Text>,
+                },
+              ]}
+              summary={(rows) => {
+                const grand = (rows as any[]).reduce((s, r) => s + r.lineTotal, 0);
+                return (
+                  <Table.Summary.Row>
+                    <Table.Summary.Cell index={0} colSpan={3} align="right">
+                      <Text strong>Total</Text>
+                    </Table.Summary.Cell>
+                    <Table.Summary.Cell index={1} align="right">
+                      <Text strong style={{ color: colors.gold.primary }}>{formatMoney(grand)}</Text>
+                    </Table.Summary.Cell>
+                  </Table.Summary.Row>
+                );
+              }}
+            />
+            {rfq.indentId && (
+              <div style={{ marginTop: 10, fontSize: 12, color: colors.text.placeholder }}>
+                Indent {rfq.indentNumber} will be linked to this PO.
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   );

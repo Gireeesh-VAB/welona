@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation';
 import {
+
   App,
   Button,
   Card,
@@ -12,14 +13,17 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Row,
   Select,
   Space,
   Spin,
   Statistic,
+  Table,
   Tabs,
   Tag,
+  Tooltip,
   Typography,
 } from 'antd';
 import {
@@ -41,14 +45,24 @@ import { useCustomers, useCustomer, useCustomerSales, useCustomerFollowUps, useC
 import { useStates } from '@/hooks/useStates';
 import { useBranchServices, useBranchEmployees, useBranchComplimentaryConfig, useLookupCoupon, useBranchCurrentInfo, type BranchInventoryItem } from '@/hooks/useBranchPortal';
 import { useRaiseIndent } from '@/hooks/useIndents';
+import { usePackageSessionMasters } from '@/hooks/usePackageSessionMasters';
+import { useSessionProducts as usePkgSessionProducts, type SessionProduct, type ConsumableUnitInfo, type ServiceProductGroup } from '@/hooks/useSessions';
 import type { CouponLookupResult } from '@/hooks/useBranchPortal';
 import { useCreateAppointment } from '@/hooks/useAppointments';
 import { ApiClientError } from '@/lib/api-client';
 import {
   useBookings,
   useBookingAction,
+  useBookingSessions,
+  useAddBookingSession,
+  useUpdateBookingSession,
+  useStartBookingSession,
+  useCompleteBookingSession,
+  useSessionEmployees,
+  useSessionProducts,
   usePackages,
   useAddPackageSession,
+  useServiceDefaultProducts,
   useOffers,
   usePrescriptions,
   useCreatePrescription,
@@ -60,13 +74,16 @@ import {
   useDocuments,
   useCustomerHistory,
 } from '@/hooks/useCustomerModules';
+import { useAuthStore } from '@/store/authStore';
 import StatusTag from '@/components/sales/StatusTag';
+import ServiceAllocationTable from '@/components/sales/ServiceAllocationTable';
 import ModuleCard from '@/components/customers/ModuleCard';
 import AvatarUpload from '@/components/customers/AvatarUpload';
 import PackagesTab from '@/components/customers/PackagesTab';
 import CountryStateFields from '@/components/customers/CountryStateFields';
 import { PHONE_CODE_OPTIONS, COUNTRY_PHONE_CODE_MAP, buildPhone } from '@/components/customers/countryData';
-import { formatDate, formatMoney } from '@shared/format';
+import { formatDate, formatMoney, titleCase } from '@shared/format';
+import { PAYMENT_METHODS } from '@shared/enums';
 import { colors } from '@/theme/colors';
 
 const { Title, Text } = Typography;
@@ -454,11 +471,17 @@ export default function CustomerDetailPage() {
   const [expandedModule, setExpandedModule] = useState<string | null>(null);
   const [selectedDetail, setSelectedDetail] = useState<any>(null);
   const [detailType, setDetailType] = useState<'history' | 'feedback' | 'document' | null>(null);
-  const [activeTab, setActiveTab] = useState<'history' | 'feedback' | 'documents'>('history');
+  const [activeTab, setActiveTab] = useState<'history' | 'feedback' | 'documents' | 'payments'>('history');
+  const [expandedInvoiceId, setExpandedInvoiceId] = useState<string | null>(null);
   const [expandedModuleView, setExpandedModuleView] = useState<string | null>(null);
   const [packageOfferStep, setPackageOfferStep] = useState<1 | 2 | 3 | 4>(1);
   const [savedBookingId, setSavedBookingId] = useState<string | null>(null);
   const [savedNetAmountPaise, setSavedNetAmountPaise] = useState<number>(0);
+  const [packagePaymentAmount, setPackagePaymentAmount] = useState<number>(0);
+  const [printMode, setPrintMode] = useState<'normal' | 'pos'>('normal');
+  const [pkgServiceAllocations, setPkgServiceAllocations] = useState<Record<string, number>>({});
+  const [savedBookingItems, setSavedBookingItems] = useState<any[]>([]);
+  const [showAllocationPanel, setShowAllocationPanel] = useState(false);
   const [bookingRows, setBookingRows] = useState<any[]>([{ id: 1, category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive', serviceBy: '', discPct: 0 }]);
   const [complimentaryRows, setComplimentaryRows] = useState<any[]>([]);
   const [couponInput, setCouponInput] = useState('');
@@ -497,6 +520,7 @@ export default function CustomerDetailPage() {
   ]);
   const moduleViewRef = useRef<HTMLDivElement>(null);
   const { message } = App.useApp();
+  const authUser = useAuthStore(s => s.user);
   const createCustomer = useCreateCustomer();
 
   // Scroll to module view when it's opened
@@ -512,6 +536,7 @@ export default function CustomerDetailPage() {
       setPackageOfferStep(1);
       setSavedBookingId(null);
       setSavedNetAmountPaise(0);
+      setPackagePaymentAmount(0);
       setBookingRows([{ id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive', serviceBy: '', discPct: 0 }]);
       setComplimentaryRows([]);
       setCouponInput('');
@@ -580,6 +605,7 @@ export default function CustomerDetailPage() {
     }
   }, [customer?.id]);
 
+
   const filteredCustomers = useMemo(() => {
     if (!allCustomers?.items) return [];
     const nameQuery = nameInput.trim().toLowerCase();
@@ -598,10 +624,67 @@ export default function CustomerDetailPage() {
   const bookingAction = useBookingAction(id);
   const [payModalBooking, setPayModalBooking] = useState<any>(null);
   const [payInput, setPayInput] = useState<string>('');
+  const [payMethod, setPayMethod] = useState<string>('cash');
+  const [payAllocations, setPayAllocations] = useState<Record<string, string>>({});
+
+  // Auto-distribute proportionally across items whenever the modal opens or the payment amount changes
+  useEffect(() => {
+    if (!payModalBooking || (payModalBooking.items?.length ?? 0) <= 1) return;
+    const paise = Math.round(parseFloat(payInput) * 100) || 0;
+    if (paise <= 0) { setPayAllocations({}); return; }
+    const items: any[] = payModalBooking.items ?? [];
+    const remaining = items.map((it: any) => Math.max(0, it.lineTotal - it.paidAmount));
+    const totalRemaining = remaining.reduce((s: number, r: number) => s + r, 0);
+    const newAllocs: Record<string, string> = {};
+    let distributed = 0;
+    items.forEach((it: any, idx: number) => {
+      if (idx === items.length - 1) {
+        newAllocs[it.id] = String(Math.max(0, paise - distributed) / 100);
+      } else {
+        const share = totalRemaining > 0 ? Math.round((remaining[idx] / totalRemaining) * paise) : 0;
+        newAllocs[it.id] = String(share / 100);
+        distributed += share;
+      }
+    });
+    setPayAllocations(newAllocs);
+  }, [payModalBooking, payInput]);
   const [creditNoteBooking, setCreditNoteBooking] = useState<any>(null);
   const [creditNoteText, setCreditNoteText] = useState('');
   const [bSearch, setBSearch] = useState('');
   const [bPage, setBPage] = useState(1);
+  const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [bkSessionModal, setBkSessionModal] = useState<{ bookingId: string; itemId?: string; serviceName?: string; totalSessions?: number; taken?: number; session?: any; branchId?: string; masterId?: string; masterInventoryItems?: any[] } | null>(null);
+  const [bkSessDate, setBkSessDate] = useState(new Date().toISOString().split('T')[0]);
+  const [bkSessStaffId, setBkSessStaffId] = useState('');
+  const [bkSessStatus, setBkSessStatus] = useState<'completed' | 'no_show' | 'cancelled' | 'rescheduled'>('completed');
+  const [bkSessRemarks, setBkSessRemarks] = useState('');
+  const [bkSessProducts, setBkSessProducts] = useState<Array<{ productId: string; productName: string; quantity: number; uom?: string }>>([]);
+  const [bkProdSearch, setBkProdSearch] = useState('');
+  const [bkSessSaving, setBkSessSaving] = useState(false);
+  const { data: sessionEmployees } = useSessionEmployees();
+  const { data: sessionProductsData } = useSessionProducts();
+  const { data: serviceDefaultProducts } = useServiceDefaultProducts(bkSessionModal?.serviceName ?? null, bkSessionModal?.branchId);
+
+  // Auto-populate service-mapped products into bkSessProducts when session modal opens.
+  // Package-level products (masterInventoryItems) are shown read-only in their own section
+  // and are NOT added here to avoid duplicate display.
+  useEffect(() => {
+    if (!bkSessionModal || bkSessionModal.session) return;
+    const svcProds = (serviceDefaultProducts ?? []).map((p) => ({
+      productId:   p.productId,
+      productName: p.productName,
+      quantity:    p.quantityPerSession,
+      uom:         p.uom ?? undefined,
+    }));
+    setBkSessProducts(svcProds);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serviceDefaultProducts, bkSessionModal?.itemId]);
+  const { data: expandedSessions, isLoading: expandedSessionsLoading } = useBookingSessions(id, expandedBookingId ?? '');
+  const addBookingSession      = useAddBookingSession(id, bkSessionModal?.bookingId ?? '');
+  const updateBookingSession   = useUpdateBookingSession(id, bkSessionModal?.bookingId ?? '');
+  const startBookingSession    = useStartBookingSession(id);
+  const completeBookingSession = useCompleteBookingSession(id);
   const { data: packages, isLoading: packagesLoading } = usePackages(id);
   const [sessionModalPkg, setSessionModalPkg] = useState<any>(null);
   const [sessionDate, setSessionDate] = useState(new Date().toISOString().split('T')[0]);
@@ -610,6 +693,8 @@ export default function CustomerDetailPage() {
   const [sessionStatus, setSessionStatus] = useState<'completed' | 'no_show' | 'cancelled' | 'rescheduled'>('completed');
   const [sessionSaving, setSessionSaving] = useState(false);
   const addSession = useAddPackageSession(id, sessionModalPkg?.id ?? '');
+  const { data: pkgProducts = [], isLoading: pkgProductsLoading } = usePkgSessionProducts(sessionModalPkg?.id);
+  const pkgProductGroups = pkgProducts as ServiceProductGroup[];
   const { data: offers, isLoading: offersLoading } = useOffers(id);
   const { data: prescriptions, isLoading: prescriptionsLoading } = usePrescriptions(id);
   const { data: medicalReports, isLoading: medicalReportsLoading } = useMedicalReports(id);
@@ -624,6 +709,8 @@ export default function CustomerDetailPage() {
 
   // Branch-assigned services (admin-assigned) drive the booking service picker.
   const { data: branchServices, isLoading: branchServicesLoading } = useBranchServices();
+  const { data: packageMasters = [] } = usePackageSessionMasters();
+  const [selectedPackageId, setSelectedPackageId] = useState<string>('');
   const { data: branchCurrentInfo } = useBranchCurrentInfo();
   const branchStateId = branchCurrentInfo?.stateId ?? null;
   const { data: complimentaryConfig } = useBranchComplimentaryConfig();
@@ -641,10 +728,7 @@ export default function CustomerDetailPage() {
     required: number;
     available: number;
   }
-  const [stockWarningOpen, setStockWarningOpen] = useState(false);
   const [stockShortfalls, setStockShortfalls] = useState<StockShortfall[]>([]);
-  const [stockIndentChecked, setStockIndentChecked] = useState<Set<string>>(new Set());
-  const [pendingBookingPayload, setPendingBookingPayload] = useState<Record<string, unknown> | null>(null);
   // Branch employees — used to populate the prescription "Doctor" dropdown.
   const { data: branchStaff, isLoading: branchStaffLoading } = useBranchEmployees();
 
@@ -898,17 +982,27 @@ export default function CustomerDetailPage() {
   const buildBookingPayload = (force = false): Record<string, unknown> => {
     const validRows = bookingRows.filter((r) => r.service && r.service.trim());
     const items = [
-      ...validRows.map((r) => ({
-        category: r.category || undefined,
-        service: r.service,
-        quantity: Math.max(1, Number(r.quantity) || 1),
-        amount: Math.round((Number(r.amount) || 0) * 100),
-      })),
+      ...validRows.map((r) => {
+        const svc = (branchServices ?? []).find((s: any) => s.name === r.service);
+        const flags = svc?.categoryFlags ?? {};
+        return {
+          category: r.category || undefined,
+          service: r.service,
+          quantity: Math.max(1, Number(r.quantity) || 1),
+          amount: Math.round((Number(r.amount) || 0) * 100),
+          isSessionBased: !!(r.isSessionBased || flags.sessionBased || flags.hasSession),
+          // Pass item-level tax for package rows (taxPercent > 0 means it was set explicitly)
+          ...(r.taxPercent ? { taxPercent: r.taxPercent, taxType: r.taxType ?? 'exclusive' } : {}),
+          // Link to Package Session Master if this row came from handleAddPackage
+          ...(r._masterId ? { packageSessionMasterId: r._masterId } : {}),
+        };
+      }),
       ...complimentaryRows.filter(r => r.service?.trim()).map((r) => ({
         category: undefined,
         service: r.service,
         quantity: Math.max(1, Number(r.quantity) || 1),
         amount: 0,
+        isSessionBased: false,
       })),
     ];
     const subtotalPaise = items.reduce((s, it) => s + (it.amount as number) * (it.quantity as number), 0);
@@ -929,36 +1023,46 @@ export default function CustomerDetailPage() {
     };
   };
 
-  const handleSaveBooking = async (force = false) => {
-    const validRows = bookingRows.filter((r) => r.service && r.service.trim());
-    if (!validRows.length) {
-      message.error('Add at least one service to save booking');
-      return;
-    }
-
+  // Returns the saved booking ID, or null if it failed.
+  const handleSaveBooking = async (force = false): Promise<{ id: string; items: any[] } | null> => {
     try {
       const payload = buildBookingPayload(force);
       const netPaise = payload._netPaise as number;
       const { _netPaise: _, ...apiPayload } = payload;
 
       const result = await createBooking.mutateAsync(apiPayload);
+      const bookingId = (result as any).id ?? null;
+      const retItems = (result as any).items ?? [];
 
-      setSavedBookingId((result as any).id ?? null);
+      setSavedBookingId(bookingId);
       setSavedNetAmountPaise(netPaise);
-
-      message.success('Booking saved! Showing receipt…');
-      setPackageOfferStep(2);
+      setSavedBookingItems(retItems);
+      return { id: bookingId, items: retItems };
     } catch (error) {
       if (error instanceof ApiClientError && error.code === 'STOCK_INSUFFICIENT') {
+        // Auto-proceed with forceCreate — stock shortage is a warning, not a blocker.
         const shortfalls: StockShortfall[] = (error.details ?? [])
           .filter((d) => d.field === 'shortfall')
           .map((d) => { try { return JSON.parse(d.message); } catch { return null; } })
           .filter(Boolean);
         setStockShortfalls(shortfalls);
-        setStockIndentChecked(new Set(shortfalls.map((s) => s.productId)));
-        setPendingBookingPayload(buildBookingPayload(true));
-        setStockWarningOpen(true);
-        return;
+        try {
+          const forcePayload = buildBookingPayload(true);
+          const forceNetPaise = forcePayload._netPaise as number;
+          const { _netPaise: __, ...forceApiPayload } = forcePayload;
+          const result = await createBooking.mutateAsync(forceApiPayload);
+          const bookingId = (result as any).id ?? null;
+          const retItems = (result as any).items ?? [];
+          setSavedBookingId(bookingId);
+          setSavedNetAmountPaise(forceNetPaise);
+          setSavedBookingItems(retItems);
+          const names = shortfalls.map((s) => s.productName).join(', ');
+          message.warning(`Booking saved. Low stock warning: ${names}. Please raise a stock request after booking.`, 6);
+          return { id: bookingId, items: retItems };
+        } catch (forceErr) {
+          message.error('Could not save booking: ' + (forceErr instanceof Error ? forceErr.message : 'Unknown error'));
+          return null;
+        }
       }
       message.error(
         'Error saving booking: ' +
@@ -968,30 +1072,17 @@ export default function CustomerDetailPage() {
               ? error.message
               : 'Unknown error'),
       );
+      return null;
     }
   };
 
-  const handleStockProceed = async () => {
-    if (!pendingBookingPayload) return;
-    try {
-      // Raise indents for checked products.
-      for (const s of stockShortfalls) {
-        if (stockIndentChecked.has(s.productId)) {
-          await raiseIndent.mutateAsync({
-            productId: s.productId,
-            requestedQty: Math.max(1, s.required - s.available),
-            reason: 'Auto-raised from booking form — insufficient stock',
-          });
-        }
-      }
-      const result = await createBooking.mutateAsync(pendingBookingPayload);
-      setSavedBookingId((result as any).id ?? null);
-      setStockWarningOpen(false);
-      message.success('Booking saved! Showing receipt…');
-      setPackageOfferStep(2);
-    } catch (err) {
-      message.error('Failed to complete booking: ' + (err instanceof Error ? err.message : 'Unknown error'));
+  const handleReviewBooking = () => {
+    const validRows = bookingRows.filter((r) => r.service && r.service.trim());
+    if (!validRows.length) {
+      message.error('Add at least one service to continue');
+      return;
     }
+    setPackageOfferStep(2);
   };
 
   const resetPrescriptionForm = () => {
@@ -999,6 +1090,83 @@ export default function CustomerDetailPage() {
     setEditingPrescription(null);
     setPrescriptionForm({ doctor: '', medications: '', diagnosis: '', notes: '' });
     setMedRows([{ id: 1, name: '', dosage: '', timing: [], when: '', duration: '' }]);
+  };
+
+  const buildRxText = (rx: any) => {
+    const lines: string[] = [];
+    lines.push(`*Prescription — ${customer?.name ?? ''}*`);
+    if (customer?.phone) lines.push(`Patient: ${customer.phone}`);
+    lines.push(`Date: ${new Date(rx.issuedAt || rx.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}`);
+    if (rx.prescribedBy) lines.push(`Doctor: Dr. ${rx.prescribedBy}`);
+    if (rx.diagnosis) lines.push(`Diagnosis: ${rx.diagnosis}`);
+    lines.push('');
+    const meds = (rx.medications ?? '').split('\n').map((m: string) => m.trim()).filter(Boolean);
+    if (meds.length) {
+      lines.push('Medications:');
+      meds.forEach((med: string, i: number) => { lines.push(`${i + 1}. ${med}`); });
+    }
+    if (rx.notes) { lines.push(''); lines.push(`Note: ${rx.notes}`); }
+    if (authUser?.branchName) lines.push(`\n${authUser.branchName}`);
+    return lines.join('\n');
+  };
+
+  const printPrescription = (rx: any) => {
+    const clinicName = authUser?.branchName ?? 'Welona Clinic';
+    const meds = (rx.medications ?? '').split('\n').map((m: string) => m.trim()).filter(Boolean);
+    const medsHtml = meds.map((med: string, i: number) => {
+      const parts = med.split(' · ');
+      const name = parts[0] ?? '';
+      const dosage = parts[1] ?? '';
+      const rest = parts.slice(2).join(' &nbsp;·&nbsp; ');
+      return `<tr>
+        <td style="padding:6px 8px;border:1px solid #e0e7ff;font-weight:600">${i + 1}</td>
+        <td style="padding:6px 8px;border:1px solid #e0e7ff">${name}</td>
+        <td style="padding:6px 8px;border:1px solid #e0e7ff;color:#555">${dosage}</td>
+        <td style="padding:6px 8px;border:1px solid #e0e7ff;color:#555">${rest}</td>
+      </tr>`;
+    }).join('');
+    const html = `<!DOCTYPE html><html><head><title>Prescription</title>
+    <style>
+      body { font-family: Arial, sans-serif; max-width: 700px; margin: 0 auto; padding: 32px; color: #111; }
+      h1 { font-size: 22px; color: #3730a3; margin: 0; }
+      .subtitle { color: #888; font-size: 12px; margin-top: 2px; }
+      .header { border-bottom: 2px solid #3730a3; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: flex-end; }
+      .patient { background: #eef2ff; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px; }
+      .label { font-size: 10px; text-transform: uppercase; color: #888; letter-spacing: .06em; margin-bottom: 2px; }
+      .value { font-size: 13px; font-weight: 600; }
+      table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 13px; }
+      th { background: #eef2ff; color: #3730a3; text-align: left; padding: 6px 8px; border: 1px solid #e0e7ff; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+      .notes { background: #fffbe6; border: 1px solid #ffe58f; border-left: 3px solid #faad14; border-radius: 6px; padding: 10px 14px; margin-top: 16px; font-size: 13px; color: #614700; }
+      .footer { margin-top: 40px; border-top: 1px solid #eee; padding-top: 12px; font-size: 11px; color: #aaa; display: flex; justify-content: space-between; }
+      @media print { body { padding: 20px; } }
+    </style></head><body>
+    <div class="header">
+      <div><h1>${clinicName}</h1><div class="subtitle">Medical Prescription</div></div>
+      <div style="font-size:12px;color:#555;text-align:right">
+        Date: <strong>${new Date(rx.issuedAt || rx.createdAt).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong>
+      </div>
+    </div>
+    <div class="patient">
+      <div style="display:flex;gap:32px">
+        <div><div class="label">Patient</div><div class="value">${customer?.name ?? ''}</div></div>
+        ${customer?.phone ? `<div><div class="label">Mobile</div><div class="value">${customer.phone}</div></div>` : ''}
+        ${rx.prescribedBy ? `<div><div class="label">Doctor</div><div class="value">Dr. ${rx.prescribedBy}</div></div>` : ''}
+        ${rx.diagnosis ? `<div><div class="label">Diagnosis</div><div class="value">${rx.diagnosis}</div></div>` : ''}
+      </div>
+    </div>
+    ${meds.length ? `
+    <div class="label" style="margin-bottom:6px">Medications</div>
+    <table><thead><tr><th>#</th><th>Medicine</th><th>Dosage</th><th>Instructions</th></tr></thead>
+    <tbody>${medsHtml}</tbody></table>` : ''}
+    ${rx.notes ? `<div class="notes"><strong>⚠️ Note:</strong> ${rx.notes}</div>` : ''}
+    <div class="footer">
+      <span>Rx — ${clinicName}</span>
+      <span>Generated on ${new Date().toLocaleDateString('en-IN')}</span>
+    </div>
+    <script>window.onload=function(){window.print();}<\/script>
+    </body></html>`;
+    const w = window.open('', '_blank');
+    if (w) { w.document.write(html); w.document.close(); }
   };
 
   const handleSavePrescription = () => {
@@ -1064,6 +1232,31 @@ export default function CustomerDetailPage() {
       }
       return row;
     }));
+  };
+
+  const handleAddPackage = () => {
+    if (!selectedPackageId) return;
+    const pkg = packageMasters.find(p => p.id === selectedPackageId);
+    if (!pkg) return;
+    // Package appears as a single line item — full price, package name as service label
+    const newRow = {
+      id: Date.now(),
+      category: 'Packages',
+      service: pkg.name,
+      quantity: 1,
+      amount: pkg.price / 100,   // paise → rupees for the form; qty=1 so total = full package price
+      taxPercent: 0,             // package selling price is all-inclusive — never add tax on top
+      taxType: 'exclusive',
+      serviceBy: '',
+      discPct: 0,
+      isSessionBased: true,
+      _isPackage: true,
+      _masterId: pkg.id, // link to Package Session Master for extra products
+    };
+    const hasRealRows = bookingRows.some(r => r.service?.trim());
+    setBookingRows(hasRealRows ? [...bookingRows, newRow] : [newRow]);
+    setSelectedPackageId('');
+    message.success(`Package "${pkg.name}" added to booking`);
   };
 
   return (
@@ -1345,7 +1538,7 @@ export default function CustomerDetailPage() {
             <>
               {/* Tab Navigation */}
               <div style={{ marginBottom: 16, display: 'flex', gap: 8, borderBottom: `2px solid ${colors.border}` }}>
-                {['history', 'feedback', 'documents'].map((tab) => (
+                {['history', 'payments', 'feedback', 'documents'].map((tab) => (
                   <button
                     key={tab}
                     onClick={() => { setActiveTab(tab as any); setSelectedDetail(null); setDetailType(null); }}
@@ -1375,6 +1568,7 @@ export default function CustomerDetailPage() {
                     }}
                   >
                     {tab === 'history' && '📋 History'}
+                    {tab === 'payments' && '💳 Payment History'}
                     {tab === 'feedback' && '⭐ Client Feedback'}
                     {tab === 'documents' && '📄 Client Documents'}
                   </button>
@@ -1500,6 +1694,201 @@ export default function CustomerDetailPage() {
                     </div>
                   ) : (
                     <Empty description="No feedback" style={{ marginTop: 40 }} />
+                  )}
+                </div>
+              )}
+
+              {/* Payment History Tab */}
+              {activeTab === 'payments' && (
+                <div>
+                  {salesLoading ? (
+                    <div style={{ textAlign: 'center', padding: 40 }}><Spin /></div>
+                  ) : (
+                    <>
+                      {/* Summary row */}
+                      {sales && (
+                        <Row gutter={16} style={{ marginBottom: 20 }}>
+                          <Col xs={8}>
+                            <div style={{ textAlign: 'center', padding: '12px 8px', background: '#f6ffed', borderRadius: 6, border: '1px solid #b7eb8f' }}>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: '#2e7d32' }}>{formatMoney(sales.summary.totalBilled)}</div>
+                              <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>Total Billed</div>
+                            </div>
+                          </Col>
+                          <Col xs={8}>
+                            <div style={{ textAlign: 'center', padding: '12px 8px', background: '#e6f4ff', borderRadius: 6, border: '1px solid #91caff' }}>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: '#1565c0' }}>{formatMoney(sales.summary.totalSpent)}</div>
+                              <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>Total Paid</div>
+                            </div>
+                          </Col>
+                          <Col xs={8}>
+                            <div style={{ textAlign: 'center', padding: '12px 8px', background: sales.summary.outstanding > 0 ? '#fff7e6' : '#f6ffed', borderRadius: 6, border: `1px solid ${sales.summary.outstanding > 0 ? '#ffd666' : '#b7eb8f'}` }}>
+                              <div style={{ fontSize: 16, fontWeight: 700, color: sales.summary.outstanding > 0 ? '#ad6800' : '#2e7d32' }}>{formatMoney(sales.summary.outstanding)}</div>
+                              <div style={{ fontSize: 11, color: '#555', marginTop: 2 }}>Outstanding</div>
+                            </div>
+                          </Col>
+                        </Row>
+                      )}
+
+                      {/* Booking payments section */}
+                      {bookings && bookings.filter((b: any) => b.paidAmount > 0).length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                          <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 10 }}>Service Bookings</Typography.Text>
+                          <div style={{ border: `1px solid ${colors.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                            <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                              <thead>
+                                <tr style={{ background: '#fafafa', color: colors.text.secondary, borderBottom: `1px solid ${colors.border}` }}>
+                                  <th style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 500 }}>Booking</th>
+                                  <th style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 500 }}>Date</th>
+                                  <th style={{ textAlign: 'left', padding: '8px 12px', fontWeight: 500 }}>Mode</th>
+                                  <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 500 }}>Total</th>
+                                  <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 500 }}>Paid</th>
+                                  <th style={{ textAlign: 'right', padding: '8px 12px', fontWeight: 500 }}>Balance</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {bookings.filter((b: any) => b.paidAmount > 0).map((b: any) => {
+                                  const bal = Math.max(0, b.netAmount - b.paidAmount);
+                                  const hasAllocations = b.items?.some((it: any) => it.paidAmount > 0);
+                                  const isExpanded = expandedBookingId === b.id;
+                                  return (
+                                    <>
+                                      <tr
+                                        key={b.id}
+                                        style={{ borderBottom: `1px solid ${colors.border}`, cursor: hasAllocations ? 'pointer' : 'default', background: isExpanded ? '#fafafa' : undefined }}
+                                        onClick={() => hasAllocations && setExpandedBookingId(isExpanded ? null : b.id)}
+                                      >
+                                        <td style={{ padding: '8px 12px' }}>
+                                          <div style={{ fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            {b.serviceName}
+                                            {hasAllocations && <span style={{ fontSize: 10, color: colors.text.secondary }}>{isExpanded ? '▲' : '▼'}</span>}
+                                          </div>
+                                          {b.number && <div style={{ fontSize: 11, color: colors.text.secondary }}>#{b.number}</div>}
+                                        </td>
+                                        <td style={{ padding: '8px 12px', color: colors.text.secondary }}>{formatDate(b.scheduledAt)}</td>
+                                        <td style={{ padding: '8px 12px', textTransform: 'capitalize', color: colors.text.secondary }}>{b.paymentMode || '—'}</td>
+                                        <td style={{ padding: '8px 12px', textAlign: 'right' }}>{formatMoney(b.netAmount)}</td>
+                                        <td style={{ padding: '8px 12px', textAlign: 'right', color: '#2e7d32', fontWeight: 600 }}>{formatMoney(b.paidAmount)}</td>
+                                        <td style={{ padding: '8px 12px', textAlign: 'right', color: bal > 0 ? '#c62828' : '#2e7d32', fontWeight: 600 }}>{formatMoney(bal)}</td>
+                                      </tr>
+                                      {isExpanded && hasAllocations && (
+                                        <tr key={`${b.id}-detail`} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                          <td colSpan={6} style={{ padding: '0 12px 10px 28px', background: '#fafafa' }}>
+                                            <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse', marginTop: 6 }}>
+                                              <thead>
+                                                <tr style={{ color: colors.text.secondary }}>
+                                                  <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Service</th>
+                                                  <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 500 }}>Total (₹)</th>
+                                                  <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 500 }}>Collected (₹)</th>
+                                                  <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 500 }}>Balance (₹)</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {b.items.filter((it: any) => it.paidAmount > 0).map((it: any) => {
+                                                  const itBal = Math.max(0, it.lineTotal - it.paidAmount);
+                                                  return (
+                                                    <tr key={it.id} style={{ borderTop: `1px solid ${colors.border}` }}>
+                                                      <td style={{ padding: '4px 8px' }}>{it.service}</td>
+                                                      <td style={{ padding: '4px 8px', textAlign: 'right' }}>{formatMoney(it.lineTotal)}</td>
+                                                      <td style={{ padding: '4px 8px', textAlign: 'right', color: '#2e7d32' }}>{formatMoney(it.paidAmount)}</td>
+                                                      <td style={{ padding: '4px 8px', textAlign: 'right', color: itBal > 0 ? '#c62828' : '#2e7d32' }}>{formatMoney(itBal)}</td>
+                                                    </tr>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+                                          </td>
+                                        </tr>
+                                      )}
+                                    </>
+                                  );
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Invoice list */}
+                      {!sales?.invoices?.length ? (
+                        <Empty description="No invoices yet" style={{ marginTop: 40 }} />
+                      ) : (
+                        <div>
+                          {sales.invoices.map((inv: any) => {
+                            const isExpanded = expandedInvoiceId === inv.id;
+                            const balance = inv.total - inv.amountPaid;
+                            return (
+                              <div key={inv.id} style={{ marginBottom: 8, border: `1px solid ${colors.border}`, borderRadius: 6, overflow: 'hidden' }}>
+                                {/* Invoice header row */}
+                                <div
+                                  onClick={() => setExpandedInvoiceId(isExpanded ? null : inv.id)}
+                                  style={{ display: 'flex', alignItems: 'center', padding: '10px 14px', cursor: 'pointer', background: isExpanded ? '#fafafa' : 'white', gap: 12 }}
+                                >
+                                  <Typography.Text strong style={{ fontSize: 13, minWidth: 90 }}>{inv.number}</Typography.Text>
+                                  <Typography.Text style={{ fontSize: 12, color: colors.text.secondary, flex: 1 }}>
+                                    {formatDate(inv.createdAt)}
+                                    {inv.order?.number ? ` · ${inv.order.number}` : ''}
+                                  </Typography.Text>
+                                  <Typography.Text style={{ fontSize: 12, minWidth: 80, textAlign: 'right' }}>{formatMoney(inv.total)}</Typography.Text>
+                                  <Typography.Text style={{ fontSize: 12, color: '#2e7d32', minWidth: 70, textAlign: 'right' }}>{formatMoney(inv.amountPaid)}</Typography.Text>
+                                  <Typography.Text style={{ fontSize: 12, color: balance > 0 ? '#c62828' : '#2e7d32', minWidth: 70, textAlign: 'right' }}>{formatMoney(balance)}</Typography.Text>
+                                  <StatusTag status={inv.status} />
+                                  <Typography.Text style={{ fontSize: 12, color: colors.text.secondary }}>{isExpanded ? '▲' : '▼'}</Typography.Text>
+                                </div>
+
+                                {/* Expanded detail */}
+                                {isExpanded && (
+                                  <div style={{ padding: '12px 14px', borderTop: `1px solid ${colors.border}`, background: '#fafafa' }}>
+                                    {/* Services breakdown */}
+                                    {inv.order?.items?.length > 0 ? (
+                                      <>
+                                        <Typography.Text strong style={{ fontSize: 12, display: 'block', marginBottom: 8, color: colors.text.secondary }}>SERVICES BREAKDOWN</Typography.Text>
+                                        <ServiceAllocationTable
+                                          items={inv.order.items}
+                                          invoiceTotal={inv.total}
+                                          amountPaid={inv.amountPaid}
+                                        />
+                                      </>
+                                    ) : (
+                                      <Typography.Text style={{ fontSize: 12, color: colors.text.secondary }}>No line item breakdown available.</Typography.Text>
+                                    )}
+
+                                    {/* Payment ledger */}
+                                    {inv.payments?.length > 0 && (
+                                      <>
+                                        <Typography.Text strong style={{ fontSize: 12, display: 'block', marginTop: 16, marginBottom: 8, color: colors.text.secondary }}>PAYMENTS RECEIVED</Typography.Text>
+                                        <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                                          <thead>
+                                            <tr style={{ color: colors.text.secondary, borderBottom: `1px solid ${colors.border}` }}>
+                                              <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Date</th>
+                                              <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Method</th>
+                                              <th style={{ textAlign: 'left', padding: '4px 8px', fontWeight: 500 }}>Reference</th>
+                                              <th style={{ textAlign: 'right', padding: '4px 8px', fontWeight: 500 }}>Amount</th>
+                                            </tr>
+                                          </thead>
+                                          <tbody>
+                                            {inv.payments.map((p: any) => (
+                                              <tr key={p.id} style={{ borderBottom: `1px solid ${colors.border}` }}>
+                                                <td style={{ padding: '6px 8px' }}>{formatDate(p.receivedAt)}</td>
+                                                <td style={{ padding: '6px 8px', textTransform: 'capitalize' }}>{p.method}</td>
+                                                <td style={{ padding: '6px 8px', color: colors.text.secondary }}>{p.reference || '—'}</td>
+                                                <td style={{ padding: '6px 8px', textAlign: 'right', fontWeight: 600, color: '#2e7d32' }}>{formatMoney(p.amount)}</td>
+                                              </tr>
+                                            ))}
+                                          </tbody>
+                                        </table>
+                                      </>
+                                    )}
+                                    {!inv.payments?.length && (
+                                      <Typography.Text style={{ fontSize: 12, color: colors.text.secondary, display: 'block', marginTop: 12 }}>No payments recorded yet.</Typography.Text>
+                                    )}
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </>
                   )}
                 </div>
               )}
@@ -1735,13 +2124,12 @@ export default function CustomerDetailPage() {
                                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Amount</th>
                                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Paid Amount</th>
                                 <th style={{ padding: '10px 12px', textAlign: 'right', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Balance Amount</th>
-                                <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>GST</th>
                                 <th style={{ padding: '10px 12px', textAlign: 'center', fontWeight: 600, color: '#444', whiteSpace: 'nowrap' }}>Manage</th>
                               </tr>
                             </thead>
                             <tbody>
                               {paged.length === 0 && (
-                                <tr><td colSpan={10} style={{ textAlign: 'center', padding: '32px 0', color: '#aaa' }}>No bookings found</td></tr>
+                                <tr><td colSpan={9} style={{ textAlign: 'center', padding: '32px 0', color: '#aaa' }}>No bookings found</td></tr>
                               )}
                               {paged.map((b: any, idx: number) => {
                                 const categories = [...new Set((b.items ?? []).map((it: any) => it.category).filter(Boolean))];
@@ -1751,9 +2139,24 @@ export default function CustomerDetailPage() {
                                 const balAmt = Math.max(0, netAmt - paidAmt);
                                 const isCancelled = b.status === 'cancelled';
                                 const isFullyPaid = balAmt === 0 && netAmt > 0;
+                                const isExpanded = expandedBookingId === b.id;
+                                // Build service list from data already in memory — no waiting for API
+                                const localItems: any[] = b.items && b.items.length > 0
+                                  ? b.items
+                                  : [{ id: b.id, service: b.serviceName ?? 'Service', category: b.categoryName ?? null, quantity: 1 }];
+                                const sessData = (expandedSessions as any);
+                                const allSessions: any[] = sessData?.sessions ?? [];
+                                // Use API items (have isSessionBased) once loaded, else fall back to localItems
+                                const displayItems: any[] = sessData?.items ?? localItems;
+                                const sessionItems = displayItems.filter((item: any) => item.isSessionBased);
+                                const singleItems = displayItems.filter((item: any) => !item.isSessionBased);
                                 return (
-                                  <tr key={b.id} style={{ borderBottom: `1px solid #f0f0f0`, background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
-                                    <td style={{ padding: '10px 12px', color: '#aaa' }}>⊕</td>
+                                  <>
+                                  <tr key={b.id} style={{ borderBottom: isExpanded ? 'none' : `1px solid #f0f0f0`, background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                    <td style={{ padding: '10px 12px', color: isExpanded ? '#1677ff' : '#aaa', cursor: 'pointer', fontSize: 16, userSelect: 'none' }}
+                                      onClick={() => { setExpandedBookingId(isExpanded ? null : b.id); setExpandedItemId(null); }}>
+                                      {isExpanded ? '⊖' : '⊕'}
+                                    </td>
                                     <td style={{ padding: '10px 12px' }}>
                                       <span style={{ color: '#1677ff', fontWeight: 600, cursor: 'pointer' }}>
                                         #{b.number ?? b.id.slice(0, 8)}
@@ -1767,29 +2170,6 @@ export default function CustomerDetailPage() {
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(netAmt / 100).toLocaleString('en-IN')}</td>
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(paidAmt / 100).toLocaleString('en-IN')}</td>
                                     <td style={{ padding: '10px 12px', textAlign: 'right' }}>{Math.round(balAmt / 100).toLocaleString('en-IN')}</td>
-                                    <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap', fontSize: 12 }}>
-                                      {(b.cgstAmt > 0 || b.igstAmt > 0) ? (
-                                        <div style={{ lineHeight: 1.6 }}>
-                                          {b.taxableAmt > 0 && (
-                                            <div style={{ color: '#888', fontSize: 11 }}>
-                                              Taxable: ₹{Math.round(b.taxableAmt / 100).toLocaleString('en-IN')}
-                                            </div>
-                                          )}
-                                          {b.igstAmt > 0 ? (
-                                            <span style={{ color: '#7b1fa2', fontWeight: 500 }}>
-                                              IGST: ₹{Math.round(b.igstAmt / 100).toLocaleString('en-IN')}
-                                            </span>
-                                          ) : (
-                                            <span style={{ color: '#1565c0' }}>
-                                              CGST: ₹{Math.round(b.cgstAmt / 100).toLocaleString('en-IN')}<br />
-                                              SGST: ₹{Math.round(b.sgstAmt / 100).toLocaleString('en-IN')}
-                                            </span>
-                                          )}
-                                        </div>
-                                      ) : (
-                                        <span style={{ color: '#bbb' }}>—</span>
-                                      )}
-                                    </td>
                                     <td style={{ padding: '10px 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                                       {isCancelled ? (
                                         <Tag color="red">Cancelled</Tag>
@@ -1798,7 +2178,7 @@ export default function CustomerDetailPage() {
                                       ) : (
                                         <div style={{ display: 'flex', gap: 6, justifyContent: 'center' }}>
                                           <button
-                                            onClick={() => { setPayModalBooking(b); setPayInput(String(Math.round(balAmt / 100))); }}
+                                            onClick={() => { setPayModalBooking(b); setPayInput(String(Math.round(balAmt / 100))); setPayMethod('cash'); }}
                                             style={{ background: '#d32f2f', color: '#fff', border: 'none', borderRadius: 4, padding: '4px 12px', fontSize: 12, fontWeight: 600, cursor: 'pointer' }}
                                           >
                                             Pay Now
@@ -1824,6 +2204,220 @@ export default function CustomerDetailPage() {
                                       )}
                                     </td>
                                   </tr>
+                                  {isExpanded && (
+                                      <tr key={b.id + '-sessions'} style={{ background: '#f7faff', borderBottom: `2px solid #d0e4ff` }}>
+                                        <td colSpan={10} style={{ padding: '0 0 0 32px' }}>
+
+                                            {/* Single / one-off services */}
+                                            {singleItems.length > 0 && (
+                                              <div style={{ padding: '10px 14px 6px', borderBottom: sessionItems.length > 0 ? '1px solid #dde8fb' : 'none' }}>
+                                                <div style={{ fontSize: 12, fontWeight: 700, color: '#555', marginBottom: 6, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Services</div>
+                                                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                                                  {singleItems.map((item: any) => (
+                                                    <div key={item.id} style={{ background: '#fff', border: '1px solid #e0e7ff', borderRadius: 6, padding: '5px 12px', fontSize: 13, color: '#333' }}>
+                                                      <span style={{ fontWeight: 600 }}>{item.service}</span>
+                                                      {item.quantity > 1 && <span style={{ marginLeft: 6, color: '#888', fontSize: 12 }}>× {item.quantity}</span>}
+                                                      {item.category && <span style={{ marginLeft: 6, fontSize: 11, color: '#aaa' }}>({item.category})</span>}
+                                                    </div>
+                                                  ))}
+                                                </div>
+                                              </div>
+                                            )}
+
+                                            {/* Session-based services */}
+                                            {sessionItems.length > 0 && (
+                                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                              <thead>
+                                                <tr style={{ background: '#e8f0fe', borderBottom: '2px solid #c5d8fb' }}>
+                                                  <th style={{ padding: '9px 14px', textAlign: 'left', fontWeight: 700, color: '#1a3a6b' }}>Session Service</th>
+                                                  <th style={{ padding: '9px 14px', textAlign: 'center', fontWeight: 700, color: '#1a3a6b' }}>Total Sessions</th>
+                                                  <th style={{ padding: '9px 14px', textAlign: 'center', fontWeight: 700, color: '#1a3a6b' }}>Sessions Taken</th>
+                                                  <th style={{ padding: '9px 14px', textAlign: 'center', fontWeight: 700, color: '#1a3a6b' }}>Balance Sessions</th>
+                                                  <th style={{ padding: '9px 14px', textAlign: 'center', fontWeight: 700, color: '#1a3a6b' }}>Action</th>
+                                                </tr>
+                                              </thead>
+                                              <tbody>
+                                                {sessionItems.map((item: any) => {
+                                                  const itemSessions = allSessions.filter((s: any) => s.bookingItemId === item.id);
+                                                  const taken = itemSessions.filter((s: any) => s.status === 'completed' || s.status === 'in_progress').length;
+                                                  const total = item.quantity;
+                                                  const balance = Math.max(0, total - taken);
+                                                  const itemExpanded = expandedItemId === item.id;
+                                                  const toggleItem = () => setExpandedItemId(itemExpanded ? null : item.id);
+                                                  return (
+                                                    <>
+                                                      <tr
+                                                        key={item.id}
+                                                        style={{ borderBottom: itemExpanded ? 'none' : '1px solid #dde8fb', background: itemExpanded ? '#edf3ff' : '#fff', cursor: 'pointer' }}
+                                                        onClick={() => toggleItem()}
+                                                      >
+                                                        <td style={{ padding: '10px 14px', color: '#1677ff', fontWeight: 500 }}>
+                                                          <span style={{ marginRight: 8, fontSize: 12, color: '#888' }}>{itemExpanded ? '▼' : '▶'}</span>
+                                                          {item.service}
+                                                          {item.category ? <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({item.category})</span> : null}
+                                                        </td>
+                                                        <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600 }}>{total}</td>
+                                                        <td style={{ padding: '10px 14px', textAlign: 'center', color: taken > 0 ? '#1677ff' : '#aaa', fontWeight: 600 }}>{taken}</td>
+                                                        <td style={{ padding: '10px 14px', textAlign: 'center', color: balance > 0 ? '#f57c00' : '#2e7d32', fontWeight: 700 }}>{balance}</td>
+                                                        <td style={{ padding: '10px 14px', textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+                                                          <button
+                                                            disabled={balance === 0}
+                                                            onClick={() => {
+                                                              if (balance === 0) return;
+                                                              // Look up inventory items from the live packageMasters list (always fresh).
+                                                              // Fall back to booking item data in case the master was deleted.
+                                                              const itemMasterId = (item as any).packageSessionMasterId ?? undefined;
+                                                              const liveMaster = packageMasters.find((m: any) => m.id === itemMasterId || m.name === item.service);
+                                                              const resolvedItems = liveMaster?.inventoryItems ?? (item as any).masterInventoryItems ?? [];
+                                                              setBkSessionModal({ bookingId: b.id, itemId: item.id, serviceName: item.service, totalSessions: total, taken, branchId: b.branchId ?? undefined, masterId: itemMasterId, masterInventoryItems: resolvedItems });
+                                                              setBkSessDate(new Date().toISOString().split('T')[0]);
+                                                              setBkSessStaffId('');
+                                                              setBkSessStatus('completed');
+                                                              setBkSessRemarks('');
+                                                              setBkSessProducts([]);
+                                                              setBkSessProducts([]);
+                                                              setBkProdSearch('');
+                                                            }}
+                                                            style={{ background: balance === 0 ? '#ccc' : '#2e7d32', color: '#fff', border: 'none', borderRadius: 5, padding: '6px 16px', fontSize: 12, fontWeight: 700, cursor: balance === 0 ? 'not-allowed' : 'pointer' }}
+                                                          >
+                                                            {balance === 0 ? 'Sessions Full' : 'Take Session'}
+                                                          </button>
+                                                        </td>
+                                                      </tr>
+                                                      {itemExpanded && (
+                                                        <tr key={item.id + '-detail'} style={{ background: '#f0f5ff' }}>
+                                                          <td colSpan={5} style={{ padding: '0 0 0 28px' }}>
+                                                            {itemSessions.length === 0 ? (
+                                                              <div style={{ padding: '10px 0', color: '#aaa', fontSize: 12 }}>No sessions logged for this service yet.</div>
+                                                            ) : (
+                                                              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                                                                <thead>
+                                                                  <tr style={{ background: '#dde8fb' }}>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>#</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Date</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Doctor / Therapist</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Status</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Start</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>End</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Duration</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Products Used</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600 }}>Remarks</th>
+                                                                    <th style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 600 }}>Actions</th>
+                                                                  </tr>
+                                                                </thead>
+                                                                <tbody>
+                                                                  {itemSessions.map((s: any) => (
+                                                                    <tr key={s.id} style={{ borderBottom: '1px solid #c8d8f8' }}>
+                                                                      <td style={{ padding: '6px 10px' }}>{s.sessionNumber}</td>
+                                                                      <td style={{ padding: '6px 10px', whiteSpace: 'nowrap' }}>
+                                                                        {new Date(s.sessionDate).toLocaleDateString('en-GB').replace(/\//g, '.')}
+                                                                      </td>
+                                                                      <td style={{ padding: '6px 10px' }}>{s.staffName || '—'}</td>
+                                                                      <td style={{ padding: '6px 10px' }}>
+                                                                        <span style={{
+                                                                          padding: '2px 8px', borderRadius: 10, fontSize: 11, fontWeight: 600,
+                                                                          background: s.status === 'completed' ? '#e8f5e9' : s.status === 'in_progress' ? '#e3f2fd' : s.status === 'no_show' ? '#fff3e0' : s.status === 'pending' ? '#f5f5f5' : '#fce4ec',
+                                                                          color: s.status === 'completed' ? '#2e7d32' : s.status === 'in_progress' ? '#1565c0' : s.status === 'no_show' ? '#e65100' : s.status === 'pending' ? '#888' : '#c62828',
+                                                                        }}>
+                                                                          {s.status === 'no_show' ? 'No Show' : s.status === 'in_progress' ? 'In Progress' : s.status.charAt(0).toUpperCase() + s.status.slice(1)}
+                                                                        </span>
+                                                                      </td>
+                                                                      <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', fontSize: 11, color: '#555' }}>
+                                                                        {s.startTime ? new Date(s.startTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                                      </td>
+                                                                      <td style={{ padding: '6px 10px', whiteSpace: 'nowrap', fontSize: 11, color: '#555' }}>
+                                                                        {s.endTime ? new Date(s.endTime).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }) : '—'}
+                                                                      </td>
+                                                                      <td style={{ padding: '6px 10px', fontSize: 11, color: '#555' }}>
+                                                                        {s.durationMinutes != null ? `${s.durationMinutes}m` : '—'}
+                                                                      </td>
+                                                                      <td style={{ padding: '6px 10px' }}>
+                                                                        {(s.products ?? []).length > 0 ? (
+                                                                          <Tooltip
+                                                                            title={
+                                                                              <div>
+                                                                                {(s.products as any[]).map((p: any) => (
+                                                                                  <div key={p.id} style={{ padding: '2px 0' }}>
+                                                                                    {p.productName} × {p.quantity}{p.uom ? ` ${p.uom}` : ''}
+                                                                                  </div>
+                                                                                ))}
+                                                                              </div>
+                                                                            }
+                                                                          >
+                                                                            <span style={{ cursor: 'pointer', background: '#f0f4ff', color: '#1565c0', borderRadius: 10, padding: '2px 10px', fontSize: 12, fontWeight: 600, whiteSpace: 'nowrap' }}>
+                                                                              {(s.products as any[]).length} product{(s.products as any[]).length > 1 ? 's' : ''}
+                                                                            </span>
+                                                                          </Tooltip>
+                                                                        ) : (
+                                                                          <span style={{ color: '#bbb' }}>—</span>
+                                                                        )}
+                                                                      </td>
+                                                                      <td style={{ padding: '6px 10px', color: '#555' }}>{s.remarks || '—'}</td>
+                                                                      <td style={{ padding: '6px 10px', textAlign: 'center', whiteSpace: 'nowrap' }}>
+                                                                        {s.status === 'in_progress' && (() => {
+                                                                          const startedAt = s.startTime ? new Date(s.startTime) : new Date(s.sessionDate);
+                                                                          const elapsedMs = Date.now() - startedAt.getTime();
+                                                                          const mins = Math.floor(elapsedMs / 60000);
+                                                                          const secs = Math.floor((elapsedMs % 60000) / 1000);
+                                                                          const elapsed = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+                                                                          return (
+                                                                            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 3 }}>
+                                                                              <span style={{ fontSize: 10, color: '#1565c0', fontWeight: 600, background: '#e3f2fd', borderRadius: 10, padding: '1px 7px' }}>
+                                                                                ⏱ {elapsed}
+                                                                              </span>
+                                                                              <button
+                                                                                onClick={async () => {
+                                                                                  try {
+                                                                                    await completeBookingSession.mutateAsync({ sessionId: s.id, bookingId: b.id, body: { action: 'complete' } });
+                                                                                    message.success('Session completed!');
+                                                                                  } catch (err: any) {
+                                                                                    message.error(err?.message ?? 'Failed to complete');
+                                                                                  }
+                                                                                }}
+                                                                                style={{ background: '#2e7d32', color: '#fff', border: 'none', borderRadius: 5, padding: '4px 12px', fontSize: 11, cursor: 'pointer', fontWeight: 700, whiteSpace: 'nowrap' }}
+                                                                              >
+                                                                                ✓ Complete
+                                                                              </button>
+                                                                            </div>
+                                                                          );
+                                                                        })()}
+                                                                        <button
+                                                                          onClick={() => {
+                                                                            setBkSessionModal({ bookingId: b.id, itemId: item.id, serviceName: item.service, totalSessions: total, taken, branchId: b.branchId ?? undefined, session: s });
+                                                                            setBkSessDate(s.sessionDate.split('T')[0]);
+                                                                            setBkSessStaffId(s.staffId ?? '');
+                                                                            setBkSessStatus(s.status);
+                                                                            setBkSessRemarks(s.remarks ?? '');
+                                                                            setBkSessProducts(s.products ?? []);
+                                                                            setBkProdSearch('');
+                                                                          }}
+                                                                          style={{ background: '#e3f2fd', color: '#1565c0', border: 'none', borderRadius: 4, padding: '3px 10px', fontSize: 11, cursor: 'pointer', fontWeight: 600 }}
+                                                                        >
+                                                                          Edit
+                                                                        </button>
+                                                                      </td>
+                                                                    </tr>
+                                                                  ))}
+                                                                </tbody>
+                                                              </table>
+                                                            )}
+                                                          </td>
+                                                        </tr>
+                                                      )}
+                                                    </>
+                                                  );
+                                                })}
+                                              </tbody>
+                                            </table>
+                                            )}
+
+                                            {sessionItems.length === 0 && singleItems.length === 0 && (
+                                              <div style={{ padding: '12px 14px', color: '#aaa', fontSize: 13 }}>No items on this booking.</div>
+                                            )}
+                                        </td>
+                                      </tr>
+                                  )}
+                                  </>
                                 );
                               })}
                             </tbody>
@@ -1855,6 +2449,270 @@ export default function CustomerDetailPage() {
                         </div>
                       </>
                     )}
+
+                    {/* Booking Session Modal */}
+                    {bkSessionModal && (() => {
+                      const employees: any[] = sessionEmployees ?? [];
+                      const productItems: any[] = (sessionProductsData as any)?.items ?? (Array.isArray(sessionProductsData) ? sessionProductsData : []);
+                      const totalSess = bkSessionModal.totalSessions ?? 0;
+                      const takenSess = bkSessionModal.taken ?? 0;
+                      const balanceSess = Math.max(0, totalSess - takenSess);
+                      const isEdit = !!bkSessionModal.session;
+
+                      const handleSave = async () => {
+                        setBkSessSaving(true);
+                        try {
+                          const now = new Date();
+                          // Combine service products + manually added extras + package-level products
+                          const pkgProductsForSave = (bkSessionModal.masterInventoryItems ?? []).map((m: any) => ({
+                            productId:   m.productId,
+                            productName: m.productName,
+                            quantity:    m.quantityPerSession ?? 1,
+                            uom:         m.uom ?? undefined,
+                          }));
+                          const allProducts = [...bkSessProducts, ...pkgProductsForSave.filter((m: any) => !bkSessProducts.find((r: any) => r.productId === m.productId))];
+                          const payload: any = {
+                            bookingItemId: bkSessionModal.itemId,
+                            serviceName:   bkSessionModal.serviceName,
+                            sessionDate:   now.toISOString(),
+                            staffId:       bkSessStaffId || undefined,
+                            status:        'in_progress',
+                            startTime:     now.toISOString(),
+                            remarks:       bkSessRemarks || undefined,
+                            products:      allProducts,
+                          };
+                          if (isEdit) {
+                            await updateBookingSession.mutateAsync({ sessionId: bkSessionModal.session.id, ...payload });
+                            message.success('Session updated');
+                          } else {
+                            await addBookingSession.mutateAsync(payload);
+                            message.success('Session started!');
+                            // Auto-expand the item row so the history is immediately visible
+                            if (bkSessionModal.itemId) setExpandedItemId(bkSessionModal.itemId);
+                          }
+                          setBkSessionModal(null);
+                        } catch (err: any) {
+                          message.error('Failed: ' + (err?.message ?? 'Unknown error'));
+                        } finally {
+                          setBkSessSaving(false);
+                        }
+                      };
+
+                      const nowStr = new Date().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+                      const todayStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
+
+                      // Build stock lookup from serviceDefaultProducts
+                      const stockByProductId = new Map<string, number | null>(
+                        (serviceDefaultProducts ?? []).map((p: any) => [p.productId, p.availableStock ?? null])
+                      );
+
+                      // Separate service-mapped products from manually added extras
+                      const serviceProductIds = new Set((serviceDefaultProducts ?? []).map((p: any) => p.productId));
+                      const svcProducts  = bkSessProducts.filter(r => serviceProductIds.has(r.productId));
+                      const extraProducts = bkSessProducts.filter(r => !serviceProductIds.has(r.productId));
+
+                      // Package products (set at package creation, given to customer)
+                      const pkgProducts = bkSessionModal.masterInventoryItems ?? [];
+
+                      return (
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
+                          <div style={{ background: '#fff', borderRadius: 16, width: '100%', maxWidth: 900, maxHeight: '92vh', boxShadow: '0 24px 64px rgba(0,0,0,0.22)', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+                            {/* Gradient accent bar */}
+                            <div style={{ height: 4, background: 'linear-gradient(90deg, #6366f1 0%, #06b6d4 100%)', flexShrink: 0 }} />
+
+                            {/* Header */}
+                            <div style={{ padding: '18px 28px', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+                              <div>
+                                <div style={{ fontSize: 16, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>
+                                  {isEdit ? `Edit Session #${bkSessionModal.session.sessionNumber}` : 'Take Session'}
+                                </div>
+                                {bkSessionModal.serviceName && (
+                                  <div style={{ fontSize: 12, color: '#94a3b8', marginTop: 3, letterSpacing: '0.01em' }}>{bkSessionModal.serviceName}</div>
+                                )}
+                              </div>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+                                <span style={{ fontSize: 12, color: '#cbd5e1', background: '#f8fafc', padding: '4px 10px', borderRadius: 6, border: '1px solid #f1f5f9' }}>{todayStr} · {nowStr}</span>
+                                <button onClick={() => setBkSessionModal(null)} style={{ background: 'none', border: '1px solid #e8e8e8', color: '#94a3b8', width: 32, height: 32, borderRadius: 8, cursor: 'pointer', fontSize: 15, lineHeight: '30px', textAlign: 'center', flexShrink: 0 }}>✕</button>
+                              </div>
+                            </div>
+
+                            {/* Body: 2 columns */}
+                            <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+
+                              {/* LEFT — session info */}
+                              <div style={{ width: 256, flexShrink: 0, borderRight: '1px solid #f0f0f0', padding: '24px 22px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 24, background: '#fafbfc' }}>
+
+                                {/* Session counter */}
+                                {totalSess > 0 && (
+                                  <div>
+                                    <div style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, marginBottom: 10 }}>Session Progress</div>
+                                    <div style={{ borderRadius: 12, overflow: 'hidden', border: '1px solid #e8ecf0' }}>
+                                      {[
+                                        { label: 'Total', value: totalSess, bg: '#f8fafc', color: '#334155' },
+                                        { label: 'Used', value: takenSess, bg: '#fff', color: '#64748b' },
+                                        { label: 'Remaining', value: balanceSess, bg: balanceSess > 0 ? '#f0fdf4' : '#fff5f5', color: balanceSess > 0 ? '#15803d' : '#dc2626' },
+                                      ].map((c, ci) => (
+                                        <div key={c.label} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '13px 16px', borderTop: ci > 0 ? '1px solid #f1f5f9' : 'none', background: c.bg }}>
+                                          <span style={{ fontSize: 12, color: '#64748b' }}>{c.label}</span>
+                                          <span style={{ fontSize: 20, fontWeight: 700, color: c.color }}>{c.value}</span>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Staff */}
+                                <div>
+                                  <label style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, display: 'block', marginBottom: 8 }}>Doctor / Therapist</label>
+                                  <select value={bkSessStaffId} onChange={e => setBkSessStaffId(e.target.value)}
+                                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: 9, fontSize: 13, background: '#fff', color: '#334155', outline: 'none' }}>
+                                    <option value="">Select staff</option>
+                                    {employees.map((emp: any) => (
+                                      <option key={emp.id} value={emp.id}>{emp.name}{emp.designation ? ` (${emp.designation})` : ''}</option>
+                                    ))}
+                                  </select>
+                                </div>
+
+                                {/* Remarks */}
+                                <div>
+                                  <label style={{ fontSize: 10, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 600, display: 'block', marginBottom: 8 }}>Remarks</label>
+                                  <textarea value={bkSessRemarks} onChange={e => setBkSessRemarks(e.target.value)} rows={5}
+                                    placeholder="Notes about this session…"
+                                    style={{ width: '100%', padding: '10px 12px', border: '1px solid #e2e8f0', borderRadius: 9, fontSize: 13, resize: 'none', background: '#fff', boxSizing: 'border-box', outline: 'none', fontFamily: 'inherit', color: '#334155', lineHeight: 1.6 }} />
+                                </div>
+                              </div>
+
+                              {/* RIGHT — products */}
+                              <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px', display: 'flex', flexDirection: 'column', gap: 26 }}>
+
+                                {/* Section A: Service Products */}
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                    <div style={{ width: 3, height: 16, borderRadius: 2, background: '#6366f1', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Service Products</span>
+                                    <span style={{ fontSize: 11, color: '#cbd5e1', marginLeft: 2 }}>consumed during session</span>
+                                  </div>
+                                  <div style={{ border: '1px solid #e8ecf0', borderRadius: 12, overflow: 'hidden' }}>
+                                    {svcProducts.length > 0 ? svcProducts.map((row, i) => {
+                                      const avail = stockByProductId.get(row.productId) ?? null;
+                                      const isLow = avail !== null && avail < row.quantity;
+                                      return (
+                                        <div key={row.productId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderTop: i > 0 ? '1px solid #f8fafc' : 'none', background: isLow ? '#fffcfc' : '#fff' }}>
+                                          <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.productName}</div>
+                                            <div style={{ fontSize: 11, color: isLow ? '#ef4444' : '#94a3b8', marginTop: 3 }}>
+                                              {avail !== null ? (isLow ? `⚠ Low — ${avail} ${row.uom ?? ''} left` : `${avail} ${row.uom ?? ''} in stock`) : 'Stock not tracked'}
+                                            </div>
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                            {row.uom && <span style={{ fontSize: 11, color: '#94a3b8', background: '#f1f5f9', padding: '3px 8px', borderRadius: 5 }}>{row.uom}</span>}
+                                            <input type="number" min={0.01} step={0.01} value={row.quantity}
+                                              onChange={e => { const v = parseFloat(e.target.value) || 1; setBkSessProducts(prev => prev.map(r => r.productId === row.productId ? { ...r, quantity: v } : r)); }}
+                                              style={{ width: 60, padding: '7px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, textAlign: 'center', outline: 'none', color: '#334155' }} />
+                                          </div>
+                                        </div>
+                                      );
+                                    }) : (
+                                      <div style={{ padding: '18px 20px', fontSize: 13, color: '#cbd5e1', fontStyle: 'italic' }}>No service products configured</div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Section B: Package Products */}
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                    <div style={{ width: 3, height: 16, borderRadius: 2, background: '#10b981', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Included in Package</span>
+                                    <span style={{ fontSize: 11, color: '#cbd5e1', marginLeft: 2 }}>give to customer</span>
+                                  </div>
+                                  <div style={{ border: '1px solid #e8ecf0', borderRadius: 12, overflow: 'hidden' }}>
+                                    {pkgProducts.length > 0 ? pkgProducts.map((m: any, i: number) => (
+                                      <div key={m.productId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderTop: i > 0 ? '1px solid #f8fafc' : 'none', background: '#fff' }}>
+                                        <div style={{ flex: 1, minWidth: 0 }}>
+                                          <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.productName}</div>
+                                          {m.uom && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 3 }}>{m.uom}</div>}
+                                        </div>
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                          {m.uom && <span style={{ fontSize: 11, color: '#94a3b8', background: '#f1f5f9', padding: '3px 8px', borderRadius: 5 }}>{m.uom}</span>}
+                                          <div style={{ width: 60, padding: '7px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, textAlign: 'center', color: '#64748b', background: '#f8fafc' }}>
+                                            {m.quantityPerSession ?? 1}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    )) : (
+                                      <div style={{ padding: '18px 20px', fontSize: 13, color: '#cbd5e1', fontStyle: 'italic' }}>No products included in this package</div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Section C: Additional Products */}
+                                <div>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+                                    <div style={{ width: 3, height: 16, borderRadius: 2, background: '#f59e0b', flexShrink: 0 }} />
+                                    <span style={{ fontSize: 12, fontWeight: 600, color: '#334155' }}>Additional Products</span>
+                                    <span style={{ fontSize: 11, color: '#cbd5e1', marginLeft: 2 }}>added for this session</span>
+                                  </div>
+                                  <div style={{ border: '1px solid #e8ecf0', borderRadius: 12, overflow: 'hidden' }}>
+                                    {extraProducts.length > 0 && extraProducts.map((row, i) => {
+                                      const avail = stockByProductId.get(row.productId) ?? null;
+                                      const isLow = avail !== null && avail < row.quantity;
+                                      return (
+                                        <div key={row.productId} style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '14px 18px', borderTop: i > 0 ? '1px solid #f8fafc' : 'none', background: '#fff' }}>
+                                          <div style={{ flex: 1, minWidth: 0 }}>
+                                            <div style={{ fontSize: 13, fontWeight: 500, color: '#1e293b', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.productName}</div>
+                                            {avail !== null && (
+                                              <div style={{ fontSize: 11, color: isLow ? '#ef4444' : '#94a3b8', marginTop: 3 }}>
+                                                {isLow ? `⚠ Low — ${avail} ${row.uom ?? ''} left` : `${avail} ${row.uom ?? ''} in stock`}
+                                              </div>
+                                            )}
+                                          </div>
+                                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+                                            {row.uom && <span style={{ fontSize: 11, color: '#94a3b8', background: '#f1f5f9', padding: '3px 8px', borderRadius: 5 }}>{row.uom}</span>}
+                                            <input type="number" min={0.01} step={0.01} value={row.quantity}
+                                              onChange={e => { const v = parseFloat(e.target.value) || 1; setBkSessProducts(prev => prev.map(r => r.productId === row.productId ? { ...r, quantity: v } : r)); }}
+                                              style={{ width: 60, padding: '7px 8px', border: '1px solid #e2e8f0', borderRadius: 7, fontSize: 13, textAlign: 'center', outline: 'none', color: '#334155' }} />
+                                            <button onClick={() => setBkSessProducts(prev => prev.filter(r => r.productId !== row.productId))}
+                                              style={{ background: 'none', border: 'none', color: '#cbd5e1', cursor: 'pointer', fontSize: 16, lineHeight: 1, padding: '0 4px' }}>✕</button>
+                                          </div>
+                                        </div>
+                                      );
+                                    })}
+                                    <div style={{ padding: '10px 14px', borderTop: extraProducts.length > 0 ? '1px solid #f8fafc' : 'none', background: '#fafbfc' }}>
+                                      <select value="" onChange={e => {
+                                        const prod = productItems.find((p: any) => p.id === e.target.value);
+                                        if (!prod || bkSessProducts.find(r => r.productId === prod.id)) return;
+                                        setBkSessProducts(prev => [...prev, { productId: prod.id, productName: prod.name, quantity: 1, uom: prod.uom }]);
+                                      }}
+                                        style={{ width: '100%', padding: '9px 12px', border: '1px dashed #e2e8f0', borderRadius: 8, fontSize: 13, color: '#94a3b8', background: 'transparent', outline: 'none' }}>
+                                        <option value="">+ Add product</option>
+                                        {productItems.filter((p: any) => !bkSessProducts.find(r => r.productId === p.id)).map((p: any) => (
+                                          <option key={p.id} value={p.id}>{p.name}{p.uom ? ` (${p.uom})` : ''}</option>
+                                        ))}
+                                      </select>
+                                    </div>
+                                  </div>
+                                </div>
+
+                              </div>
+                            </div>
+
+                            {/* Footer */}
+                            <div style={{ padding: '16px 28px', borderTop: '1px solid #f0f0f0', display: 'flex', gap: 12, flexShrink: 0, background: '#fafbfc' }}>
+                              <button onClick={() => setBkSessionModal(null)}
+                                style={{ padding: '11px 28px', border: '1px solid #e2e8f0', borderRadius: 9, background: '#fff', cursor: 'pointer', fontSize: 13, color: '#64748b', fontWeight: 500 }}>
+                                Cancel
+                              </button>
+                              <button disabled={bkSessSaving} onClick={handleSave}
+                                style={{ flex: 1, padding: '11px 24px', background: bkSessSaving ? '#94a3b8' : 'linear-gradient(90deg, #6366f1 0%, #06b6d4 100%)', color: '#fff', border: 'none', borderRadius: 9, cursor: bkSessSaving ? 'not-allowed' : 'pointer', fontSize: 14, fontWeight: 600, letterSpacing: '-0.01em' }}>
+                                {bkSessSaving ? 'Saving…' : isEdit ? 'Update Session' : 'Start Session'}
+                              </button>
+                            </div>
+
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     {/* Credit Note Modal */}
                     {creditNoteBooking && (
@@ -1929,65 +2787,210 @@ export default function CustomerDetailPage() {
                     )}
 
                     {/* Pay Now Modal */}
-                    {payModalBooking && (
-                      <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                        <div style={{ background: '#fff', borderRadius: 8, padding: 28, minWidth: 340, boxShadow: '0 8px 32px rgba(0,0,0,0.2)' }}>
-                          <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Record Payment</div>
-                          <div style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>Booking: #{payModalBooking.number ?? payModalBooking.id.slice(0, 8)}</div>
-                          <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 13 }}>
-                            <div>
-                              <div style={{ color: '#888', marginBottom: 2 }}>Net Amount (₹)</div>
-                              <div style={{ fontWeight: 700 }}>{Math.round((payModalBooking.netAmount ?? 0) / 100).toLocaleString('en-IN')}</div>
+                    {payModalBooking && (() => {
+                      const isMultiItem = (payModalBooking.items?.length ?? 0) > 1;
+                      const payAmtPaise = Math.round(parseFloat(payInput) * 100) || 0;
+                      const allocTotal = Object.values(payAllocations).reduce((s, v) => s + (Math.round(parseFloat(v) * 100) || 0), 0);
+                      const allocMismatch = isMultiItem && payAmtPaise > 0 && allocTotal !== payAmtPaise;
+                      const closePayModal = () => { setPayModalBooking(null); setPayInput(''); setPayMethod('cash'); setPayAllocations({}); };
+                      return (
+                        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                          <div style={{ background: '#fff', borderRadius: 8, padding: 28, minWidth: 380, maxWidth: 560, width: '100%', boxShadow: '0 8px 32px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+                            <div style={{ fontWeight: 700, fontSize: 16, marginBottom: 4 }}>Record Payment</div>
+                            <div style={{ fontSize: 12, color: '#888', marginBottom: 16 }}>Booking: #{payModalBooking.number ?? payModalBooking.id.slice(0, 8)}</div>
+                            <div style={{ display: 'flex', gap: 16, marginBottom: 14, fontSize: 13 }}>
+                              <div>
+                                <div style={{ color: '#888', marginBottom: 2 }}>Net Amount (₹)</div>
+                                <div style={{ fontWeight: 700 }}>{Math.round((payModalBooking.netAmount ?? 0) / 100).toLocaleString('en-IN')}</div>
+                              </div>
+                              <div>
+                                <div style={{ color: '#888', marginBottom: 2 }}>Already Paid (₹)</div>
+                                <div style={{ fontWeight: 700 }}>{Math.round((payModalBooking.paidAmount ?? 0) / 100).toLocaleString('en-IN')}</div>
+                              </div>
+                              <div>
+                                <div style={{ color: '#888', marginBottom: 2 }}>Balance (₹)</div>
+                                <div style={{ fontWeight: 700, color: '#d32f2f' }}>{Math.round(Math.max(0, (payModalBooking.netAmount ?? 0) - (payModalBooking.paidAmount ?? 0)) / 100).toLocaleString('en-IN')}</div>
+                              </div>
                             </div>
-                            <div>
-                              <div style={{ color: '#888', marginBottom: 2 }}>Already Paid (₹)</div>
-                              <div style={{ fontWeight: 700 }}>{Math.round((payModalBooking.paidAmount ?? 0) / 100).toLocaleString('en-IN')}</div>
-                            </div>
-                            <div>
-                              <div style={{ color: '#888', marginBottom: 2 }}>Balance (₹)</div>
-                              <div style={{ fontWeight: 700, color: '#d32f2f' }}>{Math.round(Math.max(0, (payModalBooking.netAmount ?? 0) - (payModalBooking.paidAmount ?? 0)) / 100).toLocaleString('en-IN')}</div>
-                            </div>
-                          </div>
-                          <div style={{ marginBottom: 16 }}>
-                            <label style={{ fontSize: 12, color: '#555', display: 'block', marginBottom: 4 }}>Amount to Pay Now (₹)</label>
-                            <Input
-                              type="number"
-                              min={1}
-                              value={payInput}
-                              onChange={e => setPayInput(e.target.value)}
-                              style={{ width: '100%' }}
-                            />
-                          </div>
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                            <Button onClick={() => setPayModalBooking(null)}>Cancel</Button>
-                            <Button
-                              type="primary"
-                              loading={bookingAction.isPending}
-                              style={{ background: '#d32f2f', borderColor: '#d32f2f' }}
-                              onClick={() => {
-                                const amt = Math.round(parseFloat(payInput) * 100);
-                                if (!amt || amt <= 0) return;
-                                bookingAction.mutate(
-                                  { bookingId: payModalBooking.id, action: 'pay', amount: amt },
-                                  { onSuccess: () => setPayModalBooking(null) }
+                            <div style={{ marginBottom: 12 }}>
+                              {(() => {
+                                const balanceRupees = Math.max(0, (payModalBooking.netAmount ?? 0) - (payModalBooking.paidAmount ?? 0)) / 100;
+                                const enteredAmt = parseFloat(payInput) || 0;
+                                const isOverLimit = enteredAmt > balanceRupees && balanceRupees > 0;
+                                return (
+                                  <>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+                                      <label style={{ fontSize: 12, color: '#555' }}>Amount to Pay Now (₹)</label>
+                                      <button
+                                        type="button"
+                                        onClick={() => setPayInput(String(balanceRupees))}
+                                        style={{ fontSize: 11, color: '#1677ff', background: 'none', border: 'none', cursor: 'pointer', padding: 0, fontWeight: 500 }}
+                                      >
+                                        Full Amount
+                                      </button>
+                                    </div>
+                                    <InputNumber
+                                      style={{ width: '100%' }}
+                                      status={isOverLimit ? 'error' : undefined}
+                                      min={0.01}
+                                      max={balanceRupees}
+                                      precision={2}
+                                      value={payInput ? parseFloat(payInput) || undefined : undefined}
+                                      onChange={v => {
+                                        if (v == null) { setPayInput(''); return; }
+                                        if (v > balanceRupees) { setPayInput(String(balanceRupees)); return; }
+                                        setPayInput(String(v));
+                                      }}
+                                      formatter={v => v !== undefined && v !== '' ? Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 }) : ''}
+                                      parser={v => (v?.replace(/[^0-9.]/g, '') ?? '') as unknown as number}
+                                    />
+                                    {isOverLimit && (
+                                      <div style={{ fontSize: 11, color: '#ff4d4f', marginTop: 3 }}>
+                                        Cannot exceed balance of ₹{balanceRupees.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                      </div>
+                                    )}
+                                  </>
                                 );
-                              }}
-                            >
-                              Confirm Payment
-                            </Button>
+                              })()}
+                            </div>
+                            <div style={{ marginBottom: 14 }}>
+                              <label style={{ fontSize: 12, color: '#555', display: 'block', marginBottom: 4 }}>Payment Mode</label>
+                              <Select
+                                value={payMethod}
+                                onChange={setPayMethod}
+                                style={{ width: '100%' }}
+                                options={PAYMENT_METHODS.map(m => ({ label: titleCase(m), value: m }))}
+                              />
+                            </div>
+                            {isMultiItem && (
+                              <div style={{ marginBottom: 14 }}>
+                                <div style={{ fontSize: 12, color: '#555', fontWeight: 500, marginBottom: 8 }}>Service-wise Allocation</div>
+                                <div style={{ border: '1px solid #e8e8e8', borderRadius: 4, overflow: 'hidden' }}>
+                                  <table style={{ width: '100%', fontSize: 12, borderCollapse: 'collapse' }}>
+                                    <thead>
+                                      <tr style={{ background: '#fafafa', borderBottom: '1px solid #e8e8e8' }}>
+                                        <th style={{ textAlign: 'left', padding: '6px 10px', fontWeight: 500, color: '#555' }}>Service</th>
+                                        <th style={{ textAlign: 'right', padding: '6px 10px', fontWeight: 500, color: '#555' }}>Total (₹)</th>
+                                        <th style={{ textAlign: 'right', padding: '6px 10px', fontWeight: 500, color: '#555' }}>Collected (₹)</th>
+                                        <th style={{ textAlign: 'right', padding: '6px 10px', fontWeight: 500, color: '#555' }}>Balance (₹)</th>
+                                        <th style={{ textAlign: 'right', padding: '6px 10px', fontWeight: 500, color: '#555' }}>Allocate Now</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {(payModalBooking.items ?? []).map((it: any) => {
+                                        const bal = Math.max(0, it.lineTotal - it.paidAmount);
+                                        return (
+                                          <tr key={it.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                                            <td style={{ padding: '6px 10px' }}>{it.service}</td>
+                                            <td style={{ padding: '6px 10px', textAlign: 'right' }}>{(it.lineTotal / 100).toLocaleString('en-IN')}</td>
+                                            <td style={{ padding: '6px 10px', textAlign: 'right', color: '#2e7d32' }}>{(it.paidAmount / 100).toLocaleString('en-IN')}</td>
+                                            <td style={{ padding: '6px 10px', textAlign: 'right', color: bal > 0 ? '#c62828' : '#2e7d32' }}>{(bal / 100).toLocaleString('en-IN')}</td>
+                                            <td style={{ padding: '4px 8px', textAlign: 'right' }}>
+                                              <InputNumber
+                                                size="small"
+                                                min={0}
+                                                max={bal / 100}
+                                                precision={2}
+                                                value={payAllocations[it.id] !== undefined ? parseFloat(payAllocations[it.id]) || 0 : 0}
+                                                onChange={v => setPayAllocations(prev => ({ ...prev, [it.id]: String(v ?? 0) }))}
+                                                style={{ width: 80 }}
+                                              />
+                                            </td>
+                                          </tr>
+                                        );
+                                      })}
+                                    </tbody>
+                                    <tfoot>
+                                      <tr style={{ background: '#fafafa', borderTop: '1px solid #e8e8e8' }}>
+                                        <td colSpan={4} style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 500, color: '#555' }}>Total allocated:</td>
+                                        <td style={{ padding: '6px 10px', textAlign: 'right', fontWeight: 700, color: allocMismatch ? '#c62828' : '#2e7d32' }}>
+                                          ₹{(allocTotal / 100).toLocaleString('en-IN')}
+                                          {allocMismatch && <div style={{ fontSize: 11, fontWeight: 400, color: '#c62828' }}>must equal ₹{(payAmtPaise / 100).toLocaleString('en-IN')}</div>}
+                                        </td>
+                                      </tr>
+                                    </tfoot>
+                                  </table>
+                                </div>
+                              </div>
+                            )}
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                              <Button onClick={closePayModal}>Cancel</Button>
+                              <Button
+                                type="primary"
+                                loading={bookingAction.isPending}
+                                style={{ background: '#d32f2f', borderColor: '#d32f2f' }}
+                                onClick={() => {
+                                  const amt = Math.round(parseFloat(payInput) * 100);
+                                  if (!amt || amt <= 0) return;
+                                  const maxAmt = Math.max(0, (payModalBooking.netAmount ?? 0) - (payModalBooking.paidAmount ?? 0));
+                                  if (amt > maxAmt) { message.error('Amount cannot exceed the balance due.'); return; }
+                                  if (allocMismatch) {
+                                    message.error('Allocation total must equal the payment amount');
+                                    return;
+                                  }
+                                  const serviceAllocations = isMultiItem
+                                    ? Object.entries(payAllocations)
+                                        .map(([bookingItemId, v]) => ({ bookingItemId, amount: Math.round(parseFloat(v) * 100) || 0 }))
+                                        .filter(a => a.amount > 0)
+                                    : (payModalBooking.items?.length === 1
+                                        ? [{ bookingItemId: payModalBooking.items[0].id, amount: amt }]
+                                        : undefined);
+                                  bookingAction.mutate(
+                                    { bookingId: payModalBooking.id, action: 'pay', amount: amt, paymentMode: payMethod, serviceAllocations },
+                                    {
+                                      onSuccess: () => {
+                                        message.success('Payment recorded successfully');
+                                        closePayModal();
+                                      },
+                                      onError: (e: unknown) => {
+                                        message.error(e instanceof ApiClientError ? e.message : 'Failed to record payment');
+                                      },
+                                    }
+                                  );
+                                }}
+                              >
+                                Confirm Payment
+                              </Button>
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    )}
+                      );
+                    })()}
                   </div>
                 );
               })()}
 
               {expandedModuleView === 'packages' && (
                 <div>
-                  {/* Add Session Modal */}
+                  {/* Add Session Modal — wide rectangle layout */}
                   <Modal
-                    title={`Add Session — ${sessionModalPkg?.name ?? ''}`}
+                    title={
+                      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingRight: 8 }}>
+                        <div>
+                          <div style={{ fontSize: 15, fontWeight: 700 }}>{sessionModalPkg?.name ?? 'Use Session'}</div>
+                          <div style={{ fontSize: 12, color: '#888', fontWeight: 400, marginTop: 2 }}>Record a session for this package</div>
+                        </div>
+                        {sessionModalPkg && (() => {
+                          const total = sessionModalPkg.totalSessions ?? 0;
+                          const used  = sessionModalPkg.usedSessions ?? 0;
+                          const rem   = Math.max(0, total - used);
+                          return (
+                            <div style={{ display: 'flex', gap: 0, border: '1px solid #f0f0f0', borderRadius: 8, overflow: 'hidden', background: '#fafafa' }}>
+                              {[
+                                { label: 'Total', value: total, color: '#1677ff' },
+                                { label: 'Used', value: used, color: '#595959' },
+                                { label: 'Remaining', value: rem, color: rem === 0 ? '#ff4d4f' : '#52c41a' },
+                              ].map(({ label, value, color }, i) => (
+                                <div key={label} style={{ textAlign: 'center', borderLeft: i > 0 ? '1px solid #f0f0f0' : 'none', padding: '4px 16px' }}>
+                                  <div style={{ fontSize: 20, fontWeight: 800, color, lineHeight: 1 }}>{value}</div>
+                                  <div style={{ fontSize: 10, color: '#8c8c8c', marginTop: 2 }}>{label}</div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    }
                     open={!!sessionModalPkg}
                     onCancel={() => {
                       setSessionModalPkg(null);
@@ -1998,6 +3001,8 @@ export default function CustomerDetailPage() {
                     }}
                     confirmLoading={sessionSaving}
                     okText="Save Session"
+                    width={920}
+                    styles={{ body: { maxHeight: 'calc(100vh - 240px)', overflowY: 'auto', padding: '16px 24px' } }}
                     onOk={async () => {
                       if (!sessionDate) { message.error('Select a session date'); return; }
                       setSessionSaving(true);
@@ -2028,49 +3033,148 @@ export default function CustomerDetailPage() {
                       }
                     }}
                   >
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                      <div>
-                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Session Status <span style={{ color: 'red' }}>*</span></label>
-                        <select
-                          value={sessionStatus}
-                          onChange={(e) => setSessionStatus(e.target.value as typeof sessionStatus)}
-                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13, background: '#fff' }}
-                        >
-                          <option value="completed">Completed</option>
-                          <option value="no_show">No Show</option>
-                          <option value="cancelled">Cancelled</option>
-                          <option value="rescheduled">Rescheduled</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Session Date <span style={{ color: 'red' }}>*</span></label>
-                        <input type="date" value={sessionDate} onChange={(e) => setSessionDate(e.target.value)}
-                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Staff / Therapist</label>
-                        <input type="text" value={sessionStaff} onChange={(e) => setSessionStaff(e.target.value)}
-                          placeholder="Name of staff who performed"
-                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13 }} />
-                      </div>
-                      <div>
-                        <label style={{ fontSize: 12, fontWeight: 500, display: 'block', marginBottom: 4 }}>Remarks</label>
-                        <textarea value={sessionRemarks} onChange={(e) => setSessionRemarks(e.target.value)} rows={2}
-                          placeholder="Optional notes about this session"
-                          style={{ width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: 4, fontSize: 13, resize: 'vertical', fontFamily: 'inherit' }} />
-                      </div>
-                      {sessionModalPkg && (
-                        <div style={{
-                          background: sessionStatus === 'completed' ? '#f6ffed' : '#fff7e6',
-                          border: `1px solid ${sessionStatus === 'completed' ? '#b7eb8f' : '#ffd591'}`,
-                          borderRadius: 4, padding: '8px 12px', fontSize: 12,
-                        }}>
-                          {sessionStatus === 'completed'
-                            ? <>Remaining sessions: <strong>{(sessionModalPkg.totalSessions ?? 0) - (sessionModalPkg.usedSessions ?? 0)}</strong> of {sessionModalPkg.totalSessions ?? 0} — 1 will be deducted</>
-                            : <>Remaining sessions: <strong>{(sessionModalPkg.totalSessions ?? 0) - (sessionModalPkg.usedSessions ?? 0)}</strong> of {sessionModalPkg.totalSessions ?? 0} — no deduction for {sessionStatus.replace('_', ' ')}</>
-                          }
+                    {/* Wide 3-column layout: form fields | service products | package extras */}
+                    <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
+
+                      {/* Column 1: Form inputs (fixed 220px) */}
+                      <div style={{ width: 220, flexShrink: 0 }}>
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4, color: '#555' }}>Status <span style={{ color: 'red' }}>*</span></label>
+                          <select value={sessionStatus} onChange={e => setSessionStatus(e.target.value as typeof sessionStatus)}
+                            style={{ width: '100%', padding: '7px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 13, background: '#fff' }}>
+                            <option value="completed">Completed</option>
+                            <option value="no_show">No Show</option>
+                            <option value="cancelled">Cancelled</option>
+                            <option value="rescheduled">Rescheduled</option>
+                          </select>
                         </div>
-                      )}
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4, color: '#555' }}>Date <span style={{ color: 'red' }}>*</span></label>
+                          <input type="date" value={sessionDate} onChange={e => setSessionDate(e.target.value)}
+                            style={{ width: '100%', padding: '7px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                        </div>
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4, color: '#555' }}>Staff / Therapist</label>
+                          <input type="text" value={sessionStaff} onChange={e => setSessionStaff(e.target.value)} placeholder="Name"
+                            style={{ width: '100%', padding: '7px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 13, boxSizing: 'border-box' }} />
+                        </div>
+                        <div style={{ marginBottom: 10 }}>
+                          <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4, color: '#555' }}>Remarks</label>
+                          <textarea value={sessionRemarks} onChange={e => setSessionRemarks(e.target.value)} rows={3}
+                            placeholder="Optional notes"
+                            style={{ width: '100%', padding: '7px 10px', border: '1px solid #d9d9d9', borderRadius: 6, fontSize: 13, resize: 'none', fontFamily: 'inherit', boxSizing: 'border-box' }} />
+                        </div>
+
+                        {/* Deduction note */}
+                        {sessionModalPkg && (
+                          <div style={{
+                            background: sessionStatus === 'completed' ? '#f6ffed' : '#fff7e6',
+                            border: `1px solid ${sessionStatus === 'completed' ? '#b7eb8f' : '#ffd591'}`,
+                            borderRadius: 6, padding: '8px 10px', fontSize: 12, color: '#555',
+                          }}>
+                            {sessionStatus === 'completed' ? (
+                              <>
+                                <strong style={{ color: '#52c41a' }}>1 session deducted</strong>
+                                <div style={{ marginTop: 2 }}><strong>{Math.max(0, (sessionModalPkg.totalSessions ?? 0) - (sessionModalPkg.usedSessions ?? 0) - 1)}</strong> remaining after save</div>
+                              </>
+                            ) : (
+                              <><strong style={{ color: '#fa8c16' }}>No deduction</strong> for &quot;{sessionStatus.replace('_', ' ')}&quot;</>
+                            )}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Column 2: Service Products (auto-consumed) */}
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#1677ff', flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#1677ff', textTransform: 'uppercase', letterSpacing: 0.4 }}>Service Products</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>Consumed from inventory automatically each session</div>
+
+                        {pkgProductsLoading ? (
+                          <div style={{ textAlign: 'center', padding: '16px 0' }}><Spin size="small" /></div>
+                        ) : pkgProductGroups.length === 0 ? (
+                          <div style={{ fontSize: 12, color: '#bfbfbf', fontStyle: 'italic', padding: '10px 12px', border: '1px solid #d6e4ff', borderRadius: 8, background: '#f0f5ff' }}>
+                            No products mapped to services in this package.
+                          </div>
+                        ) : (
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                            {pkgProductGroups.map((group: ServiceProductGroup) => (
+                              <div key={group.serviceId} style={{ border: '1px solid #d6e4ff', borderRadius: 8, overflow: 'hidden' }}>
+                                <div style={{ background: '#d6e4ff', padding: '5px 10px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                  <span style={{ fontWeight: 700, fontSize: 12, color: '#003eb3' }}>{group.serviceName}</span>
+                                  <span style={{ fontSize: 10, color: '#4096ff', background: '#fff', padding: '1px 6px', borderRadius: 10, fontWeight: 600 }}>
+                                    {group.effectiveSessions} session{group.effectiveSessions !== 1 ? 's' : ''}
+                                  </span>
+                                </div>
+                                {group.products.map((r: SessionProduct, ri: number) => {
+                                  const needed = r.quantityPerSession;
+                                  const uom = r.consumptionUom ?? r.uom ?? '';
+                                  const cu = r.consumableUnit;
+                                  const isLow = cu ? cu.remaining < needed : r.isLowStock;
+                                  const stockLabel = cu
+                                    ? (cu.remaining < needed
+                                        ? `⚠ Only ${cu.remaining.toFixed(1)} ${uom} left`
+                                        : `✓ ${cu.remaining.toFixed(1)} ${uom} available`)
+                                    : (r.availableStock !== null
+                                        ? (isLow ? `⚠ Low: ${r.availableStock} ${uom}` : `✓ Stock: ${r.availableStock} ${uom}`)
+                                        : null);
+                                  return (
+                                    <div key={r.productId} style={{
+                                      padding: '7px 10px', borderTop: ri > 0 ? '1px solid #d6e4ff' : 'none',
+                                      background: isLow ? '#fff2f0' : '#f0f5ff',
+                                      display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8,
+                                    }}>
+                                      <div style={{ minWidth: 0 }}>
+                                        <div style={{ fontWeight: 600, fontSize: 12, color: '#111', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.productName}</div>
+                                        {stockLabel && <div style={{ fontSize: 11, marginTop: 1, color: isLow ? '#ff4d4f' : '#52c41a', fontWeight: 500 }}>{stockLabel}</div>}
+                                      </div>
+                                      <span style={{ fontSize: 12, fontWeight: 700, color: '#1677ff', background: '#e6f0ff', padding: '2px 8px', borderRadius: 5, whiteSpace: 'nowrap', flexShrink: 0 }}>
+                                        {needed} {uom}
+                                      </span>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Column 3: Package Extra Products (given to customer) */}
+                      <div style={{ width: 220, flexShrink: 0 }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          <div style={{ width: 10, height: 10, borderRadius: '50%', background: '#52c41a', flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, fontWeight: 700, color: '#389e0d', textTransform: 'uppercase', letterSpacing: 0.4 }}>Given to Customer</span>
+                        </div>
+                        <div style={{ fontSize: 11, color: '#888', marginBottom: 8 }}>Additional products from this package</div>
+
+                        {(() => {
+                          const extras: any[] = sessionModalPkg?.master?.inventoryItems ?? [];
+                          if (extras.length === 0) {
+                            return (
+                              <div style={{ fontSize: 12, color: '#bfbfbf', fontStyle: 'italic', padding: '10px 12px', border: '1px solid #d9f7be', borderRadius: 8, background: '#f6ffed', textAlign: 'center' }}>
+                                No extra products added to this package.
+                              </div>
+                            );
+                          }
+                          return (
+                            <div style={{ border: '1px solid #d9f7be', borderRadius: 8, overflow: 'hidden', background: '#f6ffed' }}>
+                              {extras.map((item: any, ei: number) => (
+                                <div key={item.productId ?? ei} style={{ padding: '8px 10px', borderTop: ei > 0 ? '1px solid #d9f7be' : 'none' }}>
+                                  <div style={{ fontWeight: 600, fontSize: 12, color: '#111' }}>{item.productName ?? item.name}</div>
+                                  <div style={{ fontSize: 12, fontWeight: 700, color: '#389e0d', marginTop: 2 }}>
+                                    {item.quantityPerSession ?? item.qty ?? 1} {item.uom ?? ''}
+                                    <span style={{ fontWeight: 400, color: '#888', fontSize: 11, marginLeft: 4 }}>per session</span>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
                     </div>
                   </Modal>
 
@@ -2503,6 +3607,36 @@ export default function CustomerDetailPage() {
                                     {rx.diagnosis}
                                   </span>
                                 )}
+                                {/* Print */}
+                                <button
+                                  title="Print / Save PDF"
+                                  onClick={() => printPrescription(rx)}
+                                  style={{ background: '#f0f5ff', border: '1px solid #adc6ff', borderRadius: 6, color: '#1d39c4', cursor: 'pointer', padding: '4px 10px', fontSize: 12, fontWeight: 600 }}
+                                >
+                                  🖨️ Print
+                                </button>
+                                {/* WhatsApp */}
+                                <button
+                                  title="Share on WhatsApp"
+                                  onClick={() => {
+                                    const text = buildRxText(rx);
+                                    window.open(`https://wa.me/?text=${encodeURIComponent(text)}`, '_blank');
+                                  }}
+                                  style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 6, color: '#389e0d', cursor: 'pointer', padding: '4px 10px', fontSize: 12, fontWeight: 600 }}
+                                >
+                                  💬 WhatsApp
+                                </button>
+                                {/* Copy */}
+                                <button
+                                  title="Copy text"
+                                  onClick={() => {
+                                    navigator.clipboard.writeText(buildRxText(rx));
+                                    message.success('Prescription text copied');
+                                  }}
+                                  style={{ background: '#fafafa', border: '1px solid #d9d9d9', borderRadius: 6, color: '#555', cursor: 'pointer', padding: '4px 10px', fontSize: 12, fontWeight: 600 }}
+                                >
+                                  📋 Copy
+                                </button>
                                 {/* Edit */}
                                 <button
                                   title="Edit"
@@ -3737,6 +4871,66 @@ export default function CustomerDetailPage() {
                       </div>
                       )}
 
+                      {/* ── Package Quick-Add ── */}
+                      {packageMasters.length > 0 && (() => {
+                        // Group packages by their primary service category
+                        const grouped: Record<string, typeof packageMasters> = {};
+                        packageMasters.forEach(pkg => {
+                          // Derive category from the first service found in branchServices
+                          const firstSvc = (branchServices ?? []).find(s =>
+                            pkg.services.some(ps => ps.name === s.name)
+                          );
+                          const cat = firstSvc?.categoryName ?? 'Packages';
+                          if (!grouped[cat]) grouped[cat] = [];
+                          grouped[cat].push(pkg);
+                        });
+                        const groupEntries = Object.entries(grouped).sort(([a], [b]) =>
+                          a === 'Packages' ? 1 : b === 'Packages' ? -1 : a.localeCompare(b)
+                        );
+                        return (
+                          <div style={{ padding: '10px 16px', borderBottom: `1px dashed ${colors.border}`, background: '#f0f7ff', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                            <span style={{ fontSize: 12, fontWeight: 700, color: '#1565c0', whiteSpace: 'nowrap' }}>📦 Add Package:</span>
+                            <select
+                              value={selectedPackageId}
+                              onChange={e => setSelectedPackageId(e.target.value)}
+                              style={{ flex: 1, minWidth: 200, padding: '5px 8px', border: `1px solid #90caf9`, borderRadius: 4, fontSize: 12, background: '#fff' }}
+                            >
+                              <option value="">— Select a package —</option>
+                              {groupEntries.map(([cat, pkgs]) => (
+                                <optgroup key={cat} label={cat}>
+                                  {pkgs.map(p => (
+                                    <option key={p.id} value={p.id}>
+                                      {p.name} — {p.services.length} service(s), {p.defaultSessions} session(s) · ₹{(p.price / 100).toLocaleString('en-IN')}
+                                    </option>
+                                  ))}
+                                </optgroup>
+                              ))}
+                            </select>
+                            <button
+                              onClick={handleAddPackage}
+                              disabled={!selectedPackageId}
+                              style={{
+                                padding: '5px 14px', fontSize: 12, fontWeight: 600,
+                                background: selectedPackageId ? '#1565c0' : '#ccc',
+                                color: '#fff', border: 'none', borderRadius: 4,
+                                cursor: selectedPackageId ? 'pointer' : 'not-allowed', whiteSpace: 'nowrap',
+                              }}
+                            >
+                              + Add to Booking
+                            </button>
+                            {selectedPackageId && (() => {
+                              const pkg = packageMasters.find(p => p.id === selectedPackageId);
+                              if (!pkg) return null;
+                              return (
+                                <div style={{ fontSize: 11, color: '#1565c0', background: '#e3f2fd', border: '1px solid #90caf9', borderRadius: 4, padding: '4px 10px', lineHeight: 1.6 }}>
+                                  <strong>{pkg.name}</strong>: {pkg.services.map(s => s.name).join(', ')}
+                                </div>
+                              );
+                            })()}
+                          </div>
+                        );
+                      })()}
+
                       {/* Booking Details section */}
                       <div style={{ padding: '10px 16px 0' }}>
                         <p style={{ fontWeight: 700, fontSize: 13, margin: '0 0 8px', color: colors.text.primary }}>Booking Details</p>
@@ -3758,6 +4952,10 @@ export default function CustomerDetailPage() {
                                 GST %
                                 <div style={{ fontSize: 10, fontWeight: 400, color: '#888', marginTop: 2 }}>from service</div>
                               </th>
+                              <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#7b1fa2', fontWeight: 600 }}>
+                                Tax Amt
+                                <div style={{ fontSize: 10, fontWeight: 400, color: '#888', marginTop: 2 }}>₹ per row</div>
+                              </th>
                               {effectiveFlags.hasServiceBy && <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, borderRight: `1px solid ${colors.border}`, textAlign: 'center', color: '#1565c0', fontWeight: 600 }}>Service By</th>}
                               <th style={{ padding: '8px 10px', borderBottom: `1px solid ${colors.border}`, textAlign: 'center', color: '#333', fontWeight: 600 }}>Remove</th>
                             </tr>
@@ -3765,11 +4963,103 @@ export default function CustomerDetailPage() {
                           <tbody>
                             {bookingRows.length === 0 ? (
                               <tr>
-                                <td colSpan={7 + (effectiveFlags.hasQuantity ? 1 : 0) + (effectiveFlags.hasIndividualDiscount ? 1 : 0) + (effectiveFlags.hasServiceBy ? 1 : 0)} style={{ padding: 20, textAlign: 'center', color: colors.text.secondary, borderTop: `1px solid ${colors.border}` }}>
+                                <td colSpan={8 + (effectiveFlags.hasQuantity ? 1 : 0) + (effectiveFlags.hasIndividualDiscount ? 1 : 0) + (effectiveFlags.hasServiceBy ? 1 : 0)} style={{ padding: 20, textAlign: 'center', color: colors.text.secondary, borderTop: `1px solid ${colors.border}` }}>
                                   No rows added. Click the button below to add a service.
                                 </td>
                               </tr>
                             ) : bookingRows.map((row, idx) => {
+                              const isPackageRow = !!row._isPackage;
+                              const pkgMaster = isPackageRow ? packageMasters.find(p => p.name === row.service) : null;
+
+                              if (isPackageRow) {
+                                /* ── Package row: static display, no service dropdowns ── */
+                                const taxPct = 0; // package price is all-inclusive, never tax on top
+                                const linePaise = Math.round(row.quantity * row.amount * 100);
+                                const taxAmt = taxPct
+                                  ? (row.taxType === 'inclusive'
+                                      ? linePaise - Math.round((linePaise * 100) / (100 + taxPct))
+                                      : Math.round((linePaise * taxPct) / 100))
+                                  : 0;
+                                return (
+                                  <tr key={row.id} style={{ borderTop: `1px solid ${colors.border}`, background: '#f0f7ff' }}>
+                                    {/* S.No */}
+                                    <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}` }}>
+                                      <div style={{ width: 26, height: 26, borderRadius: '50%', background: '#1565c0', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: 12 }}>{idx + 1}</div>
+                                    </td>
+                                    {/* Category — static "Package" badge */}
+                                    <td style={{ padding: '6px 10px', borderRight: `1px solid ${colors.border}`, textAlign: 'center' }}>
+                                      <span style={{ display: 'inline-block', background: '#1565c0', color: '#fff', borderRadius: 4, padding: '2px 8px', fontSize: 11, fontWeight: 700, letterSpacing: 0.3 }}>📦 Package</span>
+                                    </td>
+                                    {/* Service — package name + included services */}
+                                    <td style={{ padding: '6px 10px', borderRight: `1px solid ${colors.border}` }}>
+                                      <div style={{ fontWeight: 700, fontSize: 12, color: '#1565c0' }}>{row.service}</div>
+                                      {pkgMaster && pkgMaster.services.length > 0 && (
+                                        <div style={{ marginTop: 3, display: 'flex', flexWrap: 'wrap', gap: 3 }}>
+                                          {pkgMaster.services.map((s: { id: string; name: string }) => (
+                                            <span key={s.id} style={{ fontSize: 10, background: '#e3f2fd', color: '#1565c0', border: '1px solid #90caf9', borderRadius: 3, padding: '1px 5px' }}>{s.name}</span>
+                                          ))}
+                                        </div>
+                                      )}
+                                      {pkgMaster && (
+                                        <div style={{ marginTop: 3, fontSize: 10, color: '#666' }}>
+                                          {pkgMaster.defaultSessions} session(s)
+                                        </div>
+                                      )}
+                                    </td>
+                                    {/* Quantity — always 1 for package, not editable */}
+                                    {effectiveFlags.hasQuantity && (
+                                      <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}`, color: '#555', fontSize: 12 }}>1</td>
+                                    )}
+                                    {/* Amount — editable */}
+                                    <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
+                                      <input
+                                        type="text" inputMode="decimal"
+                                        value={row.amount}
+                                        onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ''); handleRowChange(row.id, 'amount', v); }}
+                                        onBlur={(e) => handleRowChange(row.id, 'amount', parseFloat(e.target.value) || 0)}
+                                        style={{ width: '100%', padding: '5px 6px', border: `1px solid #90caf9`, borderRadius: 3, textAlign: 'right', fontSize: 12, background: '#e8f4fd' }}
+                                      />
+                                    </td>
+                                    {/* Disc% */}
+                                    {effectiveFlags.hasIndividualDiscount && (
+                                      <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
+                                        <input type="number" min="0" max="100" value={row.discPct} onChange={(e) => handleRowChange(row.id, 'discPct', parseFloat(e.target.value) || 0)} style={{ width: 56, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }} />
+                                      </td>
+                                    )}
+                                    {/* Total */}
+                                    <td style={{ padding: '6px 10px', textAlign: 'center', fontWeight: 700, color: '#1565c0', borderRight: `1px solid ${colors.border}` }}>
+                                      {(row.quantity * row.amount).toLocaleString('en-IN', { maximumFractionDigits: 2 })}
+                                    </td>
+                                    {/* GST % — from package config */}
+                                    <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}` }}>
+                                      {taxPct ? (
+                                        <span style={{ display: 'inline-block', background: row.taxType === 'inclusive' ? '#f3e5f5' : '#e8eaf6', color: row.taxType === 'inclusive' ? '#7b1fa2' : '#3949ab', border: `1px solid ${row.taxType === 'inclusive' ? '#ce93d8' : '#9fa8da'}`, borderRadius: 10, padding: '2px 8px', fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' }}>
+                                          {taxPct}%&nbsp;<span style={{ fontWeight: 400, fontSize: 10 }}>{row.taxType === 'inclusive' ? 'Incl.' : 'Excl.'}</span>
+                                        </span>
+                                      ) : <span style={{ fontSize: 11, color: '#ccc' }}>—</span>}
+                                    </td>
+                                    {/* Tax Amt — package row */}
+                                    <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}`, color: '#7b1fa2', fontWeight: 600, fontSize: 11 }}>
+                                      {taxAmt ? `₹${(taxAmt / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}` : <span style={{ color: '#ccc' }}>—</span>}
+                                    </td>
+                                    {/* Service By */}
+                                    {effectiveFlags.hasServiceBy && (
+                                      <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
+                                        <select value={row.serviceBy} onChange={(e) => handleRowChange(row.id, 'serviceBy', e.target.value)} style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, fontSize: 12 }}>
+                                          <option value="">Select</option>
+                                          {(branchStaff ?? []).map((emp: any) => <option key={emp.id} value={emp.id}>{emp.name}</option>)}
+                                        </select>
+                                      </td>
+                                    )}
+                                    {/* Remove */}
+                                    <td style={{ padding: '6px 10px', textAlign: 'center' }}>
+                                      <div onClick={() => handleRemoveRow(row.id)} style={{ width: 22, height: 22, borderRadius: '50%', background: '#f44336', color: '#fff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>✕</div>
+                                    </td>
+                                  </tr>
+                                );
+                              }
+
+                              /* ── Regular service row ── */
                               return (
                                 <tr key={row.id} style={{ borderTop: `1px solid ${colors.border}` }}>
                                   {/* S.No */}
@@ -3840,7 +5130,13 @@ export default function CustomerDetailPage() {
                                       type="text"
                                       inputMode="numeric"
                                       value={row.quantity}
-                                      onChange={(e) => { const v = e.target.value.replace(/[^0-9]/g, ''); handleRowChange(row.id, 'quantity', v === '' ? 1 : parseInt(v)); }}
+                                      onChange={(e) => {
+                                        const v = e.target.value.replace(/[^0-9]/g, '');
+                                        handleRowChange(row.id, 'quantity', v === '' ? '' : parseInt(v));
+                                      }}
+                                      onBlur={() => {
+                                        if (!row.quantity || Number(row.quantity) < 1) handleRowChange(row.id, 'quantity', 1);
+                                      }}
                                       style={{ width: 60, padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'center', fontSize: 12 }}
                                     />
                                   </td>
@@ -3848,9 +5144,14 @@ export default function CustomerDetailPage() {
                                   {/* Amount */}
                                   <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
                                     <input
-                                      type="number" min="0"
+                                      type="text"
+                                      inputMode="decimal"
                                       value={row.amount}
-                                      onChange={(e) => handleRowChange(row.id, 'amount', parseFloat(e.target.value) || 0)}
+                                      onChange={(e) => {
+                                        const v = e.target.value.replace(/[^0-9.]/g, '');
+                                        handleRowChange(row.id, 'amount', v);
+                                      }}
+                                      onBlur={(e) => handleRowChange(row.id, 'amount', parseFloat(e.target.value) || 0)}
                                       disabled={!effectiveFlags.isAmountEditable}
                                       style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12, background: effectiveFlags.isAmountEditable ? undefined : '#f5f5f5', cursor: effectiveFlags.isAmountEditable ? undefined : 'not-allowed' }}
                                     />
@@ -3896,6 +5197,20 @@ export default function CustomerDetailPage() {
                                     ) : (
                                       <span style={{ fontSize: 11, color: '#ccc' }}>—</span>
                                     )}
+                                  </td>
+                                  {/* Tax Amt per row */}
+                                  <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}`, color: '#7b1fa2', fontWeight: 600, fontSize: 11 }}>
+                                    {(() => {
+                                      const pct = row.taxPercent ?? 0;
+                                      if (!row.service || !pct) return <span style={{ fontSize: 11, color: '#ccc' }}>—</span>;
+                                      const disc = effectiveFlags.hasIndividualDiscount ? (row.discPct ?? 0) : 0;
+                                      const linePaise = Math.round(row.quantity * row.amount * (1 - disc / 100) * 100);
+                                      const isInclusive = row.taxType === 'inclusive';
+                                      const taxAmt = isInclusive
+                                        ? linePaise - Math.round((linePaise * 100) / (100 + pct))
+                                        : Math.round((linePaise * pct) / 100);
+                                      return `₹${(taxAmt / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+                                    })()}
                                   </td>
                                   {/* Service By — staff member performing the service */}
                                   {effectiveFlags.hasServiceBy && (
@@ -4091,31 +5406,19 @@ export default function CustomerDetailPage() {
                           Refresh
                         </button>
 
-                        {/* Totals block with auto GST — IGST vs CGST+SGST based on branch/customer states */}
+                        {/* Totals block with auto GST */}
                         {(() => {
-                          const customerStateId = customer?.stateId ?? null;
-                          const isIntraState = !!(branchStateId && customerStateId && branchStateId === customerStateId);
                           const filledRows = bookingRows.filter(r => r.service);
-                          let aggTaxable = 0, aggCgst = 0, aggSgst = 0, aggIgst = 0, aggTax = 0;
+                          let aggTaxable = 0, aggTax = 0;
                           for (const row of filledRows) {
                             const linePaise = Math.round(row.quantity * row.amount * 100);
                             const pct = row.taxPercent ?? 0;
                             if (!pct) { aggTaxable += linePaise; continue; }
                             const isInclusive = row.taxType === 'inclusive';
-                            const taxableAmt = isInclusive
-                              ? Math.round((linePaise * 100) / (100 + pct))
-                              : linePaise;
-                            const taxAmt = isInclusive
-                              ? linePaise - taxableAmt
-                              : Math.round((linePaise * pct) / 100);
+                            const taxableAmt = isInclusive ? Math.round((linePaise * 100) / (100 + pct)) : linePaise;
+                            const taxAmt = isInclusive ? linePaise - taxableAmt : Math.round((linePaise * pct) / 100);
                             aggTaxable += taxableAmt;
                             aggTax += taxAmt;
-                            if (isIntraState) {
-                              aggCgst += Math.ceil(taxAmt / 2);
-                              aggSgst += taxAmt - Math.ceil(taxAmt / 2);
-                            } else {
-                              aggIgst += taxAmt;
-                            }
                           }
                           const hasGst = aggTax > 0;
                           const grossTotal = (aggTaxable + aggTax) / 100;
@@ -4128,23 +5431,10 @@ export default function CustomerDetailPage() {
                                     <span style={{ color: colors.text.secondary }}>Taxable Amount :</span>
                                     <span style={{ minWidth: 60, textAlign: 'right' }}>{fmt(aggTaxable)}</span>
                                   </div>
-                                  {isIntraState ? (
-                                    <>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                                        <span style={{ color: '#1565c0', fontWeight: 500 }}>CGST :</span>
-                                        <span style={{ minWidth: 60, textAlign: 'right', color: '#1565c0' }}>+{fmt(aggCgst)}</span>
-                                      </div>
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                                        <span style={{ color: '#1565c0', fontWeight: 500 }}>SGST :</span>
-                                        <span style={{ minWidth: 60, textAlign: 'right', color: '#1565c0' }}>+{fmt(aggSgst)}</span>
-                                      </div>
-                                    </>
-                                  ) : (
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
-                                      <span style={{ color: '#7b1fa2', fontWeight: 500 }}>IGST :</span>
-                                      <span style={{ minWidth: 60, textAlign: 'right', color: '#7b1fa2' }}>+{fmt(aggIgst)}</span>
-                                    </div>
-                                  )}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40 }}>
+                                    <span style={{ color: '#7b1fa2', fontWeight: 500 }}>GST :</span>
+                                    <span style={{ minWidth: 60, textAlign: 'right', color: '#7b1fa2' }}>+{fmt(aggTax)}</span>
+                                  </div>
                                   <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, borderTop: `1px dashed ${colors.border}`, paddingTop: 2 }}>
                                     <span style={{ color: colors.text.secondary, fontWeight: 600 }}>Total Amount :</span>
                                     <span style={{ minWidth: 60, textAlign: 'right', fontWeight: 600 }}>{grossTotal.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
@@ -4199,9 +5489,15 @@ export default function CustomerDetailPage() {
                               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 40, alignItems: 'center' }}>
                                 <span style={{ color: colors.text.secondary }}>Round Off :</span>
                                 <input
-                                  type="number"
-                                  value={bookingData.roundOff}
-                                  onChange={(e) => setBookingData({ ...bookingData, roundOff: parseFloat(e.target.value) || 0 })}
+                                  type="text"
+                                  inputMode="decimal"
+                                  value={bookingData.roundOff === 0 ? '' : bookingData.roundOff}
+                                  placeholder="0"
+                                  onChange={(e) => {
+                                    const digits = e.target.value.replace(/[^0-9.]/g, '');
+                                    const v = parseFloat(digits) || 0;
+                                    setBookingData({ ...bookingData, roundOff: v === 0 ? 0 : -v });
+                                  }}
                                   style={{ width: 80, padding: '2px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12 }}
                                 />
                               </div>
@@ -4323,16 +5619,15 @@ export default function CustomerDetailPage() {
                       </div>
 
 
-                      {/* Save and go to Receipt */}
+                      {/* Review — no API call yet */}
                       <div style={{ padding: '10px 16px', display: 'flex', justifyContent: 'flex-end' }}>
                         <Button
                           type="default"
-                          onClick={() => handleSaveBooking()}
-                          loading={createBooking.isPending}
+                          onClick={handleReviewBooking}
                           disabled={bookingRows.filter(r => r.service).length === 0}
                           style={{ fontSize: 13 }}
                         >
-                          Save and go to Receipt &gt;
+                          Review Booking →
                         </Button>
                       </div>
                     </div>
@@ -4367,6 +5662,51 @@ export default function CustomerDetailPage() {
                         <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 14, color: colors.text.primary }}>
                           📋 Package Details
                         </div>
+
+                        {/* Stock shortfall warning banner */}
+                        {stockShortfalls.length > 0 && (
+                          <div style={{ margin: '12px 18px 0', padding: '10px 14px', background: '#fff8e1', border: '1px solid #ffe082', borderRadius: 6 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+                              <WarningOutlined style={{ color: '#f59e0b', fontSize: 16 }} />
+                              <span style={{ fontWeight: 700, fontSize: 13, color: '#92400e' }}>Low Stock Warning</span>
+                              <span style={{ fontSize: 12, color: '#92400e' }}>— booking was saved but the following items need restocking:</span>
+                            </div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 8 }}>
+                              <thead>
+                                <tr style={{ background: '#fef3c7' }}>
+                                  <th style={{ padding: '5px 8px', textAlign: 'left', color: '#78350f' }}>Product</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'center', color: '#78350f' }}>Needed</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'center', color: '#78350f' }}>In Stock</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'center', color: '#e53935' }}>Short</th>
+                                  <th style={{ padding: '5px 8px', textAlign: 'center', color: '#78350f' }}></th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {stockShortfalls.map((s) => (
+                                  <tr key={s.productId} style={{ borderBottom: '1px solid #fde68a' }}>
+                                    <td style={{ padding: '5px 8px', fontWeight: 500 }}>{s.productName}</td>
+                                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>{s.required} {s.productUom}</td>
+                                    <td style={{ padding: '5px 8px', textAlign: 'center', color: '#e53935' }}>{s.available} {s.productUom}</td>
+                                    <td style={{ padding: '5px 8px', textAlign: 'center', fontWeight: 700, color: '#e53935' }}>{s.required - s.available} {s.productUom}</td>
+                                    <td style={{ padding: '5px 8px', textAlign: 'center' }}>
+                                      <Button size="small" style={{ fontSize: 11, height: 22 }}
+                                        loading={raiseIndent.isPending}
+                                        onClick={async () => {
+                                          try {
+                                            await raiseIndent.mutateAsync({ items: [{ productId: s.productId, requestedQty: Math.max(1, s.required - s.available) }], reason: 'Low stock — booking raised' });
+                                            message.success(`Stock request raised for ${s.productName}`);
+                                            setStockShortfalls(prev => prev.filter(x => x.productId !== s.productId));
+                                          } catch { message.error('Could not raise request'); }
+                                        }}>
+                                        Raise Request
+                                      </Button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
 
                         {/* Customer + Consultant info */}
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, borderBottom: `1px solid ${colors.border}` }}>
@@ -4487,6 +5827,12 @@ export default function CustomerDetailPage() {
                                 <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{couponDiscount2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
                               </div>
                             )}
+                            {(bookingData.roundOff || 0) !== 0 && (
+                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '4px 0', borderBottom: '1px dashed #e0e0e0' }}>
+                                <span style={{ color: '#666' }}>Round Off</span>
+                                <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{Math.abs(bookingData.roundOff || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                              </div>
+                            )}
                             <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: `2px solid #333`, marginTop: 4 }}>
                               <span style={{ fontWeight: 700 }}>Net Amount</span>
                               <span style={{ fontWeight: 700, color: colors.gold.primary }}>₹{netTotal2.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
@@ -4497,7 +5843,22 @@ export default function CustomerDetailPage() {
                         {/* Navigation */}
                         <div style={{ padding: '12px 18px', display: 'flex', justifyContent: 'space-between', gap: 8 }}>
                           <Button onClick={() => setPackageOfferStep(1)}>← Back to Booking</Button>
-                          <Button onClick={() => setPackageOfferStep(3)} type="primary" style={{ background: colors.gold.primary, borderColor: colors.gold.primary }}>
+                          <Button
+                            onClick={() => {
+                              // Pre-fill advance payment amount from package master config
+                              const pkgRow = bookingRows.find((r: any) => r._isPackage);
+                              if (pkgRow) {
+                                const master = packageMasters.find(p => p.id === (pkgRow as any)._masterId);
+                                if (master?.collectAdvance && master.advancePercent > 0) {
+                                  const advAmt = Math.round((pkgRow.amount * pkgRow.quantity) * (master.advancePercent / 100) * 100) / 100;
+                                  setPackagePaymentAmount(advAmt);
+                                }
+                              }
+                              setPackageOfferStep(3);
+                            }}
+                            type="primary"
+                            style={{ background: colors.gold.primary, borderColor: colors.gold.primary }}
+                          >
                             Continue to Payment Receipt →
                           </Button>
                         </div>
@@ -4528,124 +5889,432 @@ export default function CustomerDetailPage() {
                     const manualDiscPct3 = Number(bookingData.discount) || 0;
                     const manualDiscount3 = manualDiscPct3 > 0 ? (grossTotal3 * manualDiscPct3) / 100 : 0;
                     const netAmt = grossTotal3 - couponDiscount3 - manualDiscount3 + (bookingData.roundOff || 0);
+                    // GST type: intra-state → CGST+SGST, inter-state → IGST
+                    const isIntraState3 = !!branchStateId && !!(customer as any)?.stateId && branchStateId === (customer as any)?.stateId;
+                    const cgstAmt3 = isIntraState3 ? Math.floor(aggTax3 / 2) : 0;
+                    const sgstAmt3 = isIntraState3 ? aggTax3 - cgstAmt3 : 0;
+                    const igstAmt3 = !isIntraState3 ? aggTax3 : 0;
+                    const taxRates3 = [...new Set(filledRows.filter(r => (r.taxPercent ?? 0) > 0).map(r => r.taxPercent as number))];
+                    const uniformRate3 = taxRates3.length === 1 ? taxRates3[0] : null;
                     return (
-                      <div style={{ background: '#fff', border: `1px solid ${colors.border}`, borderRadius: 6 }}>
-                        <div style={{ padding: '12px 18px', borderBottom: `1px solid ${colors.border}`, fontWeight: 700, fontSize: 14, color: colors.text.primary }}>
-                          🧾 Payment Receipt
-                        </div>
+                      <div style={{ background: '#fff', border: '1px solid #e2e8f0', borderRadius: 12, overflow: 'hidden', boxShadow: '0 4px 24px rgba(0,0,0,0.07)' }}>
+                        {/* Gradient accent */}
+                        <div style={{ height: 4, background: 'linear-gradient(90deg, #6366f1 0%, #06b6d4 100%)' }} />
 
-                        {/* Booking ID + date */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, borderBottom: `1px solid ${colors.border}` }}>
-                          <div style={{ padding: '10px 18px', borderRight: `1px solid ${colors.border}` }}>
-                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Booking ID</div>
-                            <div style={{ fontWeight: 700 }}>{bookingData.bookingId}</div>
+                        {/* Header */}
+                        <div style={{ padding: '14px 22px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                            <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>Payment Receipt</span>
+                            <span style={{ fontSize: 11, color: '#94a3b8', background: 'rgba(255,255,255,0.08)', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.08)' }}>{bookingData.bookingId}</span>
                           </div>
-                          <div style={{ padding: '10px 18px' }}>
-                            <div style={{ fontSize: 11, color: '#888', marginBottom: 2 }}>Booking Date</div>
-                            <div style={{ fontWeight: 700 }}>{new Date(bookingData.bookingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
-                          </div>
-                        </div>
-
-                        {/* Customer + Consultant */}
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 0, borderBottom: `1px solid ${colors.border}` }}>
-                          <div style={{ padding: '12px 18px', borderRight: `1px solid ${colors.border}` }}>
-                            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Customer</div>
-                            <div style={{ fontWeight: 700 }}>{customer?.name}</div>
-                            {customer?.phone && <div style={{ fontSize: 12, color: '#666', marginTop: 2 }}>{customer.phone}</div>}
-                          </div>
-                          <div style={{ padding: '12px 18px' }}>
-                            <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>Consultant</div>
-                            <div style={{ fontWeight: 700 }}>{consultantObj?.name || '—'}</div>
-                          </div>
-                        </div>
-
-                        {/* Services */}
-                        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${colors.border}` }}>
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
-                            <thead>
-                              <tr style={{ background: '#f5f5f5' }}>
-                                <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: `1px solid #ddd` }}>#</th>
-                                <th style={{ padding: '7px 10px', textAlign: 'left', borderBottom: `1px solid #ddd` }}>Service</th>
-                                <th style={{ padding: '7px 10px', textAlign: 'center', borderBottom: `1px solid #ddd` }}>Qty</th>
-                                <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: `1px solid #ddd` }}>Rate</th>
-                                <th style={{ padding: '7px 10px', textAlign: 'right', borderBottom: `1px solid #ddd` }}>Amount</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {filledRows.map((row, idx) => (
-                                <tr key={row.id} style={{ borderBottom: `1px solid #f0f0f0`, background: row.complementary ? '#f1f8e9' : undefined }}>
-                                  <td style={{ padding: '7px 10px' }}>{idx + 1}</td>
-                                  <td style={{ padding: '7px 10px', fontWeight: 500 }}>
-                                    {row.service}
-                                    {row.category && <span style={{ fontSize: 10, color: '#888', marginLeft: 6 }}>({row.category})</span>}
-                                  </td>
-                                  <td style={{ padding: '7px 10px', textAlign: 'center' }}>{row.quantity}</td>
-                                  <td style={{ padding: '7px 10px', textAlign: 'right' }}>{row.complementary ? <span style={{ color: '#2e7d32', fontSize: 11, fontWeight: 700 }}>FREE</span> : `₹${row.amount.toLocaleString('en-IN')}`}</td>
-                                  <td style={{ padding: '7px 10px', textAlign: 'right', fontWeight: 600 }}>
-                                    {row.complementary
-                                      ? <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '2px 6px', borderRadius: 8, fontSize: 10 }}>₹0 COMP</span>
-                                      : `₹${(row.quantity * row.amount).toLocaleString('en-IN')}`}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-
-                        {/* Payment breakdown */}
-                        <div style={{ padding: '14px 18px', borderBottom: `1px solid ${colors.border}`, display: 'flex', justifyContent: 'flex-end' }}>
-                          <div style={{ minWidth: 280, fontSize: 13 }}>
-                            {hasGst3 && (
-                              <>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
-                                  <span style={{ color: '#666' }}>Taxable Amount</span>
-                                  <span style={{ fontWeight: 600 }}>₹{(aggTaxable3 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                </div>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
-                                  <span style={{ color: '#7b1fa2' }}>GST</span>
-                                  <span style={{ color: '#7b1fa2', fontWeight: 600 }}>+ ₹{(aggTax3 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                </div>
-                              </>
-                            )}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
-                              <span style={{ color: '#666' }}>Total Amount</span>
-                              <span style={{ fontWeight: 600 }}>₹{grossTotal3.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                          <div style={{ display: 'flex', gap: 24 }}>
+                            <div>
+                              <div style={{ fontSize: 10, color: '#475569', marginBottom: 2, textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>Customer</div>
+                              <div style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0' }}>{customer?.name}{customer?.phone ? ` · ${customer.phone}` : ''}</div>
                             </div>
-                            {manualDiscount3 > 0 && (
-                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
-                                <span style={{ color: '#e53935' }}>Discount ({manualDiscPct3}%)</span>
-                                <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{manualDiscount3.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                            <div>
+                              <div style={{ fontSize: 10, color: '#475569', marginBottom: 2, textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>Date</div>
+                              <div style={{ fontSize: 13, color: '#cbd5e1' }}>{new Date(bookingData.bookingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</div>
+                            </div>
+                            {consultantObj && (
+                              <div>
+                                <div style={{ fontSize: 10, color: '#475569', marginBottom: 2, textTransform: 'uppercase' as const, letterSpacing: '0.06em' }}>Consultant</div>
+                                <div style={{ fontSize: 13, color: '#cbd5e1' }}>{consultantObj.name}</div>
                               </div>
                             )}
-                            {couponDiscount3 > 0 && (
-                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
-                                <span style={{ color: '#e53935' }}>Coupon ({appliedCoupon?.couponCode})</span>
-                                <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{couponDiscount3.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                          </div>
+                        </div>
+
+                        {/* ── POS two-column layout ── */}
+                        {(() => {
+                          const pkgRows3 = filledRows.filter((r: any) => r._isPackage);
+                          const nonPkgRows3 = filledRows.filter((r: any) => !r._isPackage && !r.complementary);
+                          const hasPkg3 = pkgRows3.length > 0;
+                          const pkgGross3 = pkgRows3.reduce((s: number, r: any) => s + r.quantity * r.amount, 0);
+                          const pkgNetAmt3 = pkgGross3; // package price is fixed; never absorbs GST from other services
+                          const nonPkgNetAmt3 = netAmt - pkgNetAmt3;
+                          const clampedPkgPay3 = Math.min(Math.max(0, packagePaymentAmount), pkgNetAmt3);
+                          const collectNow3 = hasPkg3 ? nonPkgNetAmt3 + clampedPkgPay3 : netAmt;
+                          const pkgBalance3 = pkgNetAmt3 - clampedPkgPay3;
+                          const fmt3 = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                          const sel = bookingData.paymentMode;
+                          const pkgMaster3 = hasPkg3 ? packageMasters.find((p: any) => p.id === (pkgRows3[0] as any)._masterId) : null;
+                          const minAdvancePay3 = (pkgMaster3 as any)?.collectAdvance ? Math.round(pkgNetAmt3 * ((pkgMaster3 as any).advancePercent / 100) * 100) / 100 : 0;
+                          const advanceShortfall = minAdvancePay3 > 0 && clampedPkgPay3 < minAdvancePay3;
+
+                          // Build unified service list for allocation (packages expand to sub-services)
+                          const displayServices: { serviceName: string; weightPaise: number }[] = [];
+                          for (const r of filledRows.filter((row: any) => !row.complementary)) {
+                            if ((r as any)._isPackage) {
+                              const snaps: any[] = (pkgMaster3 as any)?.serviceSnapshots ?? [];
+                              if (snaps.length > 0) {
+                                const rawW = snaps.map((s: any) => { const up = s.customPricePerSession ?? s.maxPrice; const q = s.customSessions ?? s.sessions ?? 1; return up * q; });
+                                const rawWTotal = rawW.reduce((a: number, b: number) => a + b, 0);
+                                const pkgLinePaise = Math.round(r.amount * r.quantity * 100);
+                                snaps.forEach((s: any, i: number) => {
+                                  const w = rawWTotal > 0 ? Math.round(pkgLinePaise * rawW[i] / rawWTotal) : Math.round(pkgLinePaise / snaps.length);
+                                  displayServices.push({ serviceName: s.serviceName, weightPaise: w });
+                                });
+                              } else {
+                                displayServices.push({ serviceName: r.service, weightPaise: Math.round(r.amount * r.quantity * 100) });
+                              }
+                            } else {
+                              displayServices.push({ serviceName: r.service, weightPaise: Math.round(r.amount * r.quantity * 100) });
+                            }
+                          }
+                          const dsWeightTotal = displayServices.reduce((s, d) => s + d.weightPaise, 0);
+                          const collectNowPaiseAlloc = Math.round(collectNow3 * 100);
+                          const dsAutoAllocs = displayServices.map((d) =>
+                            dsWeightTotal > 0 ? Math.round(collectNowPaiseAlloc * d.weightPaise / dsWeightTotal) : Math.round(collectNowPaiseAlloc / Math.max(1, displayServices.length))
+                          );
+                          const dsAssigned = displayServices.reduce((sum, d, i) =>
+                            sum + (pkgServiceAllocations[d.serviceName] ?? dsAutoAllocs[i]), 0);
+                          const allocationExceeds = showAllocationPanel && displayServices.length >= 2 && collectNowPaiseAlloc > 0 && dsAssigned > collectNowPaiseAlloc + 1;
+
+                          return (
+                            <>
+                              {/* Body: left bill items + right payment panel */}
+                              <div style={{ display: 'flex', borderTop: '1px solid #f0f0f0', minHeight: 360 }}>
+
+                                {/* LEFT: Bill items */}
+                                <div style={{ flex: 1, overflowX: 'auto' }}>
+                                  <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                                    <thead>
+                                      <tr style={{ background: '#f8fafc' }}>
+                                        <th style={{ padding: '11px 16px', fontWeight: 600, color: '#64748b', fontSize: 11, textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '2px solid #e8ecf0', textAlign: 'center', width: 40 }}>#</th>
+                                        <th style={{ padding: '11px 16px', fontWeight: 600, color: '#64748b', fontSize: 11, textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '2px solid #e8ecf0', textAlign: 'left' }}>Service</th>
+                                        <th style={{ padding: '11px 16px', fontWeight: 600, color: '#64748b', fontSize: 11, textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '2px solid #e8ecf0', textAlign: 'center', width: 60 }}>Qty</th>
+                                        <th style={{ padding: '11px 16px', fontWeight: 600, color: '#64748b', fontSize: 11, textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '2px solid #e8ecf0', textAlign: 'right', width: 110 }}>Rate</th>
+                                        <th style={{ padding: '11px 16px', fontWeight: 600, color: '#64748b', fontSize: 11, textTransform: 'uppercase' as const, letterSpacing: '0.06em', borderBottom: '2px solid #e8ecf0', textAlign: 'right', width: 110 }}>Amount</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {filledRows.map((row, idx) => (
+                                        <tr key={row.id} style={{ borderBottom: '1px solid #f1f5f9', background: row.complementary ? '#f0fdf4' : (idx % 2 === 0 ? '#fff' : '#fafbfc') }}>
+                                          <td style={{ padding: '13px 16px', color: '#94a3b8', fontSize: 12, textAlign: 'center' }}>{idx + 1}</td>
+                                          <td style={{ padding: '13px 16px' }}>
+                                            <div style={{ fontWeight: 500, color: '#1e293b' }}>{row.service}</div>
+                                            {row.category && <div style={{ fontSize: 11, color: '#94a3b8', marginTop: 2 }}>{row.category}</div>}
+                                          </td>
+                                          <td style={{ padding: '13px 16px', textAlign: 'center', color: '#334155' }}>{row.quantity}</td>
+                                          <td style={{ padding: '13px 16px', textAlign: 'right', color: '#334155' }}>
+                                            {row.complementary ? <span style={{ color: '#16a34a', fontSize: 11, fontWeight: 600 }}>FREE</span> : `₹${row.amount.toLocaleString('en-IN')}`}
+                                          </td>
+                                          <td style={{ padding: '13px 16px', textAlign: 'right', fontWeight: 600, color: '#1e293b' }}>
+                                            {row.complementary
+                                              ? <span style={{ background: '#dcfce7', color: '#16a34a', padding: '2px 8px', borderRadius: 6, fontSize: 11 }}>₹0 COMP</span>
+                                              : `₹${(row.quantity * row.amount).toLocaleString('en-IN')}`}
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+
+                                {/* RIGHT: Payment panel */}
+                                <div style={{ width: 300, flexShrink: 0, borderLeft: '1px solid #f0f0f0', display: 'flex', flexDirection: 'column', background: '#fafbfc' }}>
+
+                                  {/* Bill summary */}
+                                  <div style={{ padding: '16px 18px', borderBottom: '1px solid #e8ecf0' }}>
+                                    <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.1em', marginBottom: 12 }}>Bill Summary</div>
+                                    {hasGst3 && (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 7 }}>
+                                        <span style={{ color: '#64748b' }}>Taxable Amount</span>
+                                        <span style={{ color: '#334155' }}>₹{fmt3(aggTaxable3 / 100)}</span>
+                                      </div>
+                                    )}
+                                    {hasGst3 && isIntraState3 && (
+                                      <>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 4 }}>
+                                          <span style={{ color: '#64748b' }}>CGST{uniformRate3 ? ` (${uniformRate3 / 2}%)` : ''}</span>
+                                          <span style={{ color: '#334155' }}>+ ₹{fmt3(cgstAmt3 / 100)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 7 }}>
+                                          <span style={{ color: '#64748b' }}>SGST{uniformRate3 ? ` (${uniformRate3 / 2}%)` : ''}</span>
+                                          <span style={{ color: '#334155' }}>+ ₹{fmt3(sgstAmt3 / 100)}</span>
+                                        </div>
+                                      </>
+                                    )}
+                                    {hasGst3 && !isIntraState3 && (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 7 }}>
+                                        <span style={{ color: '#64748b' }}>IGST{uniformRate3 ? ` (${uniformRate3}%)` : ''}</span>
+                                        <span style={{ color: '#334155' }}>+ ₹{fmt3(igstAmt3 / 100)}</span>
+                                      </div>
+                                    )}
+                                    {!hasGst3 && grossTotal3 !== netAmt && (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 7 }}>
+                                        <span style={{ color: '#64748b' }}>Subtotal</span>
+                                        <span style={{ color: '#334155' }}>₹{fmt3(grossTotal3)}</span>
+                                      </div>
+                                    )}
+                                    {(manualDiscount3 > 0 || couponDiscount3 > 0) && (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 7 }}>
+                                        <span style={{ color: '#64748b' }}>Discount</span>
+                                        <span style={{ color: '#ef4444' }}>−₹{fmt3(manualDiscount3 + couponDiscount3)}</span>
+                                      </div>
+                                    )}
+                                    {(bookingData.roundOff || 0) !== 0 && (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, marginBottom: 7 }}>
+                                        <span style={{ color: '#64748b' }}>Round Off</span>
+                                        <span style={{ color: '#ef4444' }}>−₹{Math.abs(bookingData.roundOff || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                      </div>
+                                    )}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 15, fontWeight: 700, color: '#0f172a', paddingTop: 10, borderTop: '2px solid #e2e8f0', marginTop: 4 }}>
+                                      <span>Net Total</span>
+                                      <span>₹{fmt3(netAmt)}</span>
+                                    </div>
+                                  </div>
+
+                                  {/* Package payment */}
+                                  {hasPkg3 && (
+                                    <div style={{ padding: '14px 18px', borderBottom: '1px solid #e8ecf0' }}>
+                                      <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.1em', marginBottom: 10 }}>Package Payment</div>
+                                      {nonPkgNetAmt3 > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#64748b', marginBottom: 5 }}>
+                                          <span>Services</span><span>₹{fmt3(nonPkgNetAmt3)}</span>
+                                        </div>
+                                      )}
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#64748b', marginBottom: 10 }}>
+                                        <span>Package total</span><span>₹{fmt3(pkgNetAmt3)}</span>
+                                      </div>
+                                      <div style={{ fontSize: 11, color: '#94a3b8', marginBottom: 7 }}>Pay now for package</div>
+                                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 6, marginBottom: 8 }}>
+                                        {[{ label: 'Skip', val: 0 }, { label: 'Half', val: Math.round(pkgNetAmt3 / 2 * 100) / 100 }, { label: 'Full', val: pkgNetAmt3 }].map(opt => {
+                                          const active = clampedPkgPay3 === opt.val;
+                                          return (
+                                            <button key={opt.label} onClick={() => setPackagePaymentAmount(opt.val)} style={{
+                                              padding: '8px 0', fontSize: 12, cursor: 'pointer', borderRadius: 8,
+                                              border: active ? '2px solid #6366f1' : '1px solid #e2e8f0',
+                                              background: active ? '#6366f1' : '#fff',
+                                              color: active ? '#fff' : '#334155',
+                                              fontWeight: active ? 600 : 400,
+                                            }}>{opt.label}</button>
+                                          );
+                                        })}
+                                      </div>
+                                      <input type="text" inputMode="decimal"
+                                        value={packagePaymentAmount === 0 ? '' : packagePaymentAmount}
+                                        placeholder="Custom amount ₹"
+                                        onChange={(e) => {
+                                          const v = parseFloat(e.target.value.replace(/[^0-9.]/g, '')) || 0;
+                                          setPackagePaymentAmount(Math.min(v, pkgNetAmt3));
+                                        }}
+                                        style={{ width: '100%', padding: '8px 12px', border: '1px solid #e2e8f0', borderRadius: 8, fontSize: 12, outline: 'none', background: '#fff', boxSizing: 'border-box' as const }} />
+                                      {pkgBalance3 > 0 && (
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: '#92400e', marginTop: 8, padding: '6px 10px', background: '#fff7ed', borderRadius: 6, border: '1px solid #fed7aa' }}>
+                                          <span>Deferred to later sessions</span><span>₹{fmt3(pkgBalance3)}</span>
+                                        </div>
+                                      )}
+                                      {minAdvancePay3 > 0 && (
+                                        <div style={{ marginTop: 10, padding: '10px 12px', borderRadius: 8, background: advanceShortfall ? '#fef2f2' : '#f0fdf4', border: `1px solid ${advanceShortfall ? '#fca5a5' : '#86efac'}` }}>
+                                          <div style={{ fontSize: 11, fontWeight: 700, color: advanceShortfall ? '#dc2626' : '#16a34a', marginBottom: 3 }}>
+                                            {advanceShortfall ? '⚠ Advance required' : '✓ Advance collected'}
+                                          </div>
+                                          <div style={{ fontSize: 11, color: advanceShortfall ? '#b91c1c' : '#15803d' }}>
+                                            Minimum {(pkgMaster3 as any)?.advancePercent}% advance — collect at least ₹{fmt3(minAdvancePay3)}
+                                          </div>
+                                          {advanceShortfall && (
+                                            <button
+                                              onClick={() => setPackagePaymentAmount(minAdvancePay3)}
+                                              style={{ marginTop: 7, width: '100%', padding: '6px 0', fontSize: 11, fontWeight: 600, cursor: 'pointer', borderRadius: 6, border: '1px solid #fca5a5', background: '#dc2626', color: '#fff' }}
+                                            >
+                                              Set ₹{fmt3(minAdvancePay3)} ({(pkgMaster3 as any)?.advancePercent}%)
+                                            </button>
+                                          )}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Service allocation panel — works for packages AND individual services */}
+                                  {displayServices.length >= 2 && collectNow3 > 0 && (
+                                    <div style={{ padding: '10px 18px', borderBottom: '1px solid #f0f0f0' }}>
+                                      <button
+                                        onClick={() => setShowAllocationPanel(!showAllocationPanel)}
+                                        style={{ display: 'flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: '#6366f1', fontSize: 11, fontWeight: 600, padding: 0 }}
+                                      >
+                                        <span>{showAllocationPanel ? '▾' : '▸'}</span>
+                                        <span>Allocate payment to services (optional)</span>
+                                      </button>
+                                      {showAllocationPanel && (
+                                        <div style={{ marginTop: 8 }}>
+                                          {(() => {
+                                            const dsMismatch = Math.abs(dsAssigned - collectNowPaiseAlloc) > 1;
+                                            return (
+                                              <>
+                                                <table style={{ width: '100%', fontSize: 11, borderCollapse: 'collapse' }}>
+                                                  <thead>
+                                                    <tr style={{ color: '#94a3b8', borderBottom: '1px solid #e2e8f0' }}>
+                                                      <th style={{ textAlign: 'left', padding: '3px 0', fontWeight: 600 }}>Service</th>
+                                                      <th style={{ textAlign: 'right', padding: '3px 0', fontWeight: 600 }}>Auto ₹</th>
+                                                      <th style={{ textAlign: 'right', padding: '3px 0', fontWeight: 600 }}>Assign ₹</th>
+                                                    </tr>
+                                                  </thead>
+                                                  <tbody>
+                                                    {displayServices.map((d, i) => {
+                                                      const autoAmt = dsAutoAllocs[i];
+                                                      const assigned = pkgServiceAllocations[d.serviceName];
+                                                      return (
+                                                        <tr key={d.serviceName} style={{ borderBottom: '1px dashed #f1f5f9' }}>
+                                                          <td style={{ padding: '4px 0', color: '#334155' }}>{d.serviceName}</td>
+                                                          <td style={{ padding: '4px 0', textAlign: 'right', color: '#94a3b8' }}>₹{fmt3(autoAmt / 100)}</td>
+                                                          <td style={{ padding: '4px 0', textAlign: 'right' }}>
+                                                            <input
+                                                              type="text"
+                                                              inputMode="numeric"
+                                                              value={(() => { const n = assigned !== undefined ? Math.round(assigned / 100) : Math.round(autoAmt / 100); return n === 0 ? '' : String(n); })()}
+                                                              placeholder="0"
+                                                              onFocus={(e) => e.target.select()}
+                                                              onChange={(e) => {
+                                                                const v = Math.round((parseInt(e.target.value.replace(/\D/g, ''), 10) || 0) * 100);
+                                                                // Auto-redistribute remaining to other services proportionally
+                                                                const remaining = Math.max(0, collectNowPaiseAlloc - v);
+                                                                const othersWeight = displayServices.reduce((s, ds2, j) => j !== i ? s + ds2.weightPaise : s, 0);
+                                                                const newAllocs: Record<string, number> = { [d.serviceName]: v };
+                                                                let distributed = 0;
+                                                                displayServices.forEach((ds2, j) => {
+                                                                  if (j === i) return;
+                                                                  const amt = othersWeight > 0 ? Math.round(remaining * ds2.weightPaise / othersWeight) : 0;
+                                                                  newAllocs[ds2.serviceName] = amt;
+                                                                  distributed += amt;
+                                                                });
+                                                                // Assign rounding residual to last other service
+                                                                const residual = remaining - distributed;
+                                                                if (residual !== 0) {
+                                                                  const lastOtherIdx = displayServices.map((_, j) => j).filter(j => j !== i).pop();
+                                                                  if (lastOtherIdx !== undefined) newAllocs[displayServices[lastOtherIdx].serviceName] = Math.max(0, (newAllocs[displayServices[lastOtherIdx].serviceName] ?? 0) + residual);
+                                                                }
+                                                                setPkgServiceAllocations(newAllocs);
+                                                              }}
+                                                              style={{ width: 70, padding: '2px 6px', border: '1px solid #e2e8f0', borderRadius: 4, fontSize: 11, textAlign: 'right' as const }}
+                                                            />
+                                                          </td>
+                                                        </tr>
+                                                      );
+                                                    })}
+                                                    <tr style={{ borderTop: '1px solid #e2e8f0', fontWeight: 700 }}>
+                                                      <td style={{ padding: '4px 0' }}>Total</td>
+                                                      <td style={{ padding: '4px 0', textAlign: 'right', color: '#94a3b8' }}>₹{fmt3(collectNow3)}</td>
+                                                      <td style={{ padding: '4px 0', textAlign: 'right', color: dsMismatch ? '#dc2626' : '#16a34a' }}>
+                                                        ₹{fmt3(dsAssigned / 100)} {dsMismatch ? '✗' : '✓'}
+                                                      </td>
+                                                    </tr>
+                                                  </tbody>
+                                                </table>
+                                                <button
+                                                  onClick={() => setPkgServiceAllocations({})}
+                                                  style={{ marginTop: 6, fontSize: 10, color: '#6366f1', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}
+                                                >
+                                                  ↺ Reset to Auto
+                                                </button>
+                                              </>
+                                            );
+                                          })()}
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {/* Payment methods */}
+                                  <div style={{ padding: '14px 18px', borderBottom: '1px solid #e8ecf0' }}>
+                                    <div style={{ fontSize: 10, color: '#94a3b8', fontWeight: 600, textTransform: 'uppercase' as const, letterSpacing: '0.1em', marginBottom: 10 }}>Payment Method</div>
+                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 7 }}>
+                                      {[
+                                        { mode: 'Cash', label: 'Cash', icon: '₹' },
+                                        { mode: 'Card', label: 'Card', icon: '▣' },
+                                        { mode: 'UPI', label: 'UPI', icon: '⟳' },
+                                        { mode: 'Net Banking', label: 'Net', icon: '⊞' },
+                                        { mode: 'Cheque', label: 'Cheque', icon: '✎' },
+                                        { mode: 'Mixed', label: 'Mixed', icon: '⊕' },
+                                      ].map(({ mode, label, icon }) => {
+                                        const active = sel === mode;
+                                        return (
+                                          <button key={mode} onClick={() => setBookingData({ ...bookingData, paymentMode: mode })} style={{
+                                            padding: '10px 4px', cursor: 'pointer', borderRadius: 9,
+                                            border: active ? '2px solid #6366f1' : '1px solid #e2e8f0',
+                                            background: active ? '#eef2ff' : '#fff',
+                                            color: active ? '#6366f1' : '#334155',
+                                            fontSize: 11, display: 'flex', flexDirection: 'column' as const, alignItems: 'center', gap: 3,
+                                          }}>
+                                            <span style={{ fontSize: 16, lineHeight: '1' }}>{icon}</span>
+                                            <span style={{ fontWeight: active ? 600 : 400 }}>{label}</span>
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  </div>
+
+                                  {/* Collect now */}
+                                  <div style={{ padding: '16px 18px', background: '#0f172a', marginTop: 'auto' }}>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                      <div>
+                                        <div style={{ fontSize: 10, color: '#64748b', letterSpacing: '0.1em', textTransform: 'uppercase' as const }}>Collect Now</div>
+                                        {hasPkg3 && pkgBalance3 > 0 && (
+                                          <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>+₹{fmt3(pkgBalance3)} deferred</div>
+                                        )}
+                                      </div>
+                                      <div style={{ fontSize: 24, fontWeight: 800, color: '#fff', letterSpacing: '-0.02em' }}>₹{fmt3(collectNow3)}</div>
+                                    </div>
+                                  </div>
+                                </div>
                               </div>
-                            )}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #e0e0e0` }}>
-                              <span style={{ color: '#666' }}>Round Off</span>
-                              <span>{(bookingData.roundOff || 0) >= 0 ? '+' : ''}{(bookingData.roundOff || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: `2px solid #333`, marginTop: 4 }}>
-                              <span style={{ fontWeight: 800, fontSize: 14 }}>Net Amount</span>
-                              <span style={{ fontWeight: 800, fontSize: 15, color: colors.gold.primary }}>₹{netAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                            </div>
-                          </div>
-                        </div>
 
-                        {bookingData.remarks && (
-                          <div style={{ padding: '10px 18px', borderBottom: `1px solid ${colors.border}`, fontSize: 12 }}>
-                            <span style={{ color: '#888', marginRight: 6 }}>Remarks:</span>{bookingData.remarks}
-                          </div>
-                        )}
-
-                        <div style={{ padding: '12px 18px', display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                          <Button onClick={() => setPackageOfferStep(2)}>← Back</Button>
-                          <Button type="primary" onClick={() => setPackageOfferStep(4)} style={{ background: colors.gold.primary, borderColor: colors.gold.primary }}>
-                            Continue to Print →
-                          </Button>
-                        </div>
+                              {/* Footer */}
+                              <div style={{ padding: '14px 22px', borderTop: '1px solid #e8ecf0', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#fff' }}>
+                                <Button onClick={() => setPackageOfferStep(2)}>← Back</Button>
+                                <div style={{ display: 'flex', gap: 10 }}>
+                                  {allocationExceeds && (
+                                    <div style={{ padding: '8px 22px', background: '#fef2f2', borderTop: '1px solid #fca5a5', fontSize: 11, color: '#dc2626', fontWeight: 600 }}>
+                                      ⚠ Allocated total (₹{fmt3(dsAssigned / 100)}) exceeds collect amount (₹{fmt3(collectNow3)}). Please fix allocations before saving.
+                                    </div>
+                                  )}
+                                  {(() => {
+                                    const needsPayment = (collectNow3 > 0 && !sel) || advanceShortfall || allocationExceeds;
+                                    const collectNowPaise3 = Math.round(collectNow3 * 100);
+                                    return (
+                                      <>
+                                        <Button
+                                          disabled={needsPayment}
+                                          loading={createBooking.isPending || bookingAction.isPending}
+                                          onClick={async () => {
+                                            const saved = await handleSaveBooking();
+                                            if (!saved) return;
+                                            const { id: bookingId, items: bkgItems } = saved;
+                                            if (collectNowPaise3 > 0 && sel) {
+                                              // Build serviceAllocations for ALL non-summary items using displayServices map
+                                              const payableItems = bkgItems.filter((it: any) => !it.isPackageSummaryLine);
+                                              const serviceAllocations = payableItems.map((it: any) => {
+                                                const dsIdx = displayServices.findIndex(d => d.serviceName === it.service);
+                                                const autoAmt = dsIdx >= 0 ? dsAutoAllocs[dsIdx] : 0;
+                                                return {
+                                                  bookingItemId: it.id,
+                                                  amount: pkgServiceAllocations[it.service] !== undefined ? pkgServiceAllocations[it.service] : autoAmt,
+                                                };
+                                              });
+                                              await bookingAction.mutateAsync({ bookingId, action: 'pay', amount: collectNowPaise3, ...(sel ? { paymentMode: sel } : {}), ...(serviceAllocations.length ? { serviceAllocations } : {}) });
+                                            }
+                                            message.success('Booking saved!');
+                                            setExpandedModuleView(null);
+                                          }}
+                                        >Save</Button>
+                                        <Button type="primary" disabled={needsPayment}
+                                          loading={createBooking.isPending}
+                                          onClick={async () => {
+                                            const saved = await handleSaveBooking();
+                                            if (!saved) return;
+                                            setPackageOfferStep(4);
+                                          }}
+                                          style={{ background: !needsPayment ? 'linear-gradient(90deg, #6366f1 0%, #06b6d4 100%)' : undefined, border: 'none', fontWeight: 600, minWidth: 130 }}>
+                                          Save &amp; Print →
+                                        </Button>
+                                      </>
+                                    );
+                                  })()}
+                                </div>
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     );
                   })()}
@@ -4673,163 +6342,294 @@ export default function CustomerDetailPage() {
                     const manualDiscPct4 = Number(bookingData.discount) || 0;
                     const manualDiscount4 = manualDiscPct4 > 0 ? (grossTotal4 * manualDiscPct4) / 100 : 0;
                     const netAmt = grossTotal4 - couponDiscount4 - manualDiscount4 + (bookingData.roundOff || 0);
+                    const isIntraState4 = !!branchStateId && !!(customer as any)?.stateId && branchStateId === (customer as any)?.stateId;
+                    const cgstAmt4 = isIntraState4 ? Math.floor(aggTax4 / 2) : 0;
+                    const sgstAmt4 = isIntraState4 ? aggTax4 - cgstAmt4 : 0;
+                    const igstAmt4 = !isIntraState4 ? aggTax4 : 0;
+                    const taxRates4 = [...new Set(filledRows.filter(r => (r.taxPercent ?? 0) > 0).map(r => r.taxPercent as number))];
+                    const uniformRate4 = taxRates4.length === 1 ? taxRates4[0] : null;
+                    // Compute collect-now amount (same logic as Step 3)
+                    const filledRows4 = [...bookingRows.filter((r: any) => r.service), ...complimentaryRows.filter((r: any) => r.service).map((r: any) => ({ ...r, complementary: true, amount: 0 }))];
+                    const pkgRows4 = filledRows4.filter((r: any) => r._isPackage);
+                    const nonPkgRows4 = filledRows4.filter((r: any) => !r._isPackage && !r.complementary);
+                    const hasPkg4 = pkgRows4.length > 0;
+                    const pkgGross4 = pkgRows4.reduce((s: number, r: any) => s + r.quantity * r.amount, 0);
+                    const pkgNet4 = pkgGross4; // package price is fixed; never absorbs GST from other services
+                    const nonPkgNet4 = netAmt - pkgNet4;
+                    const clampedPkgPay4 = Math.min(Math.max(0, packagePaymentAmount), pkgNet4);
+                    const collectNow4 = hasPkg4 ? nonPkgNet4 + clampedPkgPay4 : netAmt;
+                    const collectNowPaise4 = Math.round(collectNow4 * 100);
+                    const fmt4 = (v: number) => v.toLocaleString('en-IN', { maximumFractionDigits: 2 });
+                    const dateStr4 = new Date(bookingData.bookingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
                     return (
                       <div>
+                        {/* POS page-size style injected only when in POS mode */}
+                        {printMode === 'pos' && (
+                          <style>{`@media print { @page { size: 80mm auto; margin: 3mm; } }`}</style>
+                        )}
+
                         {/* Action bar — hidden on print */}
-                        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                        <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
                           <Button onClick={() => setPackageOfferStep(3)}>← Back to Receipt</Button>
+
+                          {/* Print format toggle */}
+                          <div style={{ display: 'flex', gap: 0, border: '1px solid #e2e8f0', borderRadius: 8, overflow: 'hidden' }}>
+                            {(['normal', 'pos'] as const).map(mode => (
+                              <button key={mode} onClick={() => setPrintMode(mode)} style={{
+                                padding: '7px 18px', fontSize: 13, cursor: 'pointer', border: 'none', outline: 'none',
+                                background: printMode === mode ? '#6366f1' : '#fff',
+                                color: printMode === mode ? '#fff' : '#64748b',
+                                fontWeight: printMode === mode ? 600 : 400,
+                                borderRight: mode === 'normal' ? '1px solid #e2e8f0' : 'none',
+                              }}>
+                                {mode === 'normal' ? '🖨 Normal (A4)' : '🧾 POS (80mm)'}
+                              </button>
+                            ))}
+                          </div>
+
                           <div style={{ display: 'flex', gap: 8 }}>
                             <Button type="primary" onClick={() => window.print()} style={{ background: colors.gold.primary, borderColor: colors.gold.primary }}>
-                              🖨️ Print
+                              Print
                             </Button>
                             <Button
                               type="primary"
                               loading={bookingAction.isPending}
                               style={{ background: '#2e7d32', borderColor: '#2e7d32' }}
                               onClick={async () => {
-                                if (savedBookingId && savedNetAmountPaise > 0) {
+                                if (savedBookingId && collectNowPaise4 > 0) {
                                   await bookingAction.mutateAsync({
                                     bookingId: savedBookingId,
                                     action: 'pay',
-                                    amount: savedNetAmountPaise,
+                                    amount: collectNowPaise4,
+                                    ...(bookingData.paymentMode ? { paymentMode: bookingData.paymentMode } : {}),
                                   });
                                 }
                                 setExpandedModuleView(null);
                               }}
                             >
-                              ✓ Done & Save Payment
+                              ✓ Done &amp; Save Payment
                             </Button>
                           </div>
                         </div>
 
-                        {/* Printable receipt */}
-                        <div id="print-receipt" style={{
-                          background: '#fff',
-                          border: `2px solid #222`,
-                          borderRadius: 6,
-                          padding: '32px 36px',
-                          maxWidth: 680,
-                          margin: '0 auto',
-                          fontFamily: 'inherit',
-                        }}>
-                          {/* Header */}
-                          <div style={{ textAlign: 'center', paddingBottom: 16, borderBottom: `2px solid #222`, marginBottom: 20 }}>
-                            <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 2, color: '#111' }}>WELONA</div>
-                            <div style={{ fontSize: 11, color: '#777', letterSpacing: 2, marginTop: 2 }}>HEALTH &amp; WELLNESS</div>
-                            <div style={{ marginTop: 10, fontSize: 13, fontWeight: 700, letterSpacing: 3, color: '#333' }}>SERVICE BOOKING RECEIPT</div>
-                          </div>
-
-                          {/* Booking ID + Date */}
-                          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 16 }}>
-                            <div><span style={{ color: '#888' }}>Booking ID: </span><strong>{bookingData.bookingId}</strong></div>
-                            <div><span style={{ color: '#888' }}>Date: </span><strong>{new Date(bookingData.bookingDate).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</strong></div>
-                          </div>
-
-                          {/* Customer + Consultant */}
-                          <div style={{ display: 'flex', gap: 32, marginBottom: 20, padding: '12px 14px', background: '#f9f9f9', borderRadius: 4, fontSize: 12 }}>
-                            <div>
-                              <div style={{ color: '#888', marginBottom: 3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Customer</div>
-                              <div style={{ fontWeight: 700, fontSize: 14 }}>{customer?.name}</div>
-                              {customer?.phone && <div style={{ color: '#555' }}>📞 {customer.phone}</div>}
+                        {/* ── NORMAL (A4) Receipt ── */}
+                        {printMode === 'normal' && (
+                          <div className="print-area" style={{ background: '#fff', border: '2px solid #222', borderRadius: 6, padding: '32px 36px', maxWidth: 680, margin: '0 auto', fontFamily: 'inherit' }}>
+                            <div style={{ textAlign: 'center', paddingBottom: 16, borderBottom: '2px solid #222', marginBottom: 20 }}>
+                              <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 2, color: '#111' }}>WELONA</div>
+                              <div style={{ fontSize: 11, color: '#777', letterSpacing: 2, marginTop: 2 }}>HEALTH &amp; WELLNESS</div>
+                              <div style={{ marginTop: 10, fontSize: 13, fontWeight: 700, letterSpacing: 3, color: '#333' }}>SERVICE BOOKING RECEIPT</div>
                             </div>
-                            {consultantObj && (
+                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 16 }}>
+                              <div><span style={{ color: '#888' }}>Booking ID: </span><strong>{bookingData.bookingId}</strong></div>
+                              <div><span style={{ color: '#888' }}>Date: </span><strong>{dateStr4}</strong></div>
+                            </div>
+                            <div style={{ display: 'flex', gap: 32, marginBottom: 20, padding: '12px 14px', background: '#f9f9f9', borderRadius: 4, fontSize: 12 }}>
                               <div>
-                                <div style={{ color: '#888', marginBottom: 3, fontSize: 10, textTransform: 'uppercase', letterSpacing: 1 }}>Consulted By</div>
-                                <div style={{ fontWeight: 700, fontSize: 14 }}>{consultantObj.name}</div>
-                                <div style={{ color: '#555' }}>{consultantObj.designation || 'Consultant'}</div>
+                                <div style={{ color: '#888', marginBottom: 3, fontSize: 10, textTransform: 'uppercase' as const, letterSpacing: 1 }}>Customer</div>
+                                <div style={{ fontWeight: 700, fontSize: 14 }}>{customer?.name}</div>
+                                {customer?.phone && <div style={{ color: '#555' }}>📞 {customer.phone}</div>}
+                              </div>
+                              {consultantObj && (
+                                <div>
+                                  <div style={{ color: '#888', marginBottom: 3, fontSize: 10, textTransform: 'uppercase' as const, letterSpacing: 1 }}>Consulted By</div>
+                                  <div style={{ fontWeight: 700, fontSize: 14 }}>{consultantObj.name}</div>
+                                  <div style={{ color: '#555' }}>{consultantObj.designation || 'Consultant'}</div>
+                                </div>
+                              )}
+                            </div>
+                            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 20 }}>
+                              <thead>
+                                <tr style={{ background: '#222', color: '#fff' }}>
+                                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>#</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>Category</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'left' }}>Service</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Rate (₹)</th>
+                                  <th style={{ padding: '8px 10px', textAlign: 'right' }}>Amount (₹)</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {filledRows.map((row, idx) => (
+                                  <tr key={row.id} style={{ borderBottom: '1px solid #eee', background: row.complementary ? '#f1f8e9' : idx % 2 === 0 ? '#fff' : '#fafafa' }}>
+                                    <td style={{ padding: '8px 10px' }}>{idx + 1}</td>
+                                    <td style={{ padding: '8px 10px', color: '#555' }}>{row.category || '—'}</td>
+                                    <td style={{ padding: '8px 10px', fontWeight: 500 }}>{row.service}</td>
+                                    <td style={{ padding: '8px 10px', textAlign: 'center' }}>{row.quantity}</td>
+                                    <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.complementary ? '—' : `₹${row.amount.toLocaleString('en-IN')}`}</td>
+                                    <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
+                                      {row.complementary
+                                        ? <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 700 }}>₹0 — COMP</span>
+                                        : `₹${(row.quantity * row.amount).toLocaleString('en-IN')}`}
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
+                              <div style={{ minWidth: 280, fontSize: 13 }}>
+                                {hasGst4 && (
+                                  <>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                      <span style={{ color: '#666' }}>Taxable Amount</span>
+                                      <span style={{ fontWeight: 600 }}>₹{fmt4(aggTaxable4 / 100)}</span>
+                                    </div>
+                                    {isIntraState4 ? (
+                                      <>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                          <span style={{ color: '#555' }}>CGST{uniformRate4 ? ` (${uniformRate4 / 2}%)` : ''}</span>
+                                          <span style={{ fontWeight: 600 }}>+ ₹{fmt4(cgstAmt4 / 100)}</span>
+                                        </div>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                          <span style={{ color: '#555' }}>SGST{uniformRate4 ? ` (${uniformRate4 / 2}%)` : ''}</span>
+                                          <span style={{ fontWeight: 600 }}>+ ₹{fmt4(sgstAmt4 / 100)}</span>
+                                        </div>
+                                      </>
+                                    ) : (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                        <span style={{ color: '#555' }}>IGST{uniformRate4 ? ` (${uniformRate4}%)` : ''}</span>
+                                        <span style={{ fontWeight: 600 }}>+ ₹{fmt4(igstAmt4 / 100)}</span>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                  <span style={{ color: '#666' }}>Total Amount</span>
+                                  <span style={{ fontWeight: 600 }}>₹{fmt4(grossTotal4)}</span>
+                                </div>
+                                {manualDiscount4 > 0 && (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                    <span style={{ color: '#e53935' }}>Discount ({manualDiscPct4}%)</span>
+                                    <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{fmt4(manualDiscount4)}</span>
+                                  </div>
+                                )}
+                                {couponDiscount4 > 0 && (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                    <span style={{ color: '#e53935' }}>Coupon ({appliedCoupon?.couponCode})</span>
+                                    <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{fmt4(couponDiscount4)}</span>
+                                  </div>
+                                )}
+                                {(bookingData.roundOff || 0) !== 0 && (
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                    <span style={{ color: '#666' }}>Round Off</span>
+                                    <span>- ₹{Math.abs(bookingData.roundOff || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                                  </div>
+                                )}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: '2px solid #111', marginTop: 4 }}>
+                                  <span style={{ fontWeight: 800, fontSize: 14 }}>Net Amount</span>
+                                  <span style={{ fontWeight: 800, fontSize: 16 }}>₹{fmt4(netAmt)}</span>
+                                </div>
+                                {hasPkg4 && (
+                                  <>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: '1px dashed #ddd' }}>
+                                      <span style={{ color: '#2e7d32' }}>Paid Now</span>
+                                      <span style={{ fontWeight: 700, color: '#2e7d32' }}>₹{fmt4(collectNow4)}</span>
+                                    </div>
+                                    {(pkgNet4 - clampedPkgPay4) > 0 && (
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0' }}>
+                                        <span style={{ color: '#e53935' }}>Package Balance Due</span>
+                                        <span style={{ fontWeight: 700, color: '#e53935' }}>₹{fmt4(pkgNet4 - clampedPkgPay4)}</span>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            {bookingData.remarks && (
+                              <div style={{ padding: '8px 12px', background: '#f9f9f9', borderRadius: 4, marginBottom: 14, fontSize: 12 }}>
+                                <span style={{ color: '#888', marginRight: 8 }}>Remarks:</span>{bookingData.remarks}
                               </div>
                             )}
+                            {filledRows.some(r => r.complementary) && (
+                              <div style={{ padding: '6px 12px', background: '#e8f5e9', borderRadius: 4, marginBottom: 14, fontSize: 11, color: '#2e7d32' }}>
+                                🎁 Services marked <strong>COMP</strong> are complimentary — provided free of charge.
+                              </div>
+                            )}
+                            <div style={{ textAlign: 'center', paddingTop: 14, borderTop: '1px solid #ddd', fontSize: 11, color: '#aaa' }}>
+                              Thank you for choosing Welona Health &amp; Wellness
+                            </div>
                           </div>
+                        )}
 
-                          {/* Services table */}
-                          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12, marginBottom: 20 }}>
-                            <thead>
-                              <tr style={{ background: '#222', color: '#fff' }}>
-                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>#</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Category</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'left' }}>Service</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'center' }}>Qty</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'right' }}>Rate (₹)</th>
-                                <th style={{ padding: '8px 10px', textAlign: 'right' }}>Amount (₹)</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {filledRows.map((row, idx) => (
-                                <tr key={row.id} style={{ borderBottom: `1px solid #eee`, background: row.complementary ? '#f1f8e9' : idx % 2 === 0 ? '#fff' : '#fafafa' }}>
-                                  <td style={{ padding: '8px 10px' }}>{idx + 1}</td>
-                                  <td style={{ padding: '8px 10px', color: '#555' }}>{row.category || '—'}</td>
-                                  <td style={{ padding: '8px 10px', fontWeight: 500 }}>{row.service}</td>
-                                  <td style={{ padding: '8px 10px', textAlign: 'center' }}>{row.quantity}</td>
-                                  <td style={{ padding: '8px 10px', textAlign: 'right' }}>{row.complementary ? '—' : `₹${row.amount.toLocaleString('en-IN')}`}</td>
-                                  <td style={{ padding: '8px 10px', textAlign: 'right', fontWeight: 600 }}>
-                                    {row.complementary
-                                      ? <span style={{ background: '#e8f5e9', color: '#2e7d32', padding: '2px 8px', borderRadius: 8, fontSize: 11, fontWeight: 700 }}>₹0 — COMP</span>
-                                      : `₹${(row.quantity * row.amount).toLocaleString('en-IN')}`}
-                                  </td>
-                                </tr>
+                        {/* ── POS (80mm thermal) Receipt ── */}
+                        {printMode === 'pos' && (
+                          <div className="print-area" style={{ background: '#fff', width: 302, margin: '0 auto', fontFamily: "'Courier New', Courier, monospace", fontSize: 12, padding: '10px 8px' }}>
+                            {/* Header */}
+                            <div style={{ textAlign: 'center', marginBottom: 8 }}>
+                              <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 3 }}>WELONA</div>
+                              <div style={{ fontSize: 10, letterSpacing: 1, color: '#555' }}>HEALTH &amp; WELLNESS</div>
+                              <div style={{ fontSize: 9, marginTop: 4, color: '#777' }}>SERVICE BOOKING RECEIPT</div>
+                            </div>
+                            <div style={{ borderTop: '1px dashed #333', borderBottom: '1px dashed #333', padding: '5px 0', margin: '6px 0', fontSize: 10 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>ID:</span><span>{bookingData.bookingId}</span></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Date:</span><span>{dateStr4}</span></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Customer:</span><span style={{ maxWidth: 170, textAlign: 'right' }}>{customer?.name}</span></div>
+                              {customer?.phone && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Phone:</span><span>{customer.phone}</span></div>}
+                              {consultantObj && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Consultant:</span><span>{consultantObj.name}</span></div>}
+                            </div>
+                            {/* Items */}
+                            <div style={{ borderBottom: '1px dashed #333', paddingBottom: 6, marginBottom: 6 }}>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, fontWeight: 700, marginBottom: 4, textTransform: 'uppercase' as const }}>
+                                <span style={{ flex: 1 }}>Item</span>
+                                <span style={{ width: 30, textAlign: 'center' }}>Qty</span>
+                                <span style={{ width: 60, textAlign: 'right' }}>Amt</span>
+                              </div>
+                              {filledRows.map(row => (
+                                <div key={row.id} style={{ marginBottom: 4 }}>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11 }}>
+                                    <span style={{ flex: 1, paddingRight: 4, wordBreak: 'break-word' as const }}>{row.service}</span>
+                                    <span style={{ width: 30, textAlign: 'center', flexShrink: 0 }}>{row.quantity}</span>
+                                    <span style={{ width: 60, textAlign: 'right', flexShrink: 0, fontWeight: 600 }}>
+                                      {row.complementary ? 'FREE' : `₹${(row.quantity * row.amount).toLocaleString('en-IN')}`}
+                                    </span>
+                                  </div>
+                                  {row.category && <div style={{ fontSize: 9, color: '#666', paddingLeft: 2 }}>{row.category}</div>}
+                                </div>
                               ))}
-                            </tbody>
-                          </table>
-
-                          {/* Payment totals */}
-                          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
-                            <div style={{ minWidth: 280, fontSize: 13 }}>
+                            </div>
+                            {/* Totals */}
+                            <div style={{ fontSize: 11 }}>
                               {hasGst4 && (
                                 <>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
-                                    <span style={{ color: '#666' }}>Taxable Amount</span>
-                                    <span style={{ fontWeight: 600 }}>₹{(aggTaxable4 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                  </div>
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
-                                    <span style={{ color: '#555' }}>GST</span>
-                                    <span style={{ fontWeight: 600 }}>+ ₹{(aggTax4 / 100).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                  </div>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>Taxable</span><span>₹{fmt4(aggTaxable4 / 100)}</span></div>
+                                  {isIntraState4 ? (
+                                    <>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>CGST{uniformRate4 ? ` ${uniformRate4 / 2}%` : ''}</span><span>₹{fmt4(cgstAmt4 / 100)}</span></div>
+                                      <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>SGST{uniformRate4 ? ` ${uniformRate4 / 2}%` : ''}</span><span>₹{fmt4(sgstAmt4 / 100)}</span></div>
+                                    </>
+                                  ) : (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>IGST{uniformRate4 ? ` ${uniformRate4}%` : ''}</span><span>₹{fmt4(igstAmt4 / 100)}</span></div>
+                                  )}
                                 </>
                               )}
-                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
-                                <span style={{ color: '#666' }}>Total Amount</span>
-                                <span style={{ fontWeight: 600 }}>₹{grossTotal4.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                              </div>
-                              {manualDiscount4 > 0 && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
-                                  <span style={{ color: '#e53935' }}>Discount ({manualDiscPct4}%)</span>
-                                  <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{manualDiscount4.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                </div>
+                              {(manualDiscount4 > 0 || couponDiscount4 > 0) && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>Discount</span><span>-₹{fmt4(manualDiscount4 + couponDiscount4)}</span></div>
                               )}
-                              {couponDiscount4 > 0 && (
-                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
-                                  <span style={{ color: '#e53935' }}>Coupon ({appliedCoupon?.couponCode})</span>
-                                  <span style={{ color: '#e53935', fontWeight: 600 }}>- ₹{couponDiscount4.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                                </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between', borderTop: '1px dashed #333', borderBottom: '1px dashed #333', padding: '4px 0', margin: '4px 0', fontWeight: 800, fontSize: 13 }}>
+                                <span>NET TOTAL</span><span>₹{fmt4(netAmt)}</span>
+                              </div>
+                              {hasPkg4 && (
+                                <>
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>Paid Now</span><span style={{ fontWeight: 700 }}>₹{fmt4(collectNow4)}</span></div>
+                                  {(pkgNet4 - clampedPkgPay4) > 0 && (
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0' }}><span>Balance Due</span><span style={{ fontWeight: 700 }}>₹{fmt4(pkgNet4 - clampedPkgPay4)}</span></div>
+                                  )}
+                                </>
                               )}
-                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderBottom: `1px dashed #ddd` }}>
-                                <span style={{ color: '#666' }}>Round Off</span>
-                                <span>{(bookingData.roundOff || 0) >= 0 ? '+' : ''}{(bookingData.roundOff || 0).toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
+                              {bookingData.paymentMode && (
+                                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '2px 0', fontSize: 10, color: '#555' }}><span>Payment</span><span>{bookingData.paymentMode}</span></div>
+                              )}
+                            </div>
+                            {bookingData.remarks && (
+                              <div style={{ borderTop: '1px dashed #333', marginTop: 6, paddingTop: 6, fontSize: 10, color: '#555' }}>
+                                Remarks: {bookingData.remarks}
                               </div>
-                              <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderTop: `2px solid #111`, marginTop: 4 }}>
-                                <span style={{ fontWeight: 800, fontSize: 14 }}>Net Amount</span>
-                                <span style={{ fontWeight: 800, fontSize: 16 }}>₹{netAmt.toLocaleString('en-IN', { maximumFractionDigits: 2 })}</span>
-                              </div>
+                            )}
+                            <div style={{ textAlign: 'center', marginTop: 10, paddingTop: 8, borderTop: '1px dashed #333', fontSize: 10, color: '#777' }}>
+                              Thank you for visiting Welona!
                             </div>
                           </div>
-
-                          {bookingData.remarks && (
-                            <div style={{ padding: '8px 12px', background: '#f9f9f9', borderRadius: 4, marginBottom: 14, fontSize: 12 }}>
-                              <span style={{ color: '#888', marginRight: 8 }}>Remarks:</span>{bookingData.remarks}
-                            </div>
-                          )}
-
-                          {filledRows.some(r => r.complementary) && (
-                            <div style={{ padding: '6px 12px', background: '#e8f5e9', borderRadius: 4, marginBottom: 14, fontSize: 11, color: '#2e7d32' }}>
-                              🎁 Services marked <strong>COMP</strong> are complimentary — provided free of charge.
-                            </div>
-                          )}
-
-                          {/* Footer */}
-                          <div style={{ textAlign: 'center', paddingTop: 14, borderTop: `1px solid #ddd`, fontSize: 11, color: '#aaa' }}>
-                            Thank you for choosing Welona Health &amp; Wellness
-                          </div>
-                        </div>
+                        )}
                       </div>
                     );
                   })()}
@@ -4842,55 +6642,7 @@ export default function CustomerDetailPage() {
       )}
 
 
-      {/* Stock warning modal — shown when booking returns 409 STOCK_INSUFFICIENT */}
-      <Modal
-        open={stockWarningOpen}
-        title={<span><WarningOutlined style={{ color: '#faad14', marginRight: 8 }} />Insufficient Stock — Proceed Anyway?</span>}
-        onCancel={() => setStockWarningOpen(false)}
-        okText="Raise Indent & Proceed"
-        cancelText="Cancel"
-        okButtonProps={{ loading: raiseIndent.isPending || createBooking.isPending, danger: true }}
-        onOk={handleStockProceed}
-        width={520}
-      >
-        <p style={{ marginBottom: 12, color: '#555' }}>
-          The following products do not have enough stock for this booking. You can still proceed — the booking will be created and indents will be raised for checked items.
-        </p>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13, marginBottom: 12 }}>
-          <thead>
-            <tr style={{ background: '#f5f5f5' }}>
-              <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Raise Indent?</th>
-              <th style={{ padding: '6px 8px', textAlign: 'left', fontWeight: 600 }}>Product</th>
-              <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>Needed</th>
-              <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>In Stock</th>
-              <th style={{ padding: '6px 8px', textAlign: 'center', fontWeight: 600 }}>Short</th>
-            </tr>
-          </thead>
-          <tbody>
-            {stockShortfalls.map((s) => (
-              <tr key={s.productId} style={{ borderBottom: '1px solid #f0f0f0' }}>
-                <td style={{ padding: '6px 8px', textAlign: 'center' }}>
-                  <Checkbox
-                    checked={stockIndentChecked.has(s.productId)}
-                    onChange={(e) => {
-                      const next = new Set(stockIndentChecked);
-                      if (e.target.checked) next.add(s.productId); else next.delete(s.productId);
-                      setStockIndentChecked(next);
-                    }}
-                  />
-                </td>
-                <td style={{ padding: '6px 8px' }}>{s.productName}</td>
-                <td style={{ padding: '6px 8px', textAlign: 'center' }}>{s.required} {s.productUom}</td>
-                <td style={{ padding: '6px 8px', textAlign: 'center', color: '#e53935' }}>{s.available} {s.productUom}</td>
-                <td style={{ padding: '6px 8px', textAlign: 'center', color: '#e67e22', fontWeight: 600 }}>{s.required - s.available} {s.productUom}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <p style={{ fontSize: 12, color: '#888', margin: 0 }}>
-          Checked items will have a stock indent raised automatically. The booking will be created regardless.
-        </p>
-      </Modal>
+      {/* Stock shortfall banner — shown inline on step 2 when booking proceeded with low stock */}
 
       {/* Edit Customer Profile Modal */}
       <Modal
