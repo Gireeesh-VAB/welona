@@ -120,6 +120,9 @@ jobs:
             echo "── Pushing database schema ──"
             npx prisma db push --accept-data-loss
 
+            echo "── Seeding database ──"
+            npm run db:seed-all
+
             echo "── Building backend ──"
             npm run build
 
