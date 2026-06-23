@@ -23,7 +23,7 @@ import { PlusCircleOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useInventoryAlerts } from '@/hooks/useInventoryAlerts';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
-import { useAdminRaiseIndent } from '@/hooks/useAdminIndents';
+import { useCreateAdminIndent } from '@/hooks/useAdminIndents';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
@@ -47,7 +47,7 @@ export default function AdminInventoryAlertsPage() {
 
   const [branchId, setBranchId] = useState('');
   const { data, isLoading } = useInventoryAlerts({ branchId: branchId || undefined });
-  const raiseIndent = useAdminRaiseIndent();
+  const raiseIndent = useCreateAdminIndent();
 
   // Raise indent modal
   const [indentModal, setIndentModal] = useState(false);
@@ -67,8 +67,7 @@ export default function AdminInventoryAlertsPage() {
     raiseIndent.mutate(
       {
         branchId: indentTarget.branchId,
-        productId: indentTarget.productId,
-        requestedQty: values.requestedQty,
+        items: [{ productId: indentTarget.productId, requestedQty: values.requestedQty }],
         reason: values.reason,
       },
       {
@@ -76,7 +75,7 @@ export default function AdminInventoryAlertsPage() {
           message.success(`Indent raised for ${indentTarget.name} @ ${indentTarget.branchName}`);
           setIndentModal(false);
         },
-        onError: (e) => {
+        onError: (e: unknown) => {
           message.error(e instanceof ApiClientError ? e.message : 'Failed to raise indent');
         },
       },

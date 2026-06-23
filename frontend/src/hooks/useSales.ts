@@ -24,7 +24,7 @@ import type {
 } from '@shared/types/sales';
 
 /** Loose query params for list endpoints. */
-export type ListParams = Record<string, string | number | undefined>;
+export type ListParams = Record<string, string | number | boolean | undefined>;
 
 /** Invalidate every sales-related query after a pipeline mutation. */
 function invalidateSales(qc: QueryClient) {
@@ -163,6 +163,29 @@ export function useConvertLeadToCustomer() {
   return useMutation({
     mutationFn: (id: string) => api.post<Customer>(`/sales/leads/${id}/convert-customer`),
     onSuccess: () => invalidateSales(qc),
+  });
+}
+
+export function useTransferLead() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string;
+      body: { targetBranchId: string; targetOwnerStaffId?: string; notes?: string };
+    }) =>
+      api.post<{ newLeadId: string; transferredAt: string }>(`/sales/leads/${id}/transfer`, body),
+    onSuccess: () => invalidateSales(qc),
+  });
+}
+
+export function useBranches() {
+  return useQuery({
+    queryKey: ['branches'],
+    queryFn: () => api.get<Array<{ id: string; name: string }>>('/branches'),
+    staleTime: 5 * 60 * 1000,
   });
 }
 

@@ -34,7 +34,12 @@ export const GET = route(async (req) => {
 
   const where: Prisma.LeadWhereInput = { orgId };
   const branchId = query.branchId;
-  if (query.status) where.status = query.status;
+  if (query.status) {
+    where.status = query.status;
+  } else {
+    // Converted leads are hidden from the default list — they live in Customers.
+    where.status = { not: 'converted' };
+  }
   if (branchId) where.branchId = branchId;
   if (query.ownerStaffId) where.ownerStaffId = query.ownerStaffId;
   if (query.search) {

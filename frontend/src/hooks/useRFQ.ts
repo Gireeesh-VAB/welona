@@ -64,6 +64,18 @@ export function useUpdateRFQ() {
   });
 }
 
+export function useAcceptRejectQuote() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ rfqId, quoteId, action }: { rfqId: string; quoteId: string; action: 'accept' | 'reject' }) =>
+      api.patch<ProcurementRFQ>(`/admin/procurement/rfq/${rfqId}/quotes/${quoteId}`, { action }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: [KEY] });
+      qc.invalidateQueries({ queryKey: [KEY, 'detail', vars.rfqId] });
+    },
+  });
+}
+
 export function useUpsertSupplierQuote() {
   const qc = useQueryClient();
   return useMutation({

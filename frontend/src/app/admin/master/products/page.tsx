@@ -47,7 +47,7 @@ import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
 import type { AdminProduct } from '@shared/types/admin-product';
 import type { AdminProductCreateInput } from '@shared/schemas/admin-products';
-import { PRODUCT_UOMS, type ProductUom } from '@shared/enums';
+import { PRODUCT_UOMS, CONSUMPTION_UOMS, type ProductUom } from '@shared/enums';
 import BulkUploadButton, { type BulkColumn } from '@/components/common/BulkUploadButton';
 
 const { Title, Text } = Typography;
@@ -100,6 +100,10 @@ interface FormValues {
   trackBatches: boolean;
   trackExpiry: boolean;
   hasComplementary: boolean;
+  consumptionUom?: string;
+  unitsPerPurchase: number;
+  availableForServices: boolean;
+  availableForProducts: boolean;
   isActive: boolean;
 }
 
@@ -202,6 +206,10 @@ export default function AdminMasterProductsPage() {
         trackBatches: editing.trackBatches,
         trackExpiry: editing.trackExpiry,
         hasComplementary: editing.hasComplementary,
+        consumptionUom: editing.consumptionUom ?? undefined,
+        unitsPerPurchase: editing.unitsPerPurchase ?? 1,
+        availableForServices: editing.availableForServices ?? true,
+        availableForProducts: editing.availableForProducts ?? true,
         isActive: editing.isActive,
       });
     } else {
@@ -216,6 +224,10 @@ export default function AdminMasterProductsPage() {
         trackBatches: false,
         trackExpiry: false,
         hasComplementary: false,
+        consumptionUom: undefined,
+        unitsPerPurchase: 1,
+        availableForServices: true,
+        availableForProducts: true,
         isActive: true,
       });
     }
@@ -241,6 +253,10 @@ export default function AdminMasterProductsPage() {
       trackBatches: values.trackBatches,
       trackExpiry: values.trackExpiry,
       hasComplementary: values.hasComplementary,
+      consumptionUom: values.consumptionUom || undefined,
+      unitsPerPurchase: values.unitsPerPurchase ?? 1,
+      availableForServices: values.availableForServices,
+      availableForProducts: values.availableForProducts,
       isActive: values.isActive,
     };
     try {
@@ -497,6 +513,10 @@ export default function AdminMasterProductsPage() {
                 trackBatches: false,
                 trackExpiry: false,
                 hasComplementary: false,
+                consumptionUom: undefined,
+                unitsPerPurchase: 1,
+                availableForServices: true,
+                availableForProducts: true,
                 isActive: true,
               };
               await create.mutateAsync(body);
@@ -593,7 +613,7 @@ export default function AdminMasterProductsPage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Row gutter={12}>
             <Col span={8}>
@@ -785,6 +805,55 @@ export default function AdminMasterProductsPage() {
                 <Switch checkedChildren="Yes" unCheckedChildren="No" />
               </Form.Item>
             </Col>
+            <Col span={8}>
+              <Form.Item label="Available for Services" name="availableForServices" valuePropName="checked" tooltip="When enabled, this product can be mapped to services and appears in service inventory.">
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item label="Available for Products" name="availableForProducts" valuePropName="checked" tooltip="When enabled, this product appears in product inventory and can be used in retail billing.">
+                <Switch checkedChildren="Yes" unCheckedChildren="No" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                label="Consumption Unit"
+                name="consumptionUom"
+                tooltip="The unit in which this product is consumed during services (e.g. ml, Tablet, gm). Leave blank if the purchase unit and consumption unit are the same."
+              >
+                <Select
+                  placeholder="Same as purchase unit"
+                  allowClear
+                  showSearch
+                  options={CONSUMPTION_UOMS.map((u) => ({ value: u, label: u }))}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                label="Units per Purchase Unit"
+                name="unitsPerPurchase"
+                tooltip="How many consumption units are in 1 purchase unit. E.g. 1 Strip = 50 Tablets → enter 50. Leave as 1 if no conversion."
+              >
+                <InputNumber min={0.001} step={1} precision={3} style={{ width: '100%' }} />
+              </Form.Item>
+            </Col>
+            <Form.Item noStyle shouldUpdate={(prev, cur) => prev.consumptionUom !== cur.consumptionUom || prev.unitsPerPurchase !== cur.unitsPerPurchase || prev.uom !== cur.uom}>
+              {({ getFieldValue }) => {
+                const cUom = getFieldValue('consumptionUom');
+                const uom = getFieldValue('uom');
+                const ratio = getFieldValue('unitsPerPurchase');
+                if (!cUom || !ratio || ratio === 1) return null;
+                return (
+                  <Col span={24}>
+                    <div style={{ background: 'rgba(91,44,139,0.08)', border: '1px solid rgba(91,44,139,0.2)', borderRadius: 6, padding: '8px 14px', fontSize: 13 }}>
+                      <strong>Conversion preview:</strong>&nbsp; 1 {uom || 'purchase unit'} = {ratio} {cUom}
+                      &nbsp;·&nbsp; GRN receipt of 1 {uom || 'purchase unit'} will add {ratio} {cUom} to stock.
+                    </div>
+                  </Col>
+                );
+              }}
+            </Form.Item>
             <Col span={24}>
               <Form.Item label="Product image" tooltip="Upload an image or paste an image URL.">
                 <Space align="start" size={16}>

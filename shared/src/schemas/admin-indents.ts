@@ -31,11 +31,16 @@ export const stockIndentActionSchema = z.discriminatedUnion('action', [
       .min(1),
     notes: z.string().trim().max(500).optional(),
   }),
-  // Dispatch: delivery info + fulfilledQty per item — NO inventory movement
+  // Dispatch: delivery info + fulfilledQty per item; deducts from sourceWarehouseId
   z.object({
     action: z.literal('dispatch'),
+    sourceWarehouseId: z.string().min(1).optional(),
     items: z
-      .array(z.object({ itemId: z.string().min(1), fulfilledQty: z.coerce.number().int().min(0) }))
+      .array(z.object({
+        itemId: z.string().min(1),
+        fulfilledQty: z.coerce.number().int().min(0),
+        warehouseId: z.string().min(1).optional(),
+      }))
       .min(1),
     vehicleNumber: z.string().trim().max(20).optional(),
     driverName: z.string().trim().max(100).optional(),

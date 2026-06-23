@@ -41,7 +41,25 @@ export const bookingItemSchema = z.object({
   service: z.string().trim().min(1, 'Service is required'),
   quantity: z.number().int().positive().default(1),
   amount: nonNegInt.default(0), // unit amount, minor units
+  isSessionBased: z.boolean().default(false),
+  // Optional per-item tax — used for package items whose tax is configured at the package level
+  taxPercent: z.number().int().min(0).max(100).optional(),
+  taxType: z.enum(['inclusive', 'exclusive']).optional(),
+  // Link to Package Session Master so extra products can be shown in the session modal
+  packageSessionMasterId: z.string().optional(),
+  isPackageSummaryLine: z.boolean().default(false),
 });
+
+/** Record a payment against a booking, optionally allocating to specific services. */
+export const bookingPaySchema = z.object({
+  paidAmount:  z.number().int().nonnegative(),
+  paymentMode: z.string().trim().optional(),
+  serviceAllocations: z.array(z.object({
+    bookingItemId: z.string().min(1),
+    amount:        z.number().int().nonnegative(),
+  })).optional(),
+});
+export type BookingPayInput = z.infer<typeof bookingPaySchema>;
 
 /** Create a full service appointment with consultant, line items and totals. */
 export const appointmentCreateSchema = z.object({
@@ -56,6 +74,11 @@ export const appointmentCreateSchema = z.object({
   items: z.array(bookingItemSchema).min(1, 'Add at least one service'),
   /** When true, skip the insufficient-stock check and proceed anyway. */
   forceCreate: z.boolean().default(false),
+  /** Per-service advance allocation for package items. serviceName → amountPaise. */
+  packageServiceAllocations: z.array(z.object({
+    serviceName: z.string(),
+    amountPaise: z.number().int().nonnegative(),
+  })).optional(),
 });
 
 // --- Packages ---------------------------------------------------------------

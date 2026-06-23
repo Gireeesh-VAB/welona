@@ -113,6 +113,13 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
   const toWarehouseId = await getDefaultWarehouseId(db, t.toBranchId);
   const updated = await db.$transaction(async (tx) => {
     for (const it of t.items) {
+      // Auto-assign the product to the destination branch so it shows in their stock view.
+      await tx.branchProduct.upsert({
+        where: { branchId_productId: { branchId: t.toBranchId, productId: it.productId } },
+        create: { branchId: t.toBranchId, productId: it.productId },
+        update: {},
+      });
+
       const stock = await tx.inventoryStock.upsert({
         where: { warehouseId_productId: { warehouseId: toWarehouseId, productId: it.productId } },
         create: { branchId: t.toBranchId, warehouseId: toWarehouseId, productId: it.productId, quantity: 0 },

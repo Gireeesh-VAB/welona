@@ -25,7 +25,6 @@ export const adminInventoryMovementCreateSchema = z.object({
   type: z.enum(INVENTORY_MOVEMENT_TYPES),
   delta: z.coerce
     .number()
-    .int()
     .refine((v) => v !== 0, { message: 'delta cannot be zero' }),
   reason: optionalText(300),
   ref: optionalText(80),
@@ -49,7 +48,7 @@ export const adminInventoryOpeningStockSchema = z.object({
     .array(
       z.object({
         productId: z.string().min(1),
-        quantity: z.coerce.number().int().min(0),
+        quantity: z.coerce.number().min(0),
       }),
     )
     .min(1)

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   App,
+  Alert,
   Button,
   Card,
   Form,
@@ -15,12 +16,10 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import { PlusOutlined, SearchOutlined } from '@ant-design/icons';
+import { PlusOutlined, SearchOutlined, UserOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
 import { useCustomers, useCreateCustomer } from '@/hooks/useSales';
-import { useStates } from '@/hooks/useStates';
 import { ApiClientError } from '@/lib/api-client';
-import CountryStateFields from '@/components/customers/CountryStateFields';
 import { PHONE_CODE_OPTIONS, buildPhone } from '@/components/customers/countryData';
 import { formatDate } from '@shared/format';
 import type { Customer } from '@shared/types/sales';
@@ -41,22 +40,39 @@ export default function CustomersPage() {
   const createCustomer = useCreateCustomer();
   const [modalOpen, setModalOpen] = useState(false);
   const [form] = Form.useForm();
+  const [phoneInput, setPhoneInput] = useState('');
 
-  const { data: statesData } = useStates({ limit: 100 });
-  const stateOptions = (statesData?.items ?? []).map((s) => ({
-    value: s.id,
-    label: `${s.name} (${s.code})`,
-  }));
+  // Search by phone as user types — enabled once 7+ digits are entered
+  const { data: phoneSearchData, isFetching: phoneSearching } = useCustomers({
+    search: phoneInput,
+    limit: 5,
+  });
+
+  // Strip non-digits for comparison
+  const normalise = (s: string) => s.replace(/\D/g, '');
+  const existingCustomer = phoneInput.length >= 7
+    ? (phoneSearchData?.items ?? []).find(c =>
+        c.phone && normalise(c.phone).endsWith(normalise(phoneInput))
+      )
+    : null;
 
   const handleCreate = async () => {
+    // If the number belongs to an existing customer, redirect instead of creating
+    if (existingCustomer) {
+      setModalOpen(false);
+      router.push(`/customers/${existingCustomer.id}`);
+      return;
+    }
     const values = await form.validateFields();
     const phone = buildPhone(values.phoneCode, values.phone);
     delete values.phoneCode;
     try {
-      await createCustomer.mutateAsync({ ...values, phone });
+      const created = await createCustomer.mutateAsync({ ...values, phone });
       message.success('Customer created');
       setModalOpen(false);
       form.resetFields();
+      setPhoneInput('');
+      router.push(`/customers/${(created as Customer).id}`);
     } catch (error) {
       message.error(error instanceof ApiClientError ? error.message : 'Could not create customer');
     }
@@ -100,7 +116,7 @@ export default function CustomersPage() {
       width: 90,
       render: (_, row) => (
         <Button type="link" onClick={() => router.push(`/customers/${row.id}`)}>
-          View
+          Manage
         </Button>
       ),
     },
@@ -165,62 +181,69 @@ export default function CustomersPage() {
       </Card>
 
       <Modal
-        title="New customer"
+        title="New Customer"
         open={modalOpen}
         onOk={handleCreate}
+        okText={existingCustomer ? 'Go to Customer' : 'Create Customer'}
         confirmLoading={createCustomer.isPending}
-        onCancel={() => setModalOpen(false)}
-        width={560}
+        onCancel={() => { setModalOpen(false); setPhoneInput(''); form.resetFields(); }}
+        width={400}
         destroyOnClose
+        afterOpenChange={(open) => { if (!open) { setPhoneInput(''); } }}
       >
-        <Form form={form} layout="vertical" preserve={false} initialValues={{ type: 'individual', country: 'India', phoneCode: '+91' }}>
-          <Form.Item name="type" label="Customer type">
-            <Select
-              options={[
-                { label: 'Individual', value: 'individual' },
-                { label: 'Business', value: 'business' },
-              ]}
+        <Form form={form} layout="vertical" preserve={false} initialValues={{ phoneCode: '+91' }}>
+          <Form.Item
+            name="phone"
+            label="Mobile Number"
+            rules={[{ required: true, message: 'Mobile number is required' }]}
+            style={{ marginBottom: 12 }}
+          >
+            <Input
+              addonBefore={
+                <Form.Item name="phoneCode" noStyle>
+                  <Select showSearch style={{ width: 80 }} options={PHONE_CODE_OPTIONS} />
+                </Form.Item>
+              }
+              placeholder="10-digit mobile number"
+              inputMode="tel"
+              autoFocus
+              onChange={(e) => setPhoneInput(e.target.value.trim())}
+              suffix={phoneSearching && phoneInput.length >= 7
+                ? <span style={{ fontSize: 11, color: '#aaa' }}>checking…</span>
+                : undefined}
             />
           </Form.Item>
-          <Form.Item name="name" label="Name" rules={[{ required: true, message: 'Name is required' }]}>
-            <Input placeholder="Customer or company name" />
-          </Form.Item>
-          <CountryStateFields form={form} stateOptions={stateOptions} />
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="phone" label="Phone" style={{ flex: 1 }}>
-              <Input
-                addonBefore={
-                  <Form.Item name="phoneCode" noStyle>
-                    <Select showSearch style={{ width: 80 }} options={PHONE_CODE_OPTIONS} />
-                  </Form.Item>
-                }
-                placeholder="Mobile number"
-              />
+
+          {existingCustomer ? (
+            <Alert
+              type="warning"
+              showIcon
+              icon={<UserOutlined />}
+              message={
+                <span>
+                  <strong>{existingCustomer.name}</strong> is already registered with this number.
+                  Click <em>Go to Customer</em> to open their profile.
+                </span>
+              }
+              style={{ marginBottom: 12 }}
+            />
+          ) : (
+            <Form.Item
+              name="name"
+              label="Customer Name"
+              rules={[{ required: true, message: 'Name is required' }]}
+              style={{ marginBottom: 12 }}
+            >
+              <Input placeholder="Full name" />
             </Form.Item>
-            <Form.Item name="email" label="Email" style={{ flex: 1 }}>
-              <Input placeholder="name@example.com" />
-            </Form.Item>
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="companyName" label="Company name" style={{ flex: 1 }}>
-              <Input />
-            </Form.Item>
-            <Form.Item name="gstin" label="GSTIN" style={{ flex: 1 }}>
-              <Input />
-            </Form.Item>
-          </div>
-          <div style={{ display: 'flex', gap: 12 }}>
-            <Form.Item name="city" label="City" style={{ flex: 1 }}>
-              <Input />
-            </Form.Item>
-            <Form.Item name="address" label="Address" style={{ flex: 1 }}>
-              <Input />
-            </Form.Item>
-          </div>
-          <Form.Item name="notes" label="Notes">
-            <Input.TextArea rows={2} />
-          </Form.Item>
+          )}
         </Form>
+
+        {!existingCustomer && (
+          <div style={{ fontSize: 12, color: '#888' }}>
+            Additional details (gender, address, email, etc.) can be added from the customer profile.
+          </div>
+        )}
       </Modal>
     </div>
   );

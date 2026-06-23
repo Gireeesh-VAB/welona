@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api } from '@/lib/api-client';
-import type { AdminPackageSessionMaster } from '@shared/types/admin-package-session-master';
+import type { AdminPackageSessionMaster, AdminMasterPackage } from '@shared/types/admin-package-session-master';
 import type {
   AdminPackageSessionMasterCreateInput,
   AdminPackageSessionMasterUpdateInput,
@@ -23,7 +23,10 @@ export function useCreateAdminPackageSessionMaster() {
   return useMutation({
     mutationFn: (body: AdminPackageSessionMasterCreateInput) =>
       api.post<AdminPackageSessionMaster>(BASE, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [KEY] });
+      qc.invalidateQueries({ queryKey: ['package-session-masters'] });
+    },
   });
 }
 
@@ -32,7 +35,10 @@ export function useUpdateAdminPackageSessionMaster() {
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: AdminPackageSessionMasterUpdateInput }) =>
       api.patch<AdminPackageSessionMaster>(`${BASE}/${id}`, body),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [KEY] });
+      qc.invalidateQueries({ queryKey: ['package-session-masters'] });
+    },
   });
 }
 
@@ -40,6 +46,18 @@ export function useDeleteAdminPackageSessionMaster() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => api.delete(`${BASE}/${id}`),
-    onSuccess: () => qc.invalidateQueries({ queryKey: [KEY] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: [KEY] });
+      qc.invalidateQueries({ queryKey: ['package-session-masters'] });
+    },
+  });
+}
+
+export function useAdminMasterPackages(masterId: string | null) {
+  return useQuery<AdminMasterPackage[]>({
+    queryKey: [KEY, masterId, 'packages'],
+    queryFn:  () => api.get<AdminMasterPackage[]>(`${BASE}/${masterId}/packages`),
+    enabled:  !!masterId,
+    staleTime: 30_000,
   });
 }

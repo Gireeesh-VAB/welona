@@ -58,21 +58,44 @@ export const POST = route(async (req) => {
   const category = await db.category.findUnique({ where: { id: body.categoryId } });
   if (!category) throw Errors.badRequest('Selected category no longer exists.');
 
-  const row = await db.service.create({
-    data: {
-      categoryId: body.categoryId,
-      name: body.name,
-      hsnSacCode: body.hsnSacCode ?? null,
-      minPrice: body.minPrice,
-      maxPrice: body.maxPrice,
-      taxPercent: body.taxPercent,
-      taxType: body.taxType,
-      hasMeasurements: body.hasMeasurements,
-      hasComplementary: body.hasComplementary,
-      isActive: body.isActive,
-      createdByAdminId: claims.sub,
-    },
-    include: serviceInclude,
+  if (body.inventoryItems?.length) {
+    const productIds = body.inventoryItems.map((i) => i.productId);
+    const found = await db.product.count({ where: { id: { in: productIds }, isActive: true } });
+    if (found !== productIds.length) {
+      throw Errors.badRequest('One or more selected products do not exist or are inactive.');
+    }
+  }
+
+  const row = await db.$transaction(async (tx) => {
+    const service = await tx.service.create({
+      data: {
+        categoryId: body.categoryId,
+        name: body.name,
+        hsnSacCode: body.hsnSacCode ?? null,
+        minPrice: body.minPrice,
+        maxPrice: body.maxPrice,
+        taxPercent: body.taxPercent,
+        taxType: body.taxType,
+        hasMeasurements: body.hasMeasurements,
+        hasComplementary: body.hasComplementary,
+        sessions: body.sessions ?? 1,
+        isActive: body.isActive,
+        createdByAdminId: claims.sub,
+      },
+    });
+    if (body.inventoryItems?.length) {
+      await tx.serviceInventoryItem.createMany({
+        data: body.inventoryItems.map((item, i) => ({
+          serviceId: service.id,
+          productId: item.productId,
+          quantityPerSession: item.quantityPerSession,
+          chargeType: item.chargeType ?? 'consume_only',
+          lowStockThreshold: item.lowStockThreshold ?? null,
+          sortOrder: item.sortOrder ?? i,
+        })),
+      });
+    }
+    return tx.service.findUniqueOrThrow({ where: { id: service.id }, include: serviceInclude });
   });
   return created(toAdminService(row));
 });

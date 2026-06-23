@@ -9,6 +9,15 @@ import { z } from 'zod';
 const optionalText = (max: number) =>
   z.string().trim().max(max).optional().or(z.literal('').transform(() => undefined));
 
+export const serviceInventoryItemSchema = z.object({
+  productId: z.string().min(1, 'Product is required'),
+  quantityPerSession: z.coerce.number().positive('Must be greater than 0'),
+  chargeType: z.enum(['collect_amount', 'consume_only']).default('consume_only'),
+  lowStockThreshold: z.coerce.number().int().nonnegative().optional(),
+  sortOrder: z.coerce.number().int().nonnegative().default(0),
+});
+export type ServiceInventoryItemInput = z.infer<typeof serviceInventoryItemSchema>;
+
 export const adminServiceCreateSchema = z
   .object({
     categoryId: z.string().min(1, 'Category is required'),
@@ -20,20 +29,14 @@ export const adminServiceCreateSchema = z
     taxType: z.enum(['inclusive', 'exclusive']).default('exclusive'),
     hasMeasurements: z.boolean().default(false),
     hasComplementary: z.boolean().default(false),
+    sessions: z.coerce.number().int().min(1).default(1),
     isActive: z.boolean().default(true),
+    inventoryItems: z.array(serviceInventoryItemSchema).optional(),
   })
   .refine((v) => v.maxPrice >= v.minPrice, {
     message: 'Max price must be greater than or equal to min price',
     path: ['maxPrice'],
   });
-
-export const serviceInventoryItemSchema = z.object({
-  productId: z.string().min(1, 'Product is required'),
-  quantityPerSession: z.coerce.number().int().positive('Must be at least 1'),
-  lowStockThreshold: z.coerce.number().int().nonnegative().optional(),
-  sortOrder: z.coerce.number().int().nonnegative().default(0),
-});
-export type ServiceInventoryItemInput = z.infer<typeof serviceInventoryItemSchema>;
 
 export const adminServiceUpdateSchema = z
   .object({
@@ -46,6 +49,7 @@ export const adminServiceUpdateSchema = z
     taxType: z.enum(['inclusive', 'exclusive']).optional(),
     hasMeasurements: z.boolean().optional(),
     hasComplementary: z.boolean().optional(),
+    sessions: z.coerce.number().int().min(1).optional(),
     isActive: z.boolean().optional(),
     inventoryItems: z.array(serviceInventoryItemSchema).optional(),
   })

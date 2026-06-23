@@ -32,6 +32,7 @@ export const GET = route(async (req) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const productWhere: any = {
     isActive: true,
+    availableForProducts: true,
     ...(assignedIds.length > 0 && { id: { in: assignedIds } }),
     ...(categoryId && { categoryId }),
     ...(search && {
@@ -79,6 +80,8 @@ export const GET = route(async (req) => {
       categoryId: p.categoryId,
       categoryName: (p as any).category?.name ?? null,
       uom: p.uom,
+      consumptionUom: (p as any).consumptionUom ?? null,
+      unitsPerPurchase: (p as any).unitsPerPurchase ?? 1,
       mrp: p.mrp,
       salePrice: p.salePrice,
       purchasePrice: p.purchasePrice,

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import {
+  Alert,
   App,
   Button,
   Card,
@@ -14,10 +15,9 @@ import {
   Select,
   Space,
   Spin,
-  Tag,
   Typography,
 } from 'antd';
-import { ArrowLeftOutlined, PlusOutlined, UserOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, PlusOutlined, SwapOutlined, UserOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   useLead,
@@ -28,6 +28,9 @@ import {
   useFollowUps,
   useCreateFollowUp,
   useSalespeople,
+  useTransferLead,
+  useBranches,
+  useCustomerSales,
 } from '@/hooks/useSales';
 import SalesNav from '@/components/sales/SalesNav';
 import StatusTag from '@/components/sales/StatusTag';
@@ -35,11 +38,11 @@ import OwnerAssign from '@/components/sales/OwnerAssign';
 import FollowUpTimeline from '@/components/sales/FollowUpTimeline';
 import { ApiClientError } from '@/lib/api-client';
 import { FOLLOWUP_OUTCOMES, FOLLOWUP_STATUSES } from '@shared/enums';
-import { formatDate, titleCase } from '@shared/format';
+import { formatDate, formatMoney, titleCase } from '@shared/format';
 
 const { Title, Text } = Typography;
 
-/** Valid manual status moves (excludes `converted`, handled by Convert). */
+/** Valid manual status moves (excludes terminal statuses). */
 const LEAD_NEXT: Record<string, string[]> = {
   new: ['contacted', 'qualified', 'unqualified', 'lost'],
   contacted: ['qualified', 'unqualified', 'lost'],
@@ -47,6 +50,7 @@ const LEAD_NEXT: Record<string, string[]> = {
   unqualified: ['contacted'],
   converted: [],
   lost: [],
+  transferred: [],
 };
 
 /** Enquiry Details — full enquiry record, pipeline actions and follow-ups. */
@@ -59,17 +63,28 @@ export default function EnquiryDetailPage() {
   const { data: lead, isLoading } = useLead(id);
   const { data: followUps } = useFollowUps(id);
   const { data: salespeople } = useSalespeople();
+  const { data: branches } = useBranches();
 
   const leadStatus = useLeadStatus();
   const updateLead = useUpdateLead();
   const convertLead = useConvertLead();
   const convertToCustomer = useConvertLeadToCustomer();
   const createFollowUp = useCreateFollowUp();
+  const transferLead = useTransferLead();
 
   const [followForm] = Form.useForm();
+  const [transferForm] = Form.useForm();
   const [followOpen, setFollowOpen] = useState(false);
   const [lostOpen, setLostOpen] = useState(false);
+  const [transferOpen, setTransferOpen] = useState(false);
   const [lostReason, setLostReason] = useState('');
+
+  // For the "Previous Branch History" section — lazy-fetch source lead
+  const sourceLeadId = lead?.transferredFromId ?? null;
+  const { data: sourceLead } = useLead(sourceLeadId);
+  const { data: sourceFollowUps } = useFollowUps(sourceLeadId ?? '');
+  const sourceCustomerId = sourceLead?.customerId ?? null;
+  const { data: sourceCustomerSales } = useCustomerSales(sourceCustomerId);
 
   const fail = (e: unknown, fallback = 'Action failed') =>
     message.error(e instanceof ApiClientError ? e.message : fallback);
@@ -82,8 +97,11 @@ export default function EnquiryDetailPage() {
     );
   }
 
+  const isTransferred = lead.status === 'transferred';
   const moves = LEAD_NEXT[lead.status] ?? [];
-  const canConvert = lead.status !== 'converted' && lead.status !== 'lost';
+  const canConvert =
+    lead.status !== 'converted' && lead.status !== 'lost' && lead.status !== 'transferred';
+  const canTransfer = !['transferred', 'converted', 'lost'].includes(lead.status);
 
   const changeStatus = async (status: string) => {
     if (status === 'lost') {
@@ -128,6 +146,26 @@ export default function EnquiryDetailPage() {
     }
   };
 
+  const confirmTransfer = async () => {
+    try {
+      const values = await transferForm.validateFields();
+      await transferLead.mutateAsync({
+        id: lead.id,
+        body: {
+          targetBranchId:     values.targetBranchId,
+          targetOwnerStaffId: values.targetOwnerStaffId || undefined,
+          notes:              values.notes || undefined,
+        },
+      });
+      message.success('Enquiry transferred successfully');
+      setTransferOpen(false);
+      transferForm.resetFields();
+      router.push('/sales/enquiries');
+    } catch (e) {
+      fail(e, 'Transfer failed');
+    }
+  };
+
   const addFollowUp = async () => {
     const values = await followForm.validateFields();
     try {
@@ -164,6 +202,23 @@ export default function EnquiryDetailPage() {
         Back to enquiries
       </Button>
 
+      {/* Transferred-out banner */}
+      {isTransferred && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 12 }}
+          message={
+            <span>
+              This enquiry was transferred to{' '}
+              <strong>{lead.branch?.name ?? 'another branch'}</strong>
+              {lead.transferredAt ? ` on ${formatDate(lead.transferredAt)}` : ''}.
+              It is now read-only.
+            </span>
+          }
+        />
+      )}
+
       <Card style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start' }}>
           <div>
@@ -186,9 +241,7 @@ export default function EnquiryDetailPage() {
           <Descriptions.Item label="Treatment">{lead.treatment?.name || '—'}</Descriptions.Item>
           <Descriptions.Item label="Media">{lead.media || '—'}</Descriptions.Item>
           <Descriptions.Item label="Call Type">{lead.callType || '—'}</Descriptions.Item>
-          <Descriptions.Item label="Lead Transfer">
-            {lead.leadTransfer ? 'Yes' : 'No'}
-          </Descriptions.Item>
+          <Descriptions.Item label="Branch">{lead.branch?.name || '—'}</Descriptions.Item>
           <Descriptions.Item label="Health Status" span={2}>
             {lead.healthStatus || '—'}
           </Descriptions.Item>
@@ -197,18 +250,22 @@ export default function EnquiryDetailPage() {
           </Descriptions.Item>
           <Descriptions.Item label="Created">{formatDate(lead.createdAt)}</Descriptions.Item>
           <Descriptions.Item label="Follow-Up By">
-            <OwnerAssign
-              value={lead.ownerStaffId}
-              loading={updateLead.isPending}
-              onAssign={async (staffId) => {
-                try {
-                  await updateLead.mutateAsync({ id: lead.id, body: { ownerStaffId: staffId } });
-                  message.success('Reassigned');
-                } catch (e) {
-                  fail(e);
-                }
-              }}
-            />
+            {isTransferred ? (
+              <Text>{lead.owner?.name || '—'}</Text>
+            ) : (
+              <OwnerAssign
+                value={lead.ownerStaffId}
+                loading={updateLead.isPending}
+                onAssign={async (staffId) => {
+                  try {
+                    await updateLead.mutateAsync({ id: lead.id, body: { ownerStaffId: staffId } });
+                    message.success('Reassigned');
+                  } catch (e) {
+                    fail(e);
+                  }
+                }}
+              />
+            )}
           </Descriptions.Item>
         </Descriptions>
 
@@ -218,53 +275,170 @@ export default function EnquiryDetailPage() {
           </Text>
         )}
 
-        <Space style={{ marginTop: 16, flexWrap: 'wrap' }}>
-          {moves.map((s) => (
-            <Button key={s} danger={s === 'lost'} onClick={() => changeStatus(s)}>
-              Mark {titleCase(s)}
-            </Button>
-          ))}
-          {canConvert && (
-            <Button loading={convertLead.isPending} onClick={convert}>
-              Convert to Quotation
-            </Button>
-          )}
-          {canConvert && (
-            <Button
-              type="primary"
-              icon={<UserOutlined />}
-              loading={convertToCustomer.isPending}
-              onClick={convertCustomer}
-            >
-              Convert to Customer
-            </Button>
-          )}
-          {lead.customerId && (
-            <Button type="link" onClick={() => router.push(`/customers/${lead.customerId}`)}>
+        {lead.transferNotes && (
+          <Text type="secondary" style={{ display: 'block', marginTop: 8, fontSize: 12 }}>
+            Transfer note: {lead.transferNotes}
+          </Text>
+        )}
+
+        {!isTransferred && (
+          <Space style={{ marginTop: 16, flexWrap: 'wrap' }}>
+            {moves.map((s) => (
+              <Button key={s} danger={s === 'lost'} onClick={() => changeStatus(s)}>
+                Mark {titleCase(s)}
+              </Button>
+            ))}
+            {canConvert && (
+              <Button loading={convertLead.isPending} onClick={convert}>
+                Convert to Quotation
+              </Button>
+            )}
+            {canConvert && (
+              <Button
+                type="primary"
+                icon={<UserOutlined />}
+                loading={convertToCustomer.isPending}
+                onClick={convertCustomer}
+              >
+                Convert to Customer
+              </Button>
+            )}
+            {canTransfer && (
+              <Button
+                icon={<SwapOutlined />}
+                onClick={() => { transferForm.resetFields(); setTransferOpen(true); }}
+              >
+                Transfer to Branch
+              </Button>
+            )}
+            {lead.customerId && (
+              <Button type="link" onClick={() => router.push(`/customers/${lead.customerId}`)}>
+                View Customer Profile
+              </Button>
+            )}
+          </Space>
+        )}
+
+        {isTransferred && lead.customerId && (
+          <div style={{ marginTop: 16 }}>
+            <Button type="link" style={{ paddingLeft: 0 }} onClick={() => router.push(`/customers/${lead.customerId}`)}>
               View Customer Profile
             </Button>
-          )}
-        </Space>
+          </div>
+        )}
       </Card>
 
+      {/* Current branch follow-up history */}
       <Card
         title="Follow-up History"
+        style={{ marginBottom: 16 }}
         extra={
-          <Button
-            type="primary"
-            icon={<PlusOutlined />}
-            onClick={() => {
-              followForm.resetFields();
-              setFollowOpen(true);
-            }}
-          >
-            Add Follow-up Update
-          </Button>
+          !isTransferred ? (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={() => {
+                followForm.resetFields();
+                setFollowOpen(true);
+              }}
+            >
+              Add Follow-up Update
+            </Button>
+          ) : null
         }
       >
         <FollowUpTimeline items={followUps ?? []} staff={salespeople ?? []} />
       </Card>
 
+      {/* Previous branch history — shown on destination leads */}
+      {sourceLeadId && (
+        <Card
+          title={
+            <span>
+              Previous Branch History
+              {sourceLead?.branch?.name ? (
+                <Text type="secondary" style={{ fontSize: 13, fontWeight: 400, marginLeft: 8 }}>
+                  ({sourceLead.branch.name})
+                </Text>
+              ) : null}
+              <Text type="secondary" style={{ fontSize: 12, fontWeight: 400, marginLeft: 8 }}>
+                — Read-only
+              </Text>
+            </span>
+          }
+          style={{ marginBottom: 16 }}
+        >
+          {sourceLead?.transferredAt && (
+            <Text type="secondary" style={{ display: 'block', fontSize: 12, marginBottom: 12 }}>
+              Transferred on {formatDate(sourceLead.transferredAt)}
+              {sourceLead.transferNotes ? ` · Note: ${sourceLead.transferNotes}` : ''}
+            </Text>
+          )}
+
+          {/* Outstanding dues warning */}
+          {sourceCustomerSales && sourceCustomerSales.summary.outstanding > 0 && (
+            <Alert
+              type="warning"
+              showIcon
+              style={{ marginBottom: 12 }}
+              message={
+                <span>
+                  This customer has an outstanding balance of{' '}
+                  <strong>{formatMoney(sourceCustomerSales.summary.outstanding)}</strong> at{' '}
+                  {sourceLead?.branch?.name ?? 'the previous branch'}.
+                </span>
+              }
+            />
+          )}
+
+          <FollowUpTimeline items={sourceFollowUps ?? []} staff={salespeople ?? []} />
+        </Card>
+      )}
+
+      {/* Transfer Modal */}
+      <Modal
+        title="Transfer Enquiry to Another Branch"
+        open={transferOpen}
+        onOk={confirmTransfer}
+        confirmLoading={transferLead.isPending}
+        onCancel={() => { setTransferOpen(false); transferForm.resetFields(); }}
+        okText="Transfer"
+        width={480}
+      >
+        <Form form={transferForm} layout="vertical">
+          <Form.Item
+            name="targetBranchId"
+            label="Destination Branch"
+            rules={[{ required: true, message: 'Select a branch' }]}
+          >
+            <Select
+              showSearch
+              placeholder="Select branch"
+              optionFilterProp="label"
+              options={(branches ?? [])
+                .filter((b) => b.id !== lead.branchId)
+                .map((b) => ({ label: b.name, value: b.id }))}
+            />
+          </Form.Item>
+          <Form.Item name="targetOwnerStaffId" label="Assign To (optional)">
+            <Select
+              allowClear
+              showSearch
+              placeholder="Keep current assignee"
+              optionFilterProp="label"
+              options={(salespeople ?? []).map((s) => ({
+                label: `${s.name} · ${s.roleName}`,
+                value: s.id,
+              }))}
+            />
+          </Form.Item>
+          <Form.Item name="notes" label="Transfer Notes (optional)" style={{ marginBottom: 0 }}>
+            <Input.TextArea rows={2} placeholder="Reason for transfer or any instructions" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* Add Follow-up Modal */}
       <Modal
         title="Add Follow-up Update"
         open={followOpen}
@@ -337,6 +511,7 @@ export default function EnquiryDetailPage() {
         </Form>
       </Modal>
 
+      {/* Mark Lost Modal */}
       <Modal
         title="Mark enquiry as lost"
         open={lostOpen}

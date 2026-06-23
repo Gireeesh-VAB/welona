@@ -3,6 +3,7 @@ import { route } from '@/lib/api/handler';
 import { created } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
+import { serializeCustomer } from '@/lib/sales/serializers';
 
 type Ctx = { params: { id: string } };
 
@@ -26,10 +27,11 @@ export const POST = route<Ctx>(async (req, { params }) => {
     // Reuse the linked customer if the lead already has one.
     let customerId = lead.customerId;
     if (!customerId) {
+      const branchId = lead.branchId ?? claims.branchIds[0] ?? null;
       const newCustomer = await tx.customer.create({
         data: {
           orgId: claims.orgId,
-          branchId: lead.branchId,
+          branchId,
           type: 'individual',
           name: lead.contactName,
           phone: lead.contactPhone,
@@ -53,9 +55,12 @@ export const POST = route<Ctx>(async (req, { params }) => {
 
     return tx.customer.findUniqueOrThrow({
       where: { id: customerId },
-      include: { branch: { select: { id: true, name: true } } },
+      include: {
+        branch: { select: { id: true, name: true } },
+        state: { select: { id: true, name: true } },
+      },
     });
   });
 
-  return created(customer);
+  return created(serializeCustomer(customer));
 });

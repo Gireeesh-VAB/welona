@@ -122,6 +122,7 @@ export const POST = route<Ctx>(async (req, { params }) => {
             branchId: pkg.branchId,
             ref: entry.id,
             serviceIds,
+            force: true,
           });
         } else {
           // Package has no service mapping — inventory deduction skipped.

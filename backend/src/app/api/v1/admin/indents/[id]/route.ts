@@ -90,12 +90,69 @@ export const PATCH = route<RouteContext>(async (req, { params }) => {
       }
     }
 
+    // Resolve source warehouse for deduction. If not supplied, pick the warehouse
+    // with the highest stock for the first product (best-available heuristic).
+    let sourceWarehouseId: string | null = body.sourceWarehouseId ?? null;
+    if (!sourceWarehouseId) {
+      const firstItem = indent.items[0];
+      if (firstItem) {
+        const best = await db.inventoryStock.findFirst({
+          where: { productId: firstItem.productId },
+          orderBy: { quantity: 'desc' },
+          select: { warehouseId: true },
+        });
+        sourceWarehouseId = best?.warehouseId ?? null;
+      }
+    }
+
+    // Build a map of itemId → per-item warehouseId override from the request body
+    const itemWhMap = new Map(
+      body.items.filter((i) => i.warehouseId).map((i) => [i.itemId, i.warehouseId as string]),
+    );
+
     const result = await db.$transaction(async (tx) => {
       for (const item of indent.items) {
+        const qty = fulfillMap.get(item.id)!;
         await tx.stockIndentItem.update({
           where: { id: item.id },
-          data: { fulfilledQty: fulfillMap.get(item.id)! },
+          data: { fulfilledQty: qty },
         });
+
+        // Per-item warehouse takes priority; fall back to request-level sourceWarehouseId; then auto-pick
+        let whId: string | null = itemWhMap.get(item.id) ?? sourceWarehouseId;
+        if (!whId && qty > 0) {
+          const best = await tx.inventoryStock.findFirst({
+            where: { productId: item.productId },
+            orderBy: { quantity: 'desc' },
+            select: { warehouseId: true },
+          });
+          whId = best?.warehouseId ?? null;
+        }
+
+        if (whId && qty > 0) {
+          const stock = await tx.inventoryStock.findUnique({
+            where: { warehouseId_productId: { warehouseId: whId, productId: item.productId } },
+            select: { quantity: true, branchId: true },
+          });
+          if (stock) {
+            await tx.inventoryStock.update({
+              where: { warehouseId_productId: { warehouseId: whId, productId: item.productId } },
+              data: { quantity: { decrement: qty } },
+            });
+            await tx.inventoryMovement.create({
+              data: {
+                branchId: stock.branchId,
+                warehouseId: whId,
+                productId: item.productId,
+                type: 'transfer_out',
+                delta: -qty,
+                reason: `Dispatched to branch (indent ${indent.number ?? indent.id})`,
+                ref: indent.number ?? indent.id,
+                createdByAdminId,
+              },
+            });
+          }
+        }
       }
       return tx.stockIndent.update({
         where: { id: indent.id },

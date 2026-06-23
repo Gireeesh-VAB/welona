@@ -11,12 +11,17 @@ export const GET = route(async (req) => {
   const claims = requireAuth(req);
   const branchId = claims.branchIds[0] ?? null;
 
-  if (!branchId) return ok({ stateId: null });
+  if (!branchId) return ok({ stateId: null, country: null });
 
   const branch = await db.branch.findUnique({
     where: { id: branchId },
-    select: { stateId: true },
+    select: { stateId: true, zone: { select: { country: true } } },
   });
 
-  return ok({ stateId: branch?.stateId ?? null });
+  const stateId = branch?.stateId ?? null;
+  // Country comes from the branch's zone; fall back to "India" when a stateId
+  // is set (all seeded states are Indian states).
+  const country = branch?.zone?.country ?? (stateId ? 'India' : null);
+
+  return ok({ stateId, country });
 });

@@ -50,6 +50,59 @@ export function useAdminIndentAction() {
   });
 }
 
+export interface WarehouseEntry {
+  warehouseId: string;
+  warehouseName: string;
+  branchId: string;
+  branchName: string;
+  branchAddress: string | null;
+  branchCity: string | null;
+  branchPhone: string | null;
+  quantity: number;
+  canFulfill: boolean;
+}
+
+export interface WarehouseStockItem {
+  itemId: string;
+  productId: string;
+  productName: string;
+  productSku: string;
+  productUom: string;
+  requestedQty: number;
+  approvedQty: number | null;
+  neededQty: number;
+  warehouses: WarehouseEntry[];
+  recommendation: (WarehouseEntry & { availableQty: number; canFullyFulfill: boolean }) | null;
+}
+
+export interface PickupGroup {
+  warehouseId: string;
+  warehouseName: string;
+  branchName: string;
+  branchAddress: string | null;
+  branchCity: string | null;
+  branchPhone: string | null;
+  items: { productName: string; productSku: string; productUom: string; pickQty: number }[];
+}
+
+export interface WarehouseAvailabilityResult {
+  indentId: string;
+  indentNumber: string | null;
+  destinationBranch: string | null;
+  status: string;
+  items: WarehouseStockItem[];
+  pickupGroups: PickupGroup[];
+}
+
+export function useWarehouseAvailability(indentId: string | null) {
+  return useQuery<WarehouseAvailabilityResult>({
+    queryKey: ['indent-warehouse-availability', indentId],
+    queryFn: () => api.get<WarehouseAvailabilityResult>(`/admin/indents/${indentId}/warehouse-availability`),
+    enabled: !!indentId,
+    staleTime: 10_000,
+  });
+}
+
 /** Polls pending indent count every 30 s — used by the notification bell. */
 export function useAdminPendingIndentCount(enabled = true) {
   return useQuery<Paginated<StockIndent>>({

@@ -314,7 +314,7 @@ export default function AdminMasterPaymentModePage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="Category (Name)"

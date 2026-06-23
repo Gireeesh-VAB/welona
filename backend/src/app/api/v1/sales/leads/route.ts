@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { Prisma } from '@prisma/client';
 import { db } from '@/lib/db';
 import { route, parseBody, parseQuery } from '@/lib/api/handler';
@@ -5,6 +6,12 @@ import { ok, created, buildMeta } from '@/lib/api/response';
 import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
 import { leadCreateSchema, listQuerySchema } from '@shared/schemas/sales';
+
+const leadsQuerySchema = listQuerySchema.extend({
+  createdToday: z.coerce.boolean().optional(),
+  followupDueToday: z.coerce.boolean().optional(),
+  followupDoneToday: z.coerce.boolean().optional(),
+});
 
 /** Lead list rows include the owner, customer, treatment and next follow-up. */
 const leadInclude = {
@@ -26,11 +33,20 @@ const leadInclude = {
 export const GET = route(async (req) => {
   const claims = requireAuth(req);
   requirePermission(claims, 'sales:read');
-  const query = parseQuery(req, listQuerySchema);
+  const query = parseQuery(req, leadsQuerySchema);
+
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
   const staffBranchId = claims.branchIds[0] ?? null;
   const where: Prisma.LeadWhereInput = { orgId: claims.orgId };
-  if (query.status) where.status = query.status;
+  if (query.status) {
+    where.status = query.status;
+  } else {
+    // Converted leads are hidden from the default list — they live in Customers.
+    where.status = { not: 'converted' };
+  }
   const effectiveBranchId = query.branchId ?? staffBranchId;
   if (effectiveBranchId) where.branchId = effectiveBranchId;
   if (query.ownerStaffId) where.ownerStaffId = query.ownerStaffId;
@@ -40,6 +56,15 @@ export const GET = route(async (req) => {
       { contactPhone: { contains: query.search } },
       { contactEmail: { contains: query.search } },
     ];
+  }
+  if (query.createdToday) {
+    where.createdAt = { gte: startOfToday, lt: startOfTomorrow };
+  }
+  if (query.followupDueToday) {
+    where.followUps = { some: { status: 'pending', dueAt: { gte: startOfToday, lt: startOfTomorrow } } };
+  }
+  if (query.followupDoneToday) {
+    where.followUps = { some: { status: 'completed', contactedAt: { gte: startOfToday, lt: startOfTomorrow } } };
   }
 
   const [rows, total] = await Promise.all([
@@ -75,10 +100,13 @@ export const POST = route(async (req) => {
     if (!customer) throw Errors.badRequest('Selected customer does not exist');
   }
 
+  // Default branchId to the staff's own branch so the lead appears in their list view.
+  const branchId = body.branchId ?? claims.branchIds[0] ?? null;
+
   const lead = await db.lead.create({
     data: {
       orgId: claims.orgId,
-      branchId: body.branchId ?? null,
+      branchId,
       customerId: body.customerId ?? null,
       contactName: body.contactName,
       contactPhone: body.contactPhone,

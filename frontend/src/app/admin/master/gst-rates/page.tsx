@@ -306,7 +306,7 @@ export default function AdminMasterGstRatesPage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="Name"

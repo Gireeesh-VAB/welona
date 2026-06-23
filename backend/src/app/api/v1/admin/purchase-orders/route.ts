@@ -78,6 +78,20 @@ export const POST = route(async (req) => {
     throw Errors.badRequest('One or more selected products no longer exist.');
   }
 
+  // Validate linked indents if provided
+  if (body.fromIndentIds?.length) {
+    const indents = await db.stockIndent.findMany({
+      where: { id: { in: body.fromIndentIds } },
+      select: { id: true, status: true, branchId: true },
+    });
+    if (indents.length !== body.fromIndentIds.length)
+      throw Errors.badRequest('One or more indents not found.');
+    if (indents.some((i) => i.status !== 'approved'))
+      throw Errors.badRequest('All linked indents must be in approved status.');
+    if (indents.some((i) => i.branchId !== branchId))
+      throw Errors.badRequest('All linked indents must belong to the selected branch.');
+  }
+
   // Totals: subtotal = Σ unit×qty; tax = Σ line×rate/10000; total = subtotal+tax.
   let subtotal = 0;
   let taxAmt = 0;
@@ -115,6 +129,15 @@ export const POST = route(async (req) => {
       },
       include: purchaseOrderInclude,
     });
+
+    // Link indents to this PO and mark them as ordered
+    if (body.fromIndentIds?.length) {
+      await tx.stockIndent.updateMany({
+        where: { id: { in: body.fromIndentIds } },
+        data: { status: 'ordered', poId: createdPo.id },
+      });
+    }
+
     return createdPo;
   });
 

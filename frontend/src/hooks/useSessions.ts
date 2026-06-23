@@ -5,6 +5,35 @@ import { api, apiList, type Paginated } from '@/lib/api-client';
 import type { PackageSession, SessionEntry, SessionStats } from '@shared/types/customer-modules';
 import type { SessionEntryCreateInput, SessionEntryUpdateInput } from '@shared/schemas/customer-modules';
 
+export interface ConsumableUnitInfo {
+  unitId:          string;
+  status:          'open' | 'sealed';
+  remaining:       number;
+  totalCapacity:   number;
+  usedQuantity:    number;
+  willNeedNextUnit: boolean;
+}
+
+export interface SessionProduct {
+  productId:          string;
+  productName:        string;
+  quantityPerSession: number;
+  uom:                string | null;
+  availableStock:     number | null;
+  isLowStock:         boolean;
+  isConsumable:       boolean;
+  consumptionUom:     string | null;
+  unitsPerPurchase:   number;
+  consumableUnit:     ConsumableUnitInfo | null;
+}
+
+export interface ServiceProductGroup {
+  serviceId:         string;
+  serviceName:       string;
+  effectiveSessions: number;
+  products:          SessionProduct[];
+}
+
 const KEY = 'sessions';
 
 interface SessionListParams {
@@ -55,6 +84,15 @@ export function useCreateSessionEntry(customerId: string, packageId: string) {
       qc.invalidateQueries({ queryKey: [KEY, 'list'] });
       qc.invalidateQueries({ queryKey: [KEY, 'stats'] });
     },
+  });
+}
+
+export function useSessionProducts(packageId: string | undefined) {
+  return useQuery<ServiceProductGroup[]>({
+    queryKey: ['session-products', packageId],
+    queryFn:  () => api.get<ServiceProductGroup[]>(`/sessions/${packageId}/products`),
+    enabled:  !!packageId,
+    staleTime: 0,
   });
 }
 

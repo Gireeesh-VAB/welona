@@ -45,6 +45,7 @@ export interface ProcurementRFQ {
   notes: string | null;
   indentId: string | null;
   indentNumber: string | null;
+  indentBranchId: string | null;
   items: RFQItem[];
   supplierQuotes: SupplierQuote[];
   createdBy: string | null;

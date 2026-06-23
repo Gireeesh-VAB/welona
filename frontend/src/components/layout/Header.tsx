@@ -154,12 +154,12 @@ export default function Header({ onMobileMenuClick, isMobile = false }: HeaderPr
                     >
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                         <Typography.Text style={{ color: colors.text.primary, fontWeight: 600, fontSize: 13 }}>
-                          {indent.product.name}
+                          {indent.items[0]?.product.name ?? indent.number ?? 'Stock Request'}
                         </Typography.Text>
                         <Tag color="orange" style={{ fontSize: 11, margin: 0 }}>Pending</Tag>
                       </div>
                       <div style={{ color: colors.text.placeholder, fontSize: 12, marginTop: 2 }}>
-                        {indent.branchName} · Qty: {indent.requestedQty} {indent.product.uom}
+                        {indent.branchName} · {indent.items.length > 1 ? `${indent.items.length} products` : indent.items[0] ? `Qty: ${indent.items[0].requestedQty} ${indent.items[0].product.uom}` : ''}
                       </div>
                       {indent.reason && (
                         <div style={{ color: colors.text.placeholder, fontSize: 11, marginTop: 2 }}>

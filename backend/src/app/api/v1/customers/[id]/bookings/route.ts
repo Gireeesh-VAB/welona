@@ -26,6 +26,41 @@ export const GET = route<Ctx>(async (req, { params }) => {
     orderBy: { scheduledAt: 'desc' },
   });
 
+  // Fetch inventoryItemsJson for package booking items.
+  // Primary: look up by packageSessionMasterId (set on new bookings).
+  // Fallback: for old bookings without the id, look up by package name (item.service where category='Packages').
+  const masterIds = [...new Set(
+    bookings.flatMap(b => b.items.map((it: any) => it.packageSessionMasterId).filter(Boolean))
+  )] as string[];
+  const packageNames = [...new Set(
+    bookings.flatMap(b =>
+      b.items
+        .filter((it: any) => it.category === 'Packages' && !it.packageSessionMasterId)
+        .map((it: any) => it.service as string)
+    )
+  )];
+
+  // masterMap keyed by master id (used for id-linked items)
+  const masterMap: Record<string, unknown[]> = {};
+  // nameMap keyed by master name (used for name-fallback items)
+  const nameMap: Record<string, unknown[]> = {};
+
+  const allMasters = await (db as any).packageSessionMaster.findMany({
+    where: {
+      OR: [
+        ...(masterIds.length ? [{ id: { in: masterIds } }] : []),
+        ...(packageNames.length ? [{ name: { in: packageNames }, orgId: claims.orgId }] : []),
+      ],
+    },
+    select: { id: true, name: true, inventoryItemsJson: true },
+  });
+  for (const m of allMasters) {
+    let items: unknown[] = [];
+    try { items = JSON.parse(m.inventoryItemsJson ?? '[]'); } catch { items = []; }
+    masterMap[m.id] = items;
+    nameMap[m.name] = items;
+  }
+
   // Resolve consultant names from the Employee table (consultantStaffId stores an Employee.id)
   const consultantIds = [...new Set(bookings.map(b => b.consultantStaffId).filter(Boolean))] as string[];
   const employeeMap: Record<string, string> = {};
@@ -51,6 +86,7 @@ export const GET = route<Ctx>(async (req, { params }) => {
       roundOff: b.roundOff,
       netAmount: b.netAmount,
       paidAmount: b.paidAmount,
+      paymentMode: b.paymentMode ?? null,
       notes: b.notes,
       consultantId: b.consultantStaffId,
       consultantName: b.consultantStaffId ? (employeeMap[b.consultantStaffId] ?? null) : null,
@@ -63,13 +99,19 @@ export const GET = route<Ctx>(async (req, { params }) => {
       igstPct: b.igstPct,
       igstAmt: b.igstAmt,
       taxType: b.taxType,
-      items: b.items.map((it) => ({
+      branchId: b.branchId,
+      items: b.items.map((it: any) => ({
         id: it.id,
         category: it.category,
         service: it.service,
         quantity: it.quantity,
         amount: it.amount,
         lineTotal: it.lineTotal,
+        paidAmount: it.paidAmount,
+        packageSessionMasterId: it.packageSessionMasterId ?? null,
+        masterInventoryItems: it.packageSessionMasterId
+          ? (masterMap[it.packageSessionMasterId] ?? [])
+          : (it.category === 'Packages' ? (nameMap[it.service] ?? []) : []),
       })),
     })),
   );

@@ -20,11 +20,14 @@ import { recordAudit, actorFromClaims } from '@/lib/audit';
  */
 export const GET = route(async (req) => {
   requireAdminAuth(req);
-  const { search, active, page, limit } = parseQuery(req, adminSupplierListQuerySchema);
+  const { search, active, page, limit, productId } = parseQuery(req, adminSupplierListQuerySchema);
 
   const where: Prisma.SupplierWhereInput = {
     ...(active === 'active' && { isActive: true }),
     ...(active === 'inactive' && { isActive: false }),
+    ...(productId && {
+      supplierProducts: { some: { productId, isActive: true } },
+    }),
     ...(search && {
       OR: [
         { name: { contains: search } },

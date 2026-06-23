@@ -6,6 +6,9 @@ import {
   Button,
   Card,
   Col,
+  DatePicker,
+  Form,
+  Input,
   Modal,
   Popconfirm,
   Row,
@@ -17,9 +20,11 @@ import {
   Typography,
 } from 'antd';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
-import { CheckOutlined, CloseOutlined, CheckCircleOutlined } from '@ant-design/icons';
-import { useAdminIndents, useUpdateIndent } from '@/hooks/useAdminIndents';
+import { CheckOutlined, CloseOutlined, CheckCircleOutlined, ShoppingCartOutlined } from '@ant-design/icons';
+import { useAdminIndents, useAdminIndentAction } from '@/hooks/useAdminIndents';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
+import { useSuppliers } from '@/hooks/useSuppliers';
+import { useCreatePurchaseOrder } from '@/hooks/usePurchaseOrders';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
@@ -30,7 +35,9 @@ const { Title, Text } = Typography;
 const STATUS_COLORS: Record<string, string> = {
   pending: 'orange',
   approved: 'blue',
-  fulfilled: 'green',
+  dispatched: 'gold',
+  received: 'cyan',
+  closed: 'green',
   rejected: 'red',
 };
 
@@ -52,23 +59,69 @@ export default function AdminIndentsPage() {
   const [page, setPage] = useState(1);
   const [limit, setLimit] = useState(20);
 
+  // Create PO modal state
+  const [poModalIndent, setPoModalIndent] = useState<StockIndent | null>(null);
+  const [poForm] = Form.useForm();
+
   const { data, isLoading } = useAdminIndents({ status, branchId, page, limit });
   const { data: branchesData } = useAdminBranches({ limit: 200 });
-  const updateIndent = useUpdateIndent();
+  const { data: suppliersData } = useSuppliers({ active: 'active', limit: 200 });
+  const updateIndent = useAdminIndentAction();
+  const createPO = useCreatePurchaseOrder();
 
   const branchOptions = useMemo(
     () => (branchesData?.items ?? []).map((b) => ({ value: b.id, label: b.branchName })),
     [branchesData],
   );
 
+  const supplierOptions = useMemo(
+    () => (suppliersData?.items ?? []).map((s) => ({ value: s.id, label: s.name })),
+    [suppliersData],
+  );
+
   const fail = (err: unknown) => {
     message.error(err instanceof ApiClientError ? err.message : 'Action failed.');
   };
 
-  const handleAction = async (indent: StockIndent, newStatus: 'approved' | 'rejected' | 'fulfilled') => {
+  const handleAction = async (indent: StockIndent, action: 'approve' | 'reject') => {
     try {
-      await updateIndent.mutateAsync({ id: indent.id, body: { status: newStatus } });
-      message.success(`Indent marked as ${newStatus}`);
+      if (action === 'approve') {
+        await updateIndent.mutateAsync({
+          id: indent.id,
+          action: 'approve',
+          items: indent.items.map((it) => ({ itemId: it.id, approvedQty: it.requestedQty })),
+        });
+      } else {
+        await updateIndent.mutateAsync({ id: indent.id, action: 'reject' });
+      }
+      message.success(`Indent ${action === 'approve' ? 'approved' : 'rejected'}`);
+    } catch (err) {
+      fail(err);
+    }
+  };
+
+  const handleCreatePO = async () => {
+    if (!poModalIndent) return;
+    const firstItem = poModalIndent.items[0];
+    if (!firstItem) return;
+    try {
+      const values = await poForm.validateFields();
+      await createPO.mutateAsync({
+        branchId: poModalIndent.branchId,
+        supplierId: values.supplierId,
+        expectedAt: values.expectedAt ? values.expectedAt.toISOString() : undefined,
+        notes: values.notes || undefined,
+        items: [{
+          productId: firstItem.product.id,
+          quantity: firstItem.approvedQty ?? firstItem.requestedQty,
+          unitPrice: 0,
+          taxRate: 0,
+        }],
+        fromIndentIds: [poModalIndent.id],
+      });
+      message.success('Purchase Order created');
+      setPoModalIndent(null);
+      poForm.resetFields();
     } catch (err) {
       fail(err);
     }
@@ -89,33 +142,49 @@ export default function AdminIndentsPage() {
         render: (v: string) => <Tag color={colors.gold.primary} style={{ color: colors.text.onGold, border: 'none', fontSize: 12 }}>{v}</Tag>,
       },
       {
-        title: 'Product',
+        title: 'Product(s)',
         key: 'product',
         width: 200,
-        render: (_, row) => (
-          <Space direction="vertical" size={0}>
-            <Text style={{ fontWeight: 600, color: colors.text.primary }}>{row.product.name}</Text>
-            <Text style={{ fontSize: 11, color: colors.text.placeholder }}>{row.product.sku} · {row.product.uom}</Text>
-          </Space>
-        ),
+        render: (_, row) => {
+          const first = row.items[0];
+          return first ? (
+            <Space direction="vertical" size={0}>
+              <Text style={{ fontWeight: 600, color: colors.text.primary }}>{first.product.name}</Text>
+              <Text style={{ fontSize: 11, color: colors.text.placeholder }}>
+                {first.product.sku} · {first.product.uom}
+                {row.items.length > 1 && ` +${row.items.length - 1} more`}
+              </Text>
+            </Space>
+          ) : <Text style={{ color: colors.text.placeholder }}>—</Text>;
+        },
       },
       {
         title: 'Requested Qty',
-        dataIndex: 'requestedQty',
+        key: 'requestedQty',
         width: 120,
         align: 'center',
-        render: (v: number, row) => (
-          <span style={{ fontWeight: 600, color: colors.text.primary }}>{v} {row.product.uom}</span>
-        ),
+        render: (_, row) => {
+          const first = row.items[0];
+          return first ? (
+            <span style={{ fontWeight: 600, color: colors.text.primary }}>
+              {first.requestedQty} {first.product.uom}
+            </span>
+          ) : '—';
+        },
       },
       {
         title: 'Status',
         dataIndex: 'status',
-        width: 110,
-        render: (v: string) => (
-          <Tag color={STATUS_COLORS[v] ?? 'default'} style={{ fontSize: 12, textTransform: 'capitalize' }}>
-            {v}
-          </Tag>
+        width: 130,
+        render: (v: string, row) => (
+          <Space size={4} wrap>
+            <Tag color={STATUS_COLORS[v] ?? 'default'} style={{ fontSize: 12, textTransform: 'capitalize' }}>
+              {v}
+            </Tag>
+            {row.poId && (
+              <Tag color="cyan" style={{ fontSize: 11 }}>PO Raised</Tag>
+            )}
+          </Space>
         ),
       },
       {
@@ -129,9 +198,9 @@ export default function AdminIndentsPage() {
       {
         title: 'Actions',
         key: 'actions',
-        width: 160,
+        width: 180,
         render: (_, row) => {
-          if (row.status === 'rejected' || row.status === 'fulfilled') return null;
+          if (row.status === 'rejected' || row.status === 'dispatched' || row.status === 'delivered' || row.status === 'closed') return null;
           return (
             <Space size={4}>
               {row.status === 'pending' && (
@@ -141,7 +210,7 @@ export default function AdminIndentsPage() {
                       size="small"
                       type="text"
                       icon={<CheckOutlined style={{ color: '#52c41a' }} />}
-                      onClick={() => handleAction(row, 'approved')}
+                      onClick={() => handleAction(row, 'approve')}
                     />
                   </Tooltip>
                   <Tooltip title="Reject">
@@ -149,21 +218,24 @@ export default function AdminIndentsPage() {
                       title="Reject this indent?"
                       okText="Reject"
                       okButtonProps={{ danger: true }}
-                      onConfirm={() => handleAction(row, 'rejected')}
+                      onConfirm={() => handleAction(row, 'reject')}
                     >
                       <Button size="small" type="text" danger icon={<CloseOutlined />} />
                     </Popconfirm>
                   </Tooltip>
                 </>
               )}
-              {row.status === 'approved' && (
-                <Tooltip title="Mark Fulfilled">
+              {row.status === 'approved' && !row.poId && (
+                <Tooltip title="Create Purchase Order">
                   <Button
                     size="small"
-                    type="text"
-                    icon={<CheckCircleOutlined style={{ color: '#1677ff' }} />}
-                    onClick={() => handleAction(row, 'fulfilled')}
-                  />
+                    type="primary"
+                    icon={<ShoppingCartOutlined />}
+                    onClick={() => { setPoModalIndent(row); poForm.resetFields(); }}
+                    style={{ fontSize: 11 }}
+                  >
+                    Create PO
+                  </Button>
                 </Tooltip>
               )}
             </Space>
@@ -172,7 +244,7 @@ export default function AdminIndentsPage() {
       },
     ],
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [colors],
+    [colors, poForm],
   );
 
   const pagination: TablePaginationConfig = {
@@ -234,7 +306,9 @@ export default function AdminIndentsPage() {
               options={[
                 { value: 'pending', label: 'Pending' },
                 { value: 'approved', label: 'Approved' },
-                { value: 'fulfilled', label: 'Fulfilled' },
+                { value: 'dispatched', label: 'Dispatched' },
+                { value: 'received', label: 'Received' },
+                { value: 'closed', label: 'Closed' },
                 { value: 'rejected', label: 'Rejected' },
               ]}
             />
@@ -251,6 +325,45 @@ export default function AdminIndentsPage() {
           scroll={{ x: 1000 }}
         />
       </Card>
+
+      {/* Create PO Modal */}
+      <Modal
+        title={poModalIndent ? `Create PO — ${poModalIndent.items[0]?.product.name ?? ''} (${poModalIndent.items[0]?.requestedQty ?? ''} ${poModalIndent.items[0]?.product.uom ?? ''})` : 'Create Purchase Order'}
+        open={!!poModalIndent}
+        onCancel={() => { setPoModalIndent(null); poForm.resetFields(); }}
+        onOk={handleCreatePO}
+        confirmLoading={createPO.isPending}
+        okText="Create Purchase Order"
+        width={480}
+      >
+        <Form form={poForm} layout="vertical" style={{ marginTop: 12 }}>
+          <Form.Item
+            name="supplierId"
+            label="Supplier"
+            rules={[{ required: true, message: 'Select a supplier' }]}
+          >
+            <Select
+              showSearch
+              placeholder="Select supplier"
+              options={supplierOptions}
+              filterOption={(input, opt) =>
+                (opt?.label ?? '').toString().toLowerCase().includes(input.toLowerCase())
+              }
+            />
+          </Form.Item>
+          <Form.Item name="expectedAt" label="Expected Delivery Date">
+            <DatePicker style={{ width: '100%' }} />
+          </Form.Item>
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea rows={2} placeholder="Optional notes" />
+          </Form.Item>
+        </Form>
+        {poModalIndent && (
+          <div style={{ background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: 4, padding: '8px 12px', marginTop: 4, fontSize: 12 }}>
+            Branch: <strong>{poModalIndent.branchName}</strong> · Product: <strong>{poModalIndent.items[0]?.product.name}</strong> · Qty: <strong>{poModalIndent.items[0]?.requestedQty} {poModalIndent.items[0]?.product.uom}</strong>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

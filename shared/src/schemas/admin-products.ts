@@ -34,6 +34,12 @@ export const adminProductCreateSchema = z.object({
   trackBatches: z.boolean().default(false),
   trackExpiry: z.boolean().default(false),
   hasComplementary: z.boolean().default(false),
+  /** The unit stock is stored and deducted in during services. Null = same as uom (no conversion). */
+  consumptionUom: optionalText(40),
+  /** How many consumption units equal 1 purchase unit (e.g. 50 tablets per strip). */
+  unitsPerPurchase: z.coerce.number().positive().default(1),
+  availableForServices: z.boolean().default(true),
+  availableForProducts: z.boolean().default(true),
   isActive: z.boolean().default(true),
 });
 
@@ -44,7 +50,7 @@ export const adminProductListQuerySchema = z.object({
   categoryId: z.string().optional(),
   isActive: z.coerce.boolean().optional(),
   page: z.coerce.number().int().positive().default(1),
-  limit: z.coerce.number().int().positive().max(200).default(20),
+  limit: z.coerce.number().int().positive().max(500).default(20),
 });
 
 export type AdminProductCreateInput = z.infer<typeof adminProductCreateSchema>;

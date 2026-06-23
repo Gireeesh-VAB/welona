@@ -23,6 +23,12 @@ export interface AdminProduct {
   trackBatches: boolean;
   trackExpiry: boolean;
   hasComplementary: boolean;
+  /** Unit used for stock storage and service deduction. Null = same as uom. */
+  consumptionUom: string | null;
+  /** Consumption units per 1 purchase unit. 1.0 = no conversion. */
+  unitsPerPurchase: number;
+  availableForServices: boolean;
+  availableForProducts: boolean;
   isActive: boolean;
   createdBy: { id: string; name: string; email: string } | null;
   createdAt: string;

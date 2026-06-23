@@ -1,284 +1,398 @@
 ﻿'use client';
 
-import { useEffect, useMemo, useState } from 'react';
 import {
   App,
+  Badge,
   Button,
   Card,
-  Drawer,
-  Form,
-  Input,
-  Modal,
-  Popconfirm,
+  Col,
+  Descriptions,
+  Empty,
+  Row,
   Select,
   Space,
+  Spin,
   Statistic,
-  Steps,
   Table,
   Tag,
-  Timeline,
-  Tooltip,
   Typography,
 } from 'antd';
-import { DeleteOutlined, EyeOutlined, PlusOutlined, RightOutlined, CloseOutlined } from '@ant-design/icons';
-import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
+import type { ColumnsType } from 'antd/es/table';
 import {
-  useShipments,
-  useCreateShipment,
-  useAdvanceShipment,
-  useDeleteShipment,
-} from '@/hooks/useShipments';
+  CarOutlined,
+  CheckCircleOutlined,
+  ClockCircleOutlined,
+  PhoneOutlined,
+  ShopOutlined,
+  SyncOutlined,
+  TruckOutlined,
+  UserOutlined,
+} from '@ant-design/icons';
+import { useState } from 'react';
+import { useAdminIndents } from '@/hooks/useAdminIndents';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
 import { useBrandColors } from '@/hooks/useBrandColors';
-import { ApiClientError } from '@/lib/api-client';
 import { getAdminNavItem } from '@/config/adminNavigation';
-import type { AdminShipment } from '@shared/types/admin-shipment';
-import type { AdminShipmentCreateInput } from '@shared/schemas/admin-shipments';
-import { SHIPMENT_PIPELINE, SHIPMENT_STAGES, type ShipmentStage } from '@shared/enums';
+import type { StockIndent, StockIndentItem } from '@shared/types/stock-indent';
 
 const { Title, Text } = Typography;
 
-const STAGE_LABEL: Record<ShipmentStage, string> = {
-  ordered: 'Ordered',
-  in_transit: 'In transit',
-  received: 'Received',
-  qc: 'QC',
-  stocked: 'Stocked',
-  cancelled: 'Cancelled',
-};
-const STAGE_COLOR: Record<ShipmentStage, string> = {
-  ordered: 'default',
-  in_transit: 'blue',
-  received: 'gold',
-  qc: 'purple',
-  stocked: 'green',
-  cancelled: 'red',
-};
-
-function dt(iso: string): string {
-  return new Date(iso).toLocaleString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+function fmt(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-IN', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit',
+  });
 }
 
-interface ShipForm {
-  title: string;
-  branchId?: string;
-  supplier?: string;
-  reference?: string;
-  notes?: string;
+function fmtDate(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  return new Date(iso).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 }
 
-export default function AdminTrackingPage() {
+function isOverdue(iso: string | null | undefined): boolean {
+  if (!iso) return false;
+  return new Date(iso) < new Date();
+}
+
+export default function TrackingPage() {
   const colors = useBrandColors();
-  const navItem = getAdminNavItem('inventory-tracking')!;
+  const navItem = getAdminNavItem('inventory-tracking');
   const { message } = App.useApp();
 
+  const [branchId, setBranchId] = useState<string | undefined>(undefined);
 
-  const { data: branchesData } = useAdminBranches({ limit: 200, enabled: true });
-  const branchOptions = useMemo(
-    () => (branchesData?.items ?? []).map((b) => ({ value: b.id, label: `${b.branchName} (${b.branchCode})` })),
-    [branchesData],
-  );
+  const { data: dispatchedData, isLoading: dispLoading, refetch } = useAdminIndents({
+    status: 'dispatched', branchId, page: 1, limit: 200,
+  });
+  const { data: recentReceivedData, isLoading: recLoading } = useAdminIndents({
+    status: 'received', branchId, page: 1, limit: 50,
+  });
+  const { data: branchesData } = useAdminBranches({ limit: 200 });
 
-  const [stage, setStage] = useState<ShipmentStage | undefined>();
-  const [page, setPage] = useState(1);
-  const [limit, setLimit] = useState(20);
-  const { data, isLoading } = useShipments({ stage, page, limit });
+  const inTransit = dispatchedData?.items ?? [];
+  const recentReceived = recentReceivedData?.items ?? [];
+  const branchOptions = (branchesData?.items ?? []).map((b) => ({ value: b.id, label: b.branchName }));
+  const overdueCount = inTransit.filter((i) => isOverdue(i.expectedDeliveryAt)).length;
 
-  const createShip = useCreateShipment();
-  const advanceShip = useAdvanceShipment();
-  const deleteShip = useDeleteShipment();
-  const fail = (e: unknown, fb: string) => message.error(e instanceof ApiClientError ? e.message : fb);
-
-  const [createOpen, setCreateOpen] = useState(false);
-  const [form] = Form.useForm<ShipForm>();
-  const openCreate = () => { form.resetFields(); setCreateOpen(true); };
-  const onCreate = async (v: ShipForm) => {
-    const body: AdminShipmentCreateInput = {
-      title: v.title.trim(),
-      branchId: v.branchId || undefined,
-      supplier: v.supplier?.trim() || undefined,
-      reference: v.reference?.trim() || undefined,
-      notes: v.notes?.trim() || undefined,
-    };
-    try {
-      await createShip.mutateAsync(body);
-      message.success('Shipment created');
-      setCreateOpen(false);
-    } catch (e) { fail(e, 'Could not create shipment'); }
-  };
-
-  const [active, setActive] = useState<AdminShipment | null>(null);
-  const advance = async (toStage: ShipmentStage) => {
-    if (!active) return;
-    try {
-      const updated = await advanceShip.mutateAsync({ id: active.id, stage: toStage });
-      message.success(`Moved to ${STAGE_LABEL[toStage]}`);
-      setActive(updated);
-    } catch (e) { fail(e, 'Could not update stage'); }
-  };
-  const onDelete = async (s: AdminShipment) => {
-    try { await deleteShip.mutateAsync(s.id); message.success('Deleted'); } catch (e) { fail(e, 'Delete failed'); }
-  };
-
-  const stats = useMemo(() => {
-    const items = data?.items ?? [];
-    return {
-      total: data?.meta.total ?? 0,
-      active: items.filter((s) => s.stage !== 'stocked' && s.stage !== 'cancelled').length,
-      stocked: items.filter((s) => s.stage === 'stocked').length,
-    };
-  }, [data]);
-
-  const columns: ColumnsType<AdminShipment> = [
-    { title: 'Tracking', dataIndex: 'number', width: 120, render: (v: string) => <Text code style={{ fontSize: 12 }}>{v}</Text> },
+  const itemCols: ColumnsType<StockIndentItem> = [
     {
-      title: 'Shipment',
-      key: 't',
-      render: (_v, s) => (
-        <div style={{ lineHeight: 1.3 }}>
-          <div style={{ color: colors.text.primary }}>{s.title}</div>
-          <Text style={{ color: colors.text.placeholder, fontSize: 11 }}>
-            {[s.supplier, s.branchName, s.reference].filter(Boolean).join(' · ') || '—'}
-          </Text>
-        </div>
-      ),
-    },
-    { title: 'Stage', dataIndex: 'stage', width: 130, render: (s: ShipmentStage) => <Tag color={STAGE_COLOR[s]}>{STAGE_LABEL[s]}</Tag> },
-    { title: 'Updated', dataIndex: 'updatedAt', width: 170, render: (v: string) => dt(v) },
-    {
-      title: '',
-      key: 'a',
-      width: 90,
-      align: 'right',
-      fixed: 'right',
-      render: (_v, s) => (
-        <Space size={4}>
-          <Tooltip title="View / advance"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setActive(s)} /></Tooltip>
-          <Popconfirm title={`Delete ${s.number}?`} okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => onDelete(s)}>
-            <Tooltip title="Delete"><Button size="small" type="text" danger icon={<DeleteOutlined />} /></Tooltip>
-          </Popconfirm>
+      title: 'Product',
+      key: 'product',
+      render: (_, r) => (
+        <Space direction="vertical" size={0}>
+          <Text style={{ fontWeight: 600, color: colors.text.primary }}>{r.product.name}</Text>
+          <Text style={{ fontSize: 11, color: colors.text.placeholder }}>{r.product.sku} · {r.product.uom}</Text>
         </Space>
       ),
     },
+    {
+      title: 'Dispatched Qty',
+      dataIndex: 'fulfilledQty',
+      align: 'center',
+      width: 140,
+      render: (v: number | null, r) => (
+        <Tag color="gold" style={{ fontWeight: 600 }}>{v ?? r.requestedQty} {r.product.uom}</Tag>
+      ),
+    },
+    {
+      title: 'Approved Qty',
+      dataIndex: 'approvedQty',
+      align: 'center',
+      width: 120,
+      render: (v: number | null) => v ?? <Text style={{ color: colors.text.placeholder }}>—</Text>,
+    },
   ];
 
-  const pagination: TablePaginationConfig = {
-    current: page, pageSize: limit, total: data?.meta.total ?? 0, showSizeChanger: true, pageSizeOptions: [20, 50, 100],
-    onChange: (p, sz) => { setPage(p); if (sz !== limit) setLimit(sz); },
-    showTotal: (t) => `${t} shipments`,
-  };
+  const inTransitCols: ColumnsType<StockIndent> = [
+    {
+      title: 'Indent #',
+      dataIndex: 'number',
+      width: 120,
+      render: (v: string | null) => (
+        <Text style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 13, color: colors.text.primary }}>{v ?? '—'}</Text>
+      ),
+    },
+    {
+      title: 'Destination',
+      dataIndex: 'branchName',
+      width: 180,
+      render: (v: string) => (
+        <Tag icon={<ShopOutlined />} color={colors.gold.primary} style={{ color: colors.text.onGold, border: 'none' }}>{v}</Tag>
+      ),
+    },
+    {
+      title: 'Vehicle No.',
+      key: 'vehicle',
+      width: 150,
+      render: (_, row) => row.vehicleNumber ? (
+        <Space size={6}>
+          <CarOutlined style={{ color: colors.gold.primary }} />
+          <Text strong style={{ color: colors.text.primary }}>{row.vehicleNumber}</Text>
+        </Space>
+      ) : <Text style={{ color: colors.text.placeholder }}>Not specified</Text>,
+    },
+    {
+      title: 'Driver',
+      key: 'driver',
+      width: 200,
+      render: (_, row) => (
+        <Space direction="vertical" size={0}>
+          {row.driverName && (
+            <Space size={4}>
+              <UserOutlined style={{ color: colors.text.placeholder, fontSize: 11 }} />
+              <Text style={{ color: colors.text.primary }}>{row.driverName}</Text>
+            </Space>
+          )}
+          {row.driverMobile && (
+            <Space size={4}>
+              <PhoneOutlined style={{ color: colors.text.placeholder, fontSize: 11 }} />
+              <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>{row.driverMobile}</Text>
+            </Space>
+          )}
+          {!row.driverName && !row.driverMobile && <Text style={{ color: colors.text.placeholder }}>—</Text>}
+        </Space>
+      ),
+    },
+    {
+      title: 'Items',
+      key: 'items',
+      width: 70,
+      align: 'center',
+      render: (_, row) => <Badge count={row.items.length} color={colors.gold.primary} style={{ color: colors.text.onGold }} />,
+    },
+    {
+      title: 'Dispatched On',
+      dataIndex: 'dispatchedAt',
+      width: 150,
+      render: (v: string | null) => <Text style={{ fontSize: 12, color: colors.text.placeholder }}>{fmt(v)}</Text>,
+    },
+    {
+      title: 'Expected Delivery',
+      dataIndex: 'expectedDeliveryAt',
+      width: 160,
+      render: (v: string | null) => {
+        if (!v) return <Text style={{ color: colors.text.placeholder }}>—</Text>;
+        const overdue = isOverdue(v);
+        return (
+          <Space size={4}>
+            <ClockCircleOutlined style={{ color: overdue ? '#ef4444' : '#22c55e', fontSize: 12 }} />
+            <Text style={{ color: overdue ? '#ef4444' : '#22c55e', fontWeight: overdue ? 600 : 400 }}>
+              {fmtDate(v)}{overdue ? ' (Overdue)' : ''}
+            </Text>
+          </Space>
+        );
+      },
+    },
+    {
+      title: 'Reason',
+      dataIndex: 'reason',
+      ellipsis: true,
+      render: (v: string | null) => v
+        ? <Text style={{ fontSize: 12, color: colors.text.placeholder }}>{v}</Text>
+        : <Text style={{ color: colors.text.placeholder }}>—</Text>,
+    },
+  ];
 
-  // Steps index for the active shipment (cancelled shows as error on current).
-  const activeStageIndex = active ? SHIPMENT_PIPELINE.indexOf(active.stage as (typeof SHIPMENT_PIPELINE)[number]) : -1;
-  const nextStage = active && activeStageIndex >= 0 && activeStageIndex < SHIPMENT_PIPELINE.length - 1
-    ? SHIPMENT_PIPELINE[activeStageIndex + 1]
-    : null;
-  const isTerminal = active?.stage === 'stocked' || active?.stage === 'cancelled';
+  const receivedCols: ColumnsType<StockIndent> = [
+    {
+      title: 'Indent #',
+      dataIndex: 'number',
+      width: 120,
+      render: (v: string | null) => (
+        <Text style={{ fontWeight: 700, fontFamily: 'monospace', fontSize: 13 }}>{v ?? '—'}</Text>
+      ),
+    },
+    {
+      title: 'Branch',
+      dataIndex: 'branchName',
+      width: 180,
+      render: (v: string) => <Tag icon={<ShopOutlined />}>{v}</Tag>,
+    },
+    {
+      title: 'Vehicle',
+      dataIndex: 'vehicleNumber',
+      width: 130,
+      render: (v: string | null) => v
+        ? <Space size={4}><CarOutlined style={{ fontSize: 11 }} /><Text>{v}</Text></Space>
+        : <Text style={{ color: colors.text.placeholder }}>—</Text>,
+    },
+    {
+      title: 'Driver',
+      dataIndex: 'driverName',
+      width: 150,
+      render: (v: string | null) => v ?? <Text style={{ color: colors.text.placeholder }}>—</Text>,
+    },
+    {
+      title: 'Dispatched',
+      dataIndex: 'dispatchedAt',
+      width: 130,
+      render: (v: string | null) => <Text style={{ fontSize: 12, color: colors.text.placeholder }}>{fmtDate(v)}</Text>,
+    },
+    {
+      title: 'Received',
+      dataIndex: 'receivedAt',
+      width: 140,
+      render: (v: string | null) => (
+        <Space size={4}>
+          <CheckCircleOutlined style={{ color: '#22c55e', fontSize: 12 }} />
+          <Text style={{ fontSize: 12, color: '#22c55e' }}>{fmtDate(v)}</Text>
+        </Space>
+      ),
+    },
+    {
+      title: 'Items',
+      key: 'items',
+      width: 60,
+      align: 'center',
+      render: (_, row) => <Badge count={row.items.length} color="green" />,
+    },
+  ];
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <div>
-          <Title level={3} style={{ color: colors.text.primary, marginBottom: 4 }}>{navItem.label}</Title>
-          <Text style={{ color: colors.text.placeholder }}>{navItem.description}</Text>
+          <Title level={3} style={{ color: colors.text.primary, marginBottom: 4 }}>
+            {navItem?.label ?? 'Dispatch Tracking'}
+          </Title>
+          <Text style={{ color: colors.text.placeholder }}>
+            Live view of all dispatched stock — vehicle, driver, destination and delivery status.
+          </Text>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>New Shipment</Button>
+        <Button icon={<SyncOutlined />} onClick={() => { refetch(); message.info('Refreshed'); }} style={{ borderColor: colors.border, color: colors.text.secondary }}>
+          Refresh
+        </Button>
       </div>
 
-      <Space size={12} style={{ display: 'flex', marginBottom: 16 }} wrap>
-        {[
-          { label: 'TOTAL', value: stats.total, color: colors.gold.primary },
-          { label: 'IN PROGRESS', value: stats.active, color: colors.text.primary },
-          { label: 'STOCKED (view)', value: stats.stocked, color: colors.status.success },
-        ].map((k) => (
-          <Card key={k.label} size="small" style={{ background: colors.black.secondary, border: `1px solid ${colors.border}`, minWidth: 160 }} styles={{ body: { padding: '12px 16px' } }}>
-            <Statistic title={<span style={{ color: colors.text.placeholder, fontSize: 12 }}>{k.label}</span>} value={k.value} valueStyle={{ color: k.color, fontWeight: 600 }} />
+      <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }} styles={{ body: { padding: '12px 16px' } }}>
+            <Statistic
+              title={<span style={{ color: colors.text.placeholder, fontSize: 12 }}>IN TRANSIT</span>}
+              value={inTransit.length}
+              prefix={<TruckOutlined style={{ color: '#d97706' }} />}
+              valueStyle={{ color: '#d97706', fontWeight: 700 }}
+            />
           </Card>
-        ))}
-      </Space>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }} styles={{ body: { padding: '12px 16px' } }}>
+            <Statistic
+              title={<span style={{ color: colors.text.placeholder, fontSize: 12 }}>OVERDUE</span>}
+              value={overdueCount}
+              prefix={<ClockCircleOutlined style={{ color: overdueCount > 0 ? '#ef4444' : colors.text.placeholder }} />}
+              valueStyle={{ color: overdueCount > 0 ? '#ef4444' : colors.text.placeholder, fontWeight: 700 }}
+            />
+          </Card>
+        </Col>
+        <Col xs={12} sm={6}>
+          <Card size="small" style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }} styles={{ body: { padding: '12px 16px' } }}>
+            <Statistic
+              title={<span style={{ color: colors.text.placeholder, fontSize: 12 }}>RECEIVED (RECENT 50)</span>}
+              value={recentReceived.length}
+              prefix={<CheckCircleOutlined style={{ color: '#22c55e' }} />}
+              valueStyle={{ color: '#22c55e', fontWeight: 700 }}
+            />
+          </Card>
+        </Col>
+      </Row>
 
-      <Card style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }} styles={{ body: { padding: 16 } }}>
-        <div style={{ marginBottom: 12 }}>
-          <Select allowClear placeholder="All stages" value={stage} onChange={(v) => { setStage(v); setPage(1); }} style={{ width: 200 }}
-            options={SHIPMENT_STAGES.map((s) => ({ value: s, label: STAGE_LABEL[s] }))} />
-        </div>
-        <Table<AdminShipment> rowKey="id" loading={isLoading} columns={columns} dataSource={data?.items ?? []} pagination={pagination} size="middle" scroll={{ x: 800 }} />
-      </Card>
+      <div style={{ marginBottom: 16 }}>
+        <Select
+          allowClear showSearch placeholder="All branches" style={{ width: 260 }}
+          options={branchOptions} value={branchId} onChange={(v) => setBranchId(v)}
+          filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())}
+        />
+      </div>
 
-      {/* Create modal */}
-      <Modal title="New Shipment" open={createOpen} onCancel={() => setCreateOpen(false)} onOk={() => form.submit()} okText="Create" confirmLoading={createShip.isPending} destroyOnClose width={520}>
-        <Form<ShipForm> form={form} layout="vertical" onFinish={onCreate} requiredMark={false}>
-          <Form.Item label="Title" name="title" rules={[{ required: true, message: 'Enter a title' }]}>
-            <Input placeholder="e.g. Vitamin C serum restock" maxLength={160} />
-          </Form.Item>
-          <Form.Item label="Destination branch" name="branchId">
-            <Select allowClear showSearch placeholder="Pick a branch" options={branchOptions} filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
-          </Form.Item>
-          <Form.Item label="Supplier" name="supplier"><Input maxLength={120} placeholder="e.g. Acme Distributors" /></Form.Item>
-          <Form.Item label="Reference" name="reference" tooltip="PO number, invoice no., AWB/tracking id…"><Input maxLength={80} placeholder="e.g. PO-0007" /></Form.Item>
-          <Form.Item label="Notes" name="notes"><Input.TextArea rows={2} maxLength={500} /></Form.Item>
-        </Form>
-      </Modal>
-
-      {/* Detail drawer with stage timeline */}
-      <Drawer
-        title={active ? `${active.number} — ${active.title}` : 'Shipment'}
-        open={Boolean(active)}
-        onClose={() => setActive(null)}
-        width={620}
-        extra={
-          active && !isTerminal ? (
-            <Space>
-              {nextStage && (
-                <Popconfirm title={`Move to ${STAGE_LABEL[nextStage]}?`} okText="Advance" onConfirm={() => advance(nextStage)}>
-                  <Button type="primary" icon={<RightOutlined />} loading={advanceShip.isPending}>Advance to {STAGE_LABEL[nextStage]}</Button>
-                </Popconfirm>
-              )}
-              <Button danger icon={<CloseOutlined />} loading={advanceShip.isPending} onClick={() => advance('cancelled')}>Cancel</Button>
-            </Space>
-          ) : null
-        }
+      {/* In-Transit */}
+      <Card
+        title={<Space><TruckOutlined style={{ color: '#d97706' }} /><span style={{ color: colors.text.primary }}>In Transit</span>{inTransit.length > 0 && <Tag color="gold">{inTransit.length}</Tag>}</Space>}
+        style={{ background: colors.black.secondary, border: `1px solid ${colors.border}`, marginBottom: 16 }}
+        styles={{ header: { borderBottom: `1px solid ${colors.border}` }, body: { padding: 0 } }}
       >
-        {active && (
-          <>
-            <Space size={16} style={{ marginBottom: 16 }} wrap>
-              <Tag color={STAGE_COLOR[active.stage]}>{STAGE_LABEL[active.stage]}</Tag>
-              {active.branchName && <Text style={{ color: colors.text.placeholder }}>→ {active.branchName}</Text>}
-              {active.supplier && <Text style={{ color: colors.text.placeholder }}>{active.supplier}</Text>}
-              {active.reference && <Text code style={{ fontSize: 11 }}>{active.reference}</Text>}
-            </Space>
-
-            {active.stage !== 'cancelled' && (
-              <Steps
-                size="small"
-                direction="horizontal"
-                current={activeStageIndex < 0 ? 0 : activeStageIndex}
-                style={{ marginBottom: 20 }}
-                items={SHIPMENT_PIPELINE.map((s) => ({ title: STAGE_LABEL[s] }))}
-              />
-            )}
-
-            <Text strong style={{ color: colors.text.primary }}>Stage history</Text>
-            <Timeline
-              style={{ marginTop: 12 }}
-              items={active.events.map((e) => ({
-                color: STAGE_COLOR[e.stage] === 'default' ? 'gray' : STAGE_COLOR[e.stage],
-                children: (
-                  <div>
-                    <div style={{ color: colors.text.primary }}>
-                      {STAGE_LABEL[e.stage]} {e.note ? <Text style={{ color: colors.text.placeholder }}>— {e.note}</Text> : null}
-                    </div>
-                    <Text style={{ color: colors.text.placeholder, fontSize: 11 }}>
-                      {dt(e.at)}{e.actorName ? ` · ${e.actorName}` : ''}
+        <Spin spinning={dispLoading}>
+          {!dispLoading && inTransit.length === 0 ? (
+            <Empty description="No shipments in transit" style={{ padding: 32 }} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <Table<StockIndent>
+              rowKey="id"
+              columns={inTransitCols}
+              dataSource={inTransit}
+              pagination={false}
+              size="middle"
+              scroll={{ x: 1200 }}
+              expandable={{
+                expandedRowRender: (record) => (
+                  <div style={{ margin: '0 48px 12px' }}>
+                    <Descriptions
+                      size="small"
+                      bordered
+                      column={{ xs: 1, sm: 2, md: 3 }}
+                      style={{ marginBottom: 14 }}
+                    >
+                      <Descriptions.Item label="Indent #">{record.number ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Destination">{record.branchName}</Descriptions.Item>
+                      <Descriptions.Item label="Vehicle No.">{record.vehicleNumber ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Driver Name">{record.driverName ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Driver Mobile">{record.driverMobile ?? '—'}</Descriptions.Item>
+                      <Descriptions.Item label="Dispatched At">{fmt(record.dispatchedAt)}</Descriptions.Item>
+                      <Descriptions.Item label="Expected Delivery">
+                        {record.expectedDeliveryAt ? (
+                          <Text style={{ color: isOverdue(record.expectedDeliveryAt) ? '#ef4444' : '#22c55e', fontWeight: 600 }}>
+                            {fmt(record.expectedDeliveryAt)}
+                            {isOverdue(record.expectedDeliveryAt) && ' — OVERDUE'}
+                          </Text>
+                        ) : '—'}
+                      </Descriptions.Item>
+                      {record.deliveryNotes && (
+                        <Descriptions.Item label="Delivery Notes" span={2}>{record.deliveryNotes}</Descriptions.Item>
+                      )}
+                      {record.reason && (
+                        <Descriptions.Item label="Request Reason" span={2}>{record.reason}</Descriptions.Item>
+                      )}
+                    </Descriptions>
+                    <Text strong style={{ color: colors.text.primary, display: 'block', marginBottom: 8 }}>
+                      Products on this shipment
                     </Text>
+                    <Table<StockIndentItem>
+                      rowKey="id"
+                      columns={itemCols}
+                      dataSource={record.items}
+                      pagination={false}
+                      size="small"
+                    />
                   </div>
                 ),
-              }))}
+                rowExpandable: () => true,
+              }}
             />
-            {active.notes && <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Notes: {active.notes}</Text>}
-          </>
-        )}
-      </Drawer>
+          )}
+        </Spin>
+      </Card>
+
+      {/* Recently Received */}
+      <Card
+        title={<Space><CheckCircleOutlined style={{ color: '#22c55e' }} /><span style={{ color: colors.text.primary }}>Recently Received</span>{recentReceived.length > 0 && <Tag color="green">{recentReceived.length}</Tag>}</Space>}
+        style={{ background: colors.black.secondary, border: `1px solid ${colors.border}` }}
+        styles={{ header: { borderBottom: `1px solid ${colors.border}` }, body: { padding: 0 } }}
+      >
+        <Spin spinning={recLoading}>
+          {!recLoading && recentReceived.length === 0 ? (
+            <Empty description="No received shipments yet" style={{ padding: 32 }} image={Empty.PRESENTED_IMAGE_SIMPLE} />
+          ) : (
+            <Table<StockIndent>
+              rowKey="id"
+              columns={receivedCols}
+              dataSource={recentReceived}
+              pagination={{ pageSize: 20, hideOnSinglePage: true }}
+              size="middle"
+              scroll={{ x: 900 }}
+            />
+          )}
+        </Spin>
+      </Card>
     </div>
   );
 }

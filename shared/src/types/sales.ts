@@ -24,6 +24,7 @@ export interface Customer {
   stateName: string | null;
   country: string | null;
   notes: string | null;
+  gender: string | null;
   avatarUrl: string | null;
   tags: string[];
   isActive: boolean;
@@ -123,11 +124,16 @@ export interface Lead {
   ownerStaffId: string;
   notes: string | null;
   lostReason: string | null;
+  transferredFromId: string | null;
+  transferredToId: string | null;
+  transferredAt: string | null;
+  transferNotes: string | null;
   createdAt: string;
   owner?: Ref;
   customer?: Ref | null;
   branch?: Ref | null;
   treatment?: Ref | null;
+  transferredFromBranch?: Ref | null;
   quotations?: Array<{ id: string; number: string; status: string; total: number }>;
   /** Next pending follow-up(s) — the list endpoint returns at most one. */
   followUps?: FollowUp[];
@@ -227,7 +233,20 @@ export interface Invoice {
   notes: string | null;
   createdAt: string;
   customer?: Ref;
-  order?: { id: string; number: string } | null;
+  order?: {
+    id: string;
+    number: string;
+    items?: Array<{
+      id: string;
+      description: string;
+      quantity: number;
+      unitPrice: number;
+      discountAmt: number;
+      taxRate: number;
+      lineTotal: number;
+      sortOrder: number;
+    }>;
+  } | null;
   payments?: Payment[];
 }
 
@@ -260,6 +279,7 @@ export interface SalesDashboard {
   today: {
     enquiries: number;
     followupsDue: number;
+    followupsDone: number;
   };
   /** Enquiries registered today. */
   todayEnquiries: Array<{

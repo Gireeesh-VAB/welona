@@ -1,15 +1,10 @@
 import { db } from '@/lib/db';
-import { route } from '@/lib/api/handler';
-import { ok } from '@/lib/api/response';
+import { route, parseBody } from '@/lib/api/handler';
+import { ok, created } from '@/lib/api/response';
 import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
+import { treatmentCreateSchema } from '@shared/schemas/sales';
 
-/**
- * GET /api/v1/admin/treatments — treatments master (admin + branch sessions).
- *
- * Org-wide reference data used to populate line-item / package selectors in the
- * admin sales forms. Read-only; treatments are managed on the employee side.
- */
 export const GET = route(async (req) => {
   requireAdminAuth(req);
   const orgId = await resolveOrgId();
@@ -19,4 +14,22 @@ export const GET = route(async (req) => {
     orderBy: { name: 'asc' },
   });
   return ok(treatments);
+});
+
+export const POST = route(async (req) => {
+  requireAdminAuth(req);
+  const orgId = await resolveOrgId();
+  const body = await parseBody(req, treatmentCreateSchema);
+
+  const treatment = await db.treatment.create({
+    data: {
+      orgId,
+      name: body.name,
+      category: body.category || null,
+      description: body.description || null,
+      durationMinutes: body.durationMinutes ?? null,
+      price: body.price ?? null,
+    },
+  });
+  return created(treatment);
 });

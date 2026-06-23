@@ -72,6 +72,9 @@ export default function PackagesTab({ customerId, customerName = '' }: Props) {
   const paidPaise   = Math.round((parseFloat(paidRupees) || 0) * 100);
   const balancePaise = Math.max(0, pricePaise - paidPaise);
 
+  const selectedMaster = masters.find((x) => x.id === selectedMasterId);
+  const maxSessions    = selectedMaster?.defaultSessions ?? undefined;
+
   const handleMasterSelect = (id: string) => {
     setSelectedMasterId(id);
     const m = masters.find((x) => x.id === id);
@@ -90,6 +93,7 @@ export default function PackagesTab({ customerId, customerName = '' }: Props) {
     if (!packageName.trim()) { message.error('Enter a package name'); return; }
     const sessions = parseInt(totalSessions) || 0;
     if (sessions < 1) { message.error('Total sessions must be at least 1'); return; }
+    if (maxSessions !== undefined && sessions > maxSessions) { message.error(`Total sessions cannot exceed ${maxSessions}`); return; }
     setPaidRupees('0');
     setPaymentMethod('cash');
     setPaymentRef('');
@@ -239,9 +243,22 @@ export default function PackagesTab({ customerId, customerName = '' }: Props) {
               <td style={sno}><Num n={2} /></td>
               <td style={lbl}>Total Sessions</td>
               <td style={val}>
-                <input type="number" min="1" value={totalSessions} onChange={(e) => setTotalSessions(e.target.value)}
+                <input
+                  type="number"
+                  min="1"
+                  max={maxSessions}
+                  value={totalSessions}
+                  onChange={(e) => {
+                    const val = parseInt(e.target.value) || 0;
+                    if (maxSessions !== undefined && val > maxSessions) return;
+                    setTotalSessions(e.target.value);
+                  }}
                   placeholder="0"
-                  style={{ width: 100, padding: '5px 8px', border: b, borderRadius: 3, fontSize: 12, textAlign: 'center' }} />
+                  style={{ width: 100, padding: '5px 8px', border: b, borderRadius: 3, fontSize: 12, textAlign: 'center' }}
+                />
+                {maxSessions !== undefined && (
+                  <span style={{ fontSize: 11, color: '#8c8c8c', marginLeft: 6 }}>max {maxSessions}</span>
+                )}
               </td>
             </tr>
             <tr style={{ borderTop: b }}>

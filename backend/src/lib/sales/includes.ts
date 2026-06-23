@@ -27,10 +27,21 @@ export const orderDetailInclude = {
   invoices: { orderBy: { createdAt: 'desc' } },
 } satisfies Prisma.SalesOrderInclude;
 
-/** Full invoice with payments and links. */
+const orderItemSelect = {
+  id: true, description: true, quantity: true,
+  unitPrice: true, discountAmt: true, taxRate: true, lineTotal: true, sortOrder: true,
+};
+
+/** Full invoice with payments, order items and links. */
 export const invoiceDetailInclude = {
   customer: idName,
   branch: idName,
-  order: { select: { id: true, number: true } },
+  order: {
+    select: {
+      id: true,
+      number: true,
+      items: { select: orderItemSelect, orderBy: { sortOrder: 'asc' } },
+    },
+  },
   payments: { orderBy: { receivedAt: 'desc' } },
 } satisfies Prisma.InvoiceInclude;

@@ -219,20 +219,38 @@ export function useBranchComplimentaryConfig() {
 
 // ---- Stock Indents (restock requests from branch) ---------------------------
 
-export interface BranchIndent {
+export interface BranchIndentItem {
   id: string;
   product: { id: string; name: string; sku: string; uom: string };
   requestedQty: number;
-  status: 'pending' | 'approved' | 'rejected' | 'fulfilled';
+  approvedQty: number | null;
+  rejectedQty: number | null;
+  rejectionReason: string | null;
+  fulfilledQty: number | null;
+  receivedQty: number | null;
+}
+
+export interface BranchIndent {
+  id: string;
+  number: string | null;
+  items: BranchIndentItem[];
+  status: 'pending' | 'approved' | 'dispatched' | 'delivered' | 'closed' | 'rejected';
   reason: string | null;
   notes: string | null;
+  vehicleNumber: string | null;
+  driverName: string | null;
+  driverMobile: string | null;
+  dispatchedAt: string | null;
+  expectedDeliveryAt: string | null;
+  deliveryNotes: string | null;
+  receivedAt: string | null;
+  closedAt: string | null;
   createdAt: string;
   updatedAt: string;
 }
 
 export interface RaiseIndentInput {
-  productId: string;
-  requestedQty: number;
+  items: { productId: string; requestedQty: number }[];
   reason?: string;
   notes?: string;
 }
@@ -256,14 +274,110 @@ export function useRaiseIndent() {
   });
 }
 
+export function useBranchGRNRecords() {
+  return useQuery({
+    queryKey: ['branch-grn-records'],
+    queryFn: async () => {
+      const [delivered, closed] = await Promise.all([
+        apiList<BranchIndent>('/indents', { query: { status: 'delivered', limit: 200 } }),
+        apiList<BranchIndent>('/indents', { query: { status: 'closed', limit: 200 } }),
+      ]);
+      return [...delivered.items, ...closed.items].sort(
+        (a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime(),
+      );
+    },
+    staleTime: 60 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useBranchReceiveIndent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, items, notes }: { id: string; items: { itemId: string; receivedQty: number }[]; notes?: string }) =>
+      api.patch<unknown>(`/indents/${id}`, { action: 'deliver', items, notes }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['branch-indents'] });
+      qc.invalidateQueries({ queryKey: ['branch-stock'], refetchType: 'all' });
+      qc.invalidateQueries({ queryKey: ['branch-grn-records'] });
+    },
+  });
+}
+
 // ---- Branch info (for GST routing) -----------------------------------------
 
-/** Returns the current branch's stateId — used to determine IGST vs CGST+SGST. */
+/** Returns the current branch's stateId and country — used for GST routing and form defaults. */
 export function useBranchCurrentInfo() {
-  return useQuery<{ stateId: string | null }>({
+  return useQuery<{ stateId: string | null; country: string | null }>({
     queryKey: ['branch-current-info'],
-    queryFn: () => api.get<{ stateId: string | null }>('/branches/current'),
+    queryFn: () => api.get<{ stateId: string | null; country: string | null }>('/branches/current'),
     staleTime: 10 * 60 * 1000,
+  });
+}
+
+// ---- Incoming Stock Transfers (branch receives from admin dispatch) ----------
+
+export interface BranchTransferItem {
+  id: string;
+  product: { id: string; name: string; sku: string; uom: string };
+  quantity: number;
+}
+
+export interface BranchIncomingTransfer {
+  id: string;
+  number: string;
+  fromBranch: { id: string; name: string; code: string };
+  toBranch?: { id: string; name: string; code: string };
+  status: 'requested' | 'dispatched' | 'received';
+  dispatchedAt: string | null;
+  receivedAt: string | null;
+  notes: string | null;
+  items: BranchTransferItem[];
+  createdAt: string;
+}
+
+interface TransferParams {
+  direction?: 'incoming' | 'outgoing';
+  page?: number;
+  limit?: number;
+}
+
+export function useBranchIncomingTransfers(params: TransferParams = {}) {
+  return useQuery({
+    queryKey: ['branch-incoming-transfers', params],
+    queryFn: () =>
+      apiList<BranchIncomingTransfer>('/inventory/transfers', {
+        query: { direction: 'incoming', page: params.page ?? 1, limit: params.limit ?? 20 },
+      }),
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useBranchOutgoingTransfers(params: TransferParams = {}) {
+  return useQuery({
+    queryKey: ['branch-outgoing-transfers', params],
+    queryFn: () =>
+      apiList<BranchIncomingTransfer>('/inventory/transfers', {
+        query: { direction: 'outgoing', page: params.page ?? 1, limit: params.limit ?? 20 },
+      }),
+    staleTime: 30 * 1000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export function useBranchTransferAction() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, action }: { id: string; action: 'dispatch' | 'receive' }) =>
+      api.put<BranchIncomingTransfer>(`/inventory/transfers/${id}`, { action }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['branch-incoming-transfers'] });
+      qc.invalidateQueries({ queryKey: ['branch-outgoing-transfers'] });
+      // refetchType: 'all' forces a refetch even on inactive/unmounted queries
+      // so the "All Stock" tab reflects the new quantities immediately
+      qc.invalidateQueries({ queryKey: ['branch-stock'], refetchType: 'all' });
+    },
   });
 }
 

@@ -430,7 +430,7 @@ export default function AdminMasterLedgersPage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Row gutter={12}>
             <Col span={14}>
