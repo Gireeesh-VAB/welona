@@ -75,15 +75,99 @@ export const POST = route(async (req) => {
   });
   if (!customer) throw Errors.notFound('Customer');
 
-  const items = body.items.map((it, i) => ({
-    category: it.category || null,
-    service: it.service,
-    quantity: it.quantity,
-    amount: it.amount,
-    lineTotal: it.amount * it.quantity,
-    sortOrder: i,
-  }));
-  const totalAmount = items.reduce((s, it) => s + it.lineTotal, 0);
+  // Expand package items into a summary line + per-service sub-items for revenue tracking.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const dba = db as any;
+  const pkgMasterIds = body.items
+    .map(it => it.packageSessionMasterId)
+    .filter((id): id is string => !!id);
+  const pkgMasterMap = new Map<string, { serviceSnapshotsJson: string }>();
+  if (pkgMasterIds.length) {
+    const masters = await dba.packageSessionMaster.findMany({
+      where: { id: { in: pkgMasterIds } },
+      select: { id: true, serviceSnapshotsJson: true },
+    });
+    for (const m of masters) pkgMasterMap.set(m.id, m);
+  }
+
+  // Build allocation lookup: serviceName → amountPaise (from frontend allocation choice)
+  const allocationMap = new Map<string, number>();
+  for (const a of body.packageServiceAllocations ?? []) allocationMap.set(a.serviceName, a.amountPaise);
+
+  const items: Array<{
+    category: string | null; service: string; quantity: number; amount: number;
+    lineTotal: number; sortOrder: number; isSessionBased: boolean;
+    packageSessionMasterId: string | null; isPackageSummaryLine: boolean;
+  }> = [];
+  let sortIdx = 0;
+
+  for (const it of body.items) {
+    const masterId = it.packageSessionMasterId ?? null;
+    const master = masterId ? pkgMasterMap.get(masterId) : null;
+
+    if (master) {
+      // Summary line (shown on receipt, excluded from revenue aggregation)
+      items.push({
+        category: it.category || null, service: it.service,
+        quantity: it.quantity, amount: it.amount,
+        lineTotal: it.amount * it.quantity,
+        sortOrder: sortIdx++, isSessionBased: it.isSessionBased ?? false,
+        packageSessionMasterId: masterId, isPackageSummaryLine: true,
+      });
+
+      // Per-service sub-items
+      type Snapshot = { serviceId?: string; serviceName: string; maxPrice: number; customPricePerSession?: number; sessions: number; customSessions?: number };
+      let snapshots: Snapshot[] = [];
+      try { snapshots = JSON.parse(master.serviceSnapshotsJson ?? '[]'); } catch { snapshots = []; }
+
+      if (snapshots.length > 0) {
+        const pkgLinePaise = it.amount * it.quantity; // already in paise
+        // Compute raw prices, then normalize so they sum to pkgLinePaise
+        const rawPrices = snapshots.map(s => {
+          const unitPrice = s.customPricePerSession ?? s.maxPrice;
+          const qty = s.customSessions ?? s.sessions ?? 1;
+          return unitPrice * qty;
+        });
+        const rawTotal = rawPrices.reduce((a, b) => a + b, 0);
+        const normalized = rawPrices.map((rp, i) =>
+          rawTotal > 0 ? Math.round(pkgLinePaise * (rp / rawTotal)) : Math.round(pkgLinePaise / snapshots.length)
+        );
+        // Fix rounding residual on last item
+        const normSum = normalized.reduce((a, b) => a + b, 0);
+        if (normalized.length > 0) normalized[normalized.length - 1] += pkgLinePaise - normSum;
+
+        for (let i = 0; i < snapshots.length; i++) {
+          const snap = snapshots[i];
+          const qty = snap.customSessions ?? snap.sessions ?? 1;
+          const lineTotal = normalized[i];
+          const unitAmt = qty > 0 ? Math.round(lineTotal / qty) : lineTotal;
+          // paidAmount: use explicit allocation if provided, else 0
+          const paidAmt = allocationMap.get(snap.serviceName) ?? 0;
+          items.push({
+            category: 'Packages', service: snap.serviceName,
+            quantity: qty, amount: unitAmt,
+            lineTotal,
+            sortOrder: sortIdx++, isSessionBased: true,
+            packageSessionMasterId: masterId, isPackageSummaryLine: false,
+          });
+          // Store paidAmount alongside — handled after booking creation via allocation
+          allocationMap.set(snap.serviceName + '__itemIdx__' + (items.length - 1), paidAmt);
+        }
+      }
+    } else {
+      items.push({
+        category: it.category || null, service: it.service,
+        quantity: it.quantity, amount: it.amount,
+        lineTotal: it.amount * it.quantity,
+        sortOrder: sortIdx++, isSessionBased: it.isSessionBased ?? false,
+        packageSessionMasterId: masterId, isPackageSummaryLine: false,
+      });
+    }
+  }
+
+  const totalAmount = items
+    .filter(it => !it.isPackageSummaryLine)
+    .reduce((s, it) => s + it.lineTotal, 0);
   let netAmount = totalAmount - body.discount + body.roundOff;
   const serviceName =
     items.length === 1 ? items[0].service : `${items[0].service} +${items.length - 1} more`;
@@ -111,14 +195,24 @@ export const POST = route(async (req) => {
   });
   const serviceMap = new Map(serviceRows.map((s) => [s.name, s]));
 
-  for (const item of items) {
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    // Skip summary lines — their price is already covered by the per-service sub-items
+    if (item.isPackageSummaryLine) continue;
+    // Skip package sub-items — the package price is all-inclusive; no additional tax should be applied
+    if (item.packageSessionMasterId) continue;
+    // Use per-item tax from the request (set for package items); otherwise look up from service table.
+    // Map back to original body item index (summary lines are inserted so indices diverge)
+    const bodyItem = body.items.find(bi => bi.service === item.service && bi.packageSessionMasterId === item.packageSessionMasterId && !item.isPackageSummaryLine);
     const svc = serviceMap.get(item.service);
-    if (!svc || !svc.taxPercent) continue;
+    const taxPct = bodyItem?.taxPercent ?? svc?.taxPercent ?? 0;
+    const taxTyp = (bodyItem?.taxType ?? svc?.taxType ?? 'exclusive') as 'inclusive' | 'exclusive';
+    if (!taxPct) continue;
     const linePaise = item.lineTotal;
     const gst = calculateGst({
       netAmountPaise: linePaise,
-      percentage: svc.taxPercent,
-      taxType: svc.taxType as 'inclusive' | 'exclusive',
+      percentage: taxPct,
+      taxType: taxTyp,
       branchStateId: branchData?.stateId ?? null,
       customerStateId: customerData?.stateId ?? null,
     });
@@ -127,7 +221,7 @@ export const POST = route(async (req) => {
     aggregateCgst += gst.cgstAmt;
     aggregateSgst += gst.sgstAmt;
     aggregateIgst += gst.igstAmt;
-    if (svc.taxType === 'exclusive') extraAmount += gst.totalTax;
+    if (taxTyp === 'exclusive') extraAmount += gst.totalTax;
   }
 
   const isIntraState = !!(branchData?.stateId && customerData?.stateId && branchData.stateId === customerData.stateId);
@@ -202,11 +296,19 @@ export const POST = route(async (req) => {
         orgId: claims.orgId,
         bookingRef: created.number ?? created.id,
         lines: serviceLines,
+        force: body.forceCreate,
       });
     }
 
     return created;
   });
 
-  return created({ id: booking.id, number: booking.number });
+  // Fetch the created items so the frontend can map service names → BookingItem IDs for allocation
+  const createdItems = await db.bookingItem.findMany({
+    where: { bookingId: booking.id },
+    select: { id: true, service: true, isPackageSummaryLine: true, packageSessionMasterId: true, lineTotal: true },
+    orderBy: { sortOrder: 'asc' },
+  });
+
+  return created({ id: booking.id, number: booking.number, items: createdItems });
 });

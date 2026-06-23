@@ -341,7 +341,7 @@ export default function AdminMasterTaxPage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="Tax Name"

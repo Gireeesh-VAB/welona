@@ -23,7 +23,24 @@ export const GET = route<Ctx>(async (req, { params }) => {
     db.lead.findMany({ where: { customerId: params.id }, orderBy: { createdAt: 'desc' } }),
     db.quotation.findMany({ where: { customerId: params.id }, orderBy: { createdAt: 'desc' } }),
     db.salesOrder.findMany({ where: { customerId: params.id }, orderBy: { createdAt: 'desc' } }),
-    db.invoice.findMany({ where: { customerId: params.id }, orderBy: { createdAt: 'desc' } }),
+    db.invoice.findMany({
+      where: { customerId: params.id },
+      orderBy: { createdAt: 'desc' },
+      include: {
+        payments: { orderBy: { receivedAt: 'desc' } },
+        order: {
+          select: {
+            id: true,
+            number: true,
+            items: {
+              select: { id: true, description: true, quantity: true, unitPrice: true,
+                         discountAmt: true, taxRate: true, lineTotal: true, sortOrder: true },
+              orderBy: { sortOrder: 'asc' },
+            },
+          },
+        },
+      },
+    }),
   ]);
 
   const totalSpent = invoices.reduce((sum, i) => sum + i.amountPaid, 0);

@@ -50,6 +50,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
           ...(body.taxType !== undefined && { taxType: body.taxType }),
           ...(body.hasMeasurements !== undefined && { hasMeasurements: body.hasMeasurements }),
           ...(body.hasComplementary !== undefined && { hasComplementary: body.hasComplementary }),
+          ...(body.sessions !== undefined && { sessions: body.sessions }),
           ...(body.isActive !== undefined && { isActive: body.isActive }),
         },
       });
@@ -63,6 +64,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
               serviceId: params.id,
               productId: item.productId,
               quantityPerSession: item.quantityPerSession,
+              chargeType: item.chargeType ?? 'consume_only',
               lowStockThreshold: item.lowStockThreshold ?? null,
               sortOrder: item.sortOrder ?? 0,
             })),

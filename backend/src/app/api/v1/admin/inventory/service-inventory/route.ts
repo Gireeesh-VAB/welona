@@ -42,8 +42,9 @@ export const GET = route(async (req) => {
       include: {
         category: { select: { id: true, name: true } },
         inventoryItems: {
+          where: { product: { availableForServices: true } },
           include: {
-            product: { select: { id: true, name: true, sku: true, uom: true, reorderLevel: true } },
+            product: { select: { id: true, name: true, sku: true, uom: true, consumptionUom: true, reorderLevel: true, availableForServices: true } },
           },
           orderBy: { sortOrder: 'asc' },
         },
@@ -86,6 +87,7 @@ export const GET = route(async (req) => {
         productSku: item.product.sku,
         productName: item.product.name,
         productUom: item.product.uom,
+        productConsumptionUom: (item.product as any).consumptionUom ?? item.product.uom,
         quantityPerSession: item.quantityPerSession,
         lowStockThreshold: item.lowStockThreshold,
         currentStock,

@@ -1,5 +1,6 @@
 'use client';
 
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Button, Card, Form, Input, Typography, App } from 'antd';
@@ -33,6 +34,7 @@ export default function AdminLoginPage() {
   const { message } = App.useApp();
   const login = useAdminLogin();
   const colors = useBrandColors();
+  const [loginSource, setLoginSource] = useState<'manual' | 'demo' | null>(null);
   const [form] = Form.useForm<CredentialsForm>();
 
   const fail = (error: unknown, fallback: string) => {
@@ -40,18 +42,21 @@ export default function AdminLoginPage() {
   };
 
   const handleAutoFill = () => {
+    setLoginSource('demo');
     form.setFieldsValue(TEST_CREDENTIALS);
-    // Submit immediately so it works in one click on live
     setTimeout(() => form.submit(), 50);
   };
 
   const onSubmit = async (values: CredentialsForm) => {
+    if (loginSource !== 'demo') setLoginSource('manual');
     try {
       await login.mutateAsync(values);
       message.success('Welcome to the admin console');
       router.replace('/admin');
     } catch (error) {
       fail(error, 'Sign in failed. Please try again.');
+    } finally {
+      setLoginSource(null);
     }
   };
 
@@ -120,7 +125,9 @@ export default function AdminLoginPage() {
           </Form.Item>
 
           <Form.Item style={{ marginBottom: 8 }}>
-            <Button type="primary" htmlType="submit" block loading={login.isPending}>
+            <Button type="primary" htmlType="submit" block
+              loading={login.isPending && loginSource === 'manual'}
+              disabled={login.isPending}>
               Sign In to Admin Console
             </Button>
           </Form.Item>
@@ -130,7 +137,8 @@ export default function AdminLoginPage() {
               type="dashed"
               block
               onClick={handleAutoFill}
-              loading={login.isPending}
+              loading={login.isPending && loginSource === 'demo'}
+              disabled={login.isPending}
               style={{ color: colors.text.placeholder, borderColor: colors.border }}
             >
               Use test credentials

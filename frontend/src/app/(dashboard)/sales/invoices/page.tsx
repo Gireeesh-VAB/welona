@@ -21,6 +21,7 @@ import type { ColumnsType } from 'antd/es/table';
 import { useInvoices, useInvoice, useIssueInvoice, useRecordPayment } from '@/hooks/useSales';
 import SalesNav from '@/components/sales/SalesNav';
 import StatusTag from '@/components/sales/StatusTag';
+import ServiceAllocationTable from '@/components/sales/ServiceAllocationTable';
 import { ApiClientError } from '@/lib/api-client';
 import { PAYMENT_METHODS } from '@shared/enums';
 import { formatDate, formatMoney, titleCase, toMinorUnits } from '@shared/format';
@@ -118,6 +119,24 @@ function InvoiceDrawer({ id, onClose }: { id: string | null; onClose: () => void
             <div style={{ color: colors.status.warning }}>Balance: {formatMoney(balance)}</div>
           </div>
 
+          {/* Services breakdown */}
+          {invoice.order?.items && invoice.order.items.length > 0 ? (
+            <>
+              <Title level={5} style={{ marginTop: 20, marginBottom: 8 }}>
+                Services Breakdown
+              </Title>
+              <ServiceAllocationTable
+                items={invoice.order.items}
+                invoiceTotal={invoice.total}
+                amountPaid={invoice.amountPaid}
+              />
+            </>
+          ) : (
+            <Text type="secondary" style={{ display: 'block', marginTop: 16, fontSize: 12 }}>
+              No line item breakdown available.
+            </Text>
+          )}
+
           <Space style={{ marginTop: 16 }}>
             {invoice.status === 'draft' && (
               <Button type="primary" loading={issueInvoice.isPending} onClick={issue}>
@@ -132,7 +151,7 @@ function InvoiceDrawer({ id, onClose }: { id: string | null; onClose: () => void
           </Space>
 
           <Title level={5} style={{ marginTop: 24 }}>
-            Payments
+            Payment History
           </Title>
           <Table<Payment>
             rowKey="id"

@@ -96,6 +96,13 @@ export const leadStatusSchema = z.object({
   lostReason: z.string().trim().optional(),
 });
 
+export const transferLeadSchema = z.object({
+  targetBranchId:     z.string().min(1, 'Target branch is required'),
+  targetOwnerStaffId: z.string().optional(),
+  notes:              z.string().trim().optional(),
+});
+export type TransferLeadInput = z.infer<typeof transferLeadSchema>;
+
 // --- Master options (configurable dropdowns) -------------------------------
 
 export const masterOptionCreateSchema = z.object({

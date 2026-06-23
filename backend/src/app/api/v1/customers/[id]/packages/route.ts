@@ -28,7 +28,7 @@ async function enrichMaster(pkg: any) {
   if (!pkg.masterId) return pkg;
   const master = await (db as any).packageSessionMaster.findUnique({
     where: { id: pkg.masterId },
-    select: { id: true, name: true, serviceIds: true },
+    select: { id: true, name: true, serviceIds: true, inventoryItemsJson: true },
   });
   if (!master) return pkg;
   let serviceIds: string[] = [];
@@ -37,7 +37,9 @@ async function enrichMaster(pkg: any) {
     where: { id: { in: serviceIds } },
     select: { id: true, name: true },
   });
-  return { ...pkg, master: { id: master.id, name: master.name, services } };
+  let inventoryItems: unknown[] = [];
+  try { inventoryItems = JSON.parse(master.inventoryItemsJson ?? '[]'); } catch { inventoryItems = []; }
+  return { ...pkg, master: { id: master.id, name: master.name, services, inventoryItems } };
 }
 
 /** Auto-expire packages whose expiresAt has passed. Run inline on GET to avoid needing a cron job. */

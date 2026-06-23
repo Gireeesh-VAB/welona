@@ -378,7 +378,7 @@ export default function AdminMasterMediaPage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="Zone"

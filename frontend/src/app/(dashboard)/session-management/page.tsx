@@ -2,6 +2,7 @@
 
 import { useState, useCallback } from 'react';
 import {
+
   Badge,
   Button,
   Card,
@@ -34,6 +35,9 @@ import {
   useSessionStats,
   useSessionEntries,
   useCreateSessionEntry,
+  useSessionProducts,
+  type SessionProduct,
+  type ServiceProductGroup,
 } from '@/hooks/useSessions';
 import type { PackageSession, SessionEntry } from '@shared/types/customer-modules';
 import { SESSION_STATUSES } from '@shared/enums';
@@ -157,6 +161,31 @@ function HistoryDrawer({
 
 // ---- Add Session Modal -----------------------------------------------------
 
+const PRODUCT_COLS = [
+  {
+    title: 'Product',
+    dataIndex: 'productName',
+    key: 'name',
+    ellipsis: true,
+  },
+  {
+    title: 'Quantity Required',
+    key: 'qty',
+    width: 130,
+    render: (_: unknown, row: SessionProduct) => (
+      <Text style={{ fontSize: 12 }}>{row.quantityPerSession}</Text>
+    ),
+  },
+  {
+    title: 'UOM',
+    key: 'uom',
+    width: 80,
+    render: (_: unknown, row: SessionProduct) => (
+      <Text style={{ fontSize: 12 }}>{row.uom ?? '—'}</Text>
+    ),
+  },
+];
+
 function AddSessionModal({
   pkg,
   open,
@@ -168,6 +197,8 @@ function AddSessionModal({
 }) {
   const [form] = Form.useForm();
   const createEntry = useCreateSessionEntry(pkg?.customerId ?? '', pkg?.id ?? '');
+  const { data: productGroups = [], isLoading: productsLoading, isError: productsError } = useSessionProducts(pkg?.id);
+  const products: SessionProduct[] = productGroups.flatMap((g: ServiceProductGroup) => g.products);
 
   const handleSubmit = useCallback(async () => {
     try {
@@ -198,8 +229,10 @@ function AddSessionModal({
       onOk={handleSubmit}
       okText="Save"
       confirmLoading={createEntry.isPending}
+      width={600}
       destroyOnClose
     >
+      {/* Package summary */}
       {pkg && (
         <div
           style={{
@@ -220,29 +253,60 @@ function AddSessionModal({
           </div>
         </div>
       )}
+
+      {/* Products panel */}
+      <div style={{ marginBottom: 16 }}>
+        <Text strong style={{ fontSize: 12, display: 'block', marginBottom: 6, color: colors.text.secondary }}>
+          PRODUCTS TO BE USED
+        </Text>
+        {productsLoading ? (
+          <div style={{ textAlign: 'center', padding: '12px 0' }}><Spin size="small" /></div>
+        ) : productsError ? (
+          <Text style={{ fontSize: 12, color: '#cf1322' }}>Could not load products. Please try again.</Text>
+        ) : products.length === 0 ? (
+          <Text style={{ fontSize: 12, color: colors.text.placeholder }}>No products mapped to this service.</Text>
+        ) : (
+          <Table<SessionProduct>
+            dataSource={products}
+            columns={PRODUCT_COLS}
+            rowKey="productId"
+            size="small"
+            pagination={false}
+            style={{ fontSize: 12 }}
+          />
+        )}
+      </div>
+
+      {/* Session form */}
       <Form form={form} layout="vertical">
-        <Form.Item
-          label="Session Date"
-          name="sessionDate"
-          rules={[{ required: true, message: 'Required' }]}
-          initialValue={dayjs().format('YYYY-MM-DD')}
-        >
-          <Input type="date" max={dayjs().format('YYYY-MM-DD')} />
-        </Form.Item>
-        <Form.Item
-          label="Status"
-          name="status"
-          rules={[{ required: true, message: 'Required' }]}
-          initialValue="completed"
-        >
-          <Select>
-            {SESSION_STATUSES.map((s) => (
-              <Select.Option key={s} value={s}>
-                {s.replace('_', ' ')}
-              </Select.Option>
-            ))}
-          </Select>
-        </Form.Item>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item
+              label="Session Date"
+              name="sessionDate"
+              rules={[{ required: true, message: 'Required' }]}
+              initialValue={dayjs().format('YYYY-MM-DD')}
+            >
+              <Input type="date" max={dayjs().format('YYYY-MM-DD')} />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item
+              label="Status"
+              name="status"
+              rules={[{ required: true, message: 'Required' }]}
+              initialValue="completed"
+            >
+              <Select>
+                {SESSION_STATUSES.map((s) => (
+                  <Select.Option key={s} value={s}>
+                    {s.replace('_', ' ')}
+                  </Select.Option>
+                ))}
+              </Select>
+            </Form.Item>
+          </Col>
+        </Row>
         <Form.Item label="Staff Name" name="staffName">
           <Input placeholder="Who attended the session?" />
         </Form.Item>

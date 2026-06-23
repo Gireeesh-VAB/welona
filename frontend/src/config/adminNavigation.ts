@@ -167,6 +167,12 @@ export const adminNavigation: AdminNavItem[] = [
         description: 'Storage locations within each branch; stock is tracked per warehouse.',
       },
       {
+        key: 'inventory-warehouse-stock',
+        label: 'Warehouse Stock',
+        path: '/admin/inventory/warehouse-stock',
+        description: 'View available stock in a specific warehouse — quantities, low-stock indicators and last movement date.',
+      },
+      {
         key: 'inventory-suppliers',
         label: 'Suppliers',
         path: '/admin/inventory/suppliers',
@@ -228,9 +234,9 @@ export const adminNavigation: AdminNavItem[] = [
       },
       {
         key: 'inventory-indents',
-        label: 'Stock Indents',
-        path: '/admin/master/indents',
-        description: 'Branch purchase requests for low-stock inventory items — approve, reject or mark fulfilled.',
+        label: 'Stock Requests',
+        path: '/admin/inventory/stock-requests',
+        description: 'Branch stock requests — approve, dispatch, and confirm receipt to update inventory.',
       },
       {
         key: 'inventory-consumable-usage',
@@ -256,13 +262,31 @@ export const adminNavigation: AdminNavItem[] = [
     key: 'procurement',
     label: 'Procurement',
     path: '/admin/procurement',
-    description: 'RFQs, supplier quotes and purchase comparison.',
+    description: 'RFQs, supplier quotes, purchase orders and goods receipts.',
     children: [
       {
         key: 'procurement-rfq',
         label: 'RFQs',
         path: '/admin/procurement/rfq',
         description: 'Requests for Quotation — create, send to suppliers and compare quotes.',
+      },
+      {
+        key: 'procurement-purchase-orders',
+        label: 'Purchase Orders',
+        path: '/admin/inventory/purchase-orders',
+        description: 'Raise and track purchase orders; receive stock against them.',
+      },
+      {
+        key: 'procurement-grn',
+        label: 'Goods Receipts',
+        path: '/admin/inventory/grn',
+        description: 'Goods Receipt Notes — incoming stock received against purchase orders.',
+      },
+      {
+        key: 'procurement-suppliers',
+        label: 'Suppliers',
+        path: '/admin/inventory/suppliers',
+        description: 'Vendor master — contacts, GSTIN and payment terms for procurement.',
       },
     ],
   },

@@ -22,6 +22,7 @@ export function toAdminService(row: ServiceWithRelations): AdminService {
     taxType: row.taxType,
     hasMeasurements: row.hasMeasurements,
     hasComplementary: row.hasComplementary,
+    sessions: (row as any).sessions ?? 1,
     isActive: row.isActive,
     inventoryItems: row.inventoryItems.map((item) => ({
       id: item.id,
@@ -29,6 +30,7 @@ export function toAdminService(row: ServiceWithRelations): AdminService {
       productName: item.product.name,
       productUom: item.product.uom,
       quantityPerSession: item.quantityPerSession,
+      chargeType: (item as any).chargeType ?? 'consume_only',
       lowStockThreshold: item.lowStockThreshold,
       sortOrder: item.sortOrder,
     })),

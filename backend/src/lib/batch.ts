@@ -60,7 +60,7 @@ export async function receiveBatchStock(
  */
 export async function depleteBatchStockFEFO(
   tx: Tx,
-  input: { productId: string; warehouseId: string; quantity: number },
+  input: { productId: string; warehouseId: string; quantity: number; force?: boolean },
 ): Promise<Array<{ batchId: string; quantity: number }>> {
   if (input.quantity <= 0) return [];
   const rows = await tx.batchStock.findMany({
@@ -90,7 +90,7 @@ export async function depleteBatchStockFEFO(
     consumed.push({ batchId: row.batchId, quantity: take });
     remaining -= take;
   }
-  if (remaining > 0) {
+  if (remaining > 0 && !input.force) {
     throw Errors.conflict(
       `Insufficient batch stock: could not fulfil ${remaining} unit(s) from tracked batches.`,
     );

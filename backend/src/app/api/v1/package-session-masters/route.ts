@@ -22,10 +22,20 @@ export const GET = route(async (req) => {
       const services = ids.length
         ? await db.service.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } })
         : [];
+      let inventoryItems: unknown[] = [];
+      try { inventoryItems = JSON.parse(row.inventoryItemsJson ?? '[]'); } catch { inventoryItems = []; }
+      let serviceSnapshots: unknown[] = [];
+      try { serviceSnapshots = JSON.parse(row.serviceSnapshotsJson ?? '[]'); } catch { serviceSnapshots = []; }
       return {
         id: row.id, name: row.name,
         serviceIds: ids, services,
+        serviceSnapshots,
+        inventoryItems,
         defaultSessions: row.defaultSessions, price: row.price,
+        taxPercent: row.taxPercent ?? 0,
+        taxType: row.taxType ?? 'exclusive',
+        collectAdvance: row.collectAdvance ?? false,
+        advancePercent: row.advancePercent ?? 0,
       };
     }),
   );

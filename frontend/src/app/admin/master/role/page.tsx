@@ -681,7 +681,7 @@ export default function AdminMasterRolePage() {
         width={560}
         destroyOnClose
       >
-        <Form<NewRoleForm> form={createForm} layout="vertical" preserve={false}>
+        <Form<NewRoleForm> form={createForm} layout="vertical">
           <Row gutter={12}>
             <Col span={6}>
               <Form.Item name="emoji" label="Icon" rules={[{ required: true }]}>
@@ -721,7 +721,7 @@ export default function AdminMasterRolePage() {
         width={520}
         destroyOnClose
       >
-        <Form form={editForm} layout="vertical" preserve={false}>
+        <Form form={editForm} layout="vertical">
           <Row gutter={12}>
             <Col span={6}>
               <Form.Item name="emoji" label="Icon" rules={[{ required: true }]}>

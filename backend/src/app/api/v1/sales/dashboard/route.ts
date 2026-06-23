@@ -20,20 +20,26 @@ export const GET = route(async (req) => {
   const claims = requireAuth(req);
   requirePermission(claims, 'sales:read');
   const orgId = claims.orgId;
+  const staffBranchId = claims.branchIds[0] ?? null;
 
   const now = new Date();
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const startOfTomorrow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
 
-  const [leads, quotations, orders, payments, invoices, staff, todayLeads, dueFollowups] =
+  // Branch-scoped staff only see their branch; org-wide roles see everything.
+  const branchFilter = staffBranchId ? { branchId: staffBranchId } : {};
+  // Follow-ups don't carry branchId directly — scope through their lead.
+  const followupBranchFilter = staffBranchId ? { lead: { branchId: staffBranchId } } : {};
+
+  const [leads, quotations, orders, payments, invoices, staff, todayLeads, dueFollowups, doneFollowupsCount] =
     await Promise.all([
-      db.lead.findMany({ where: { orgId }, select: { status: true, ownerStaffId: true } }),
+      db.lead.findMany({ where: { orgId, ...branchFilter }, select: { status: true, ownerStaffId: true } }),
       db.quotation.findMany({
-        where: { orgId },
+        where: { orgId, ...branchFilter },
         select: { status: true, ownerStaffId: true, total: true },
       }),
       db.salesOrder.findMany({
-        where: { orgId },
+        where: { orgId, ...branchFilter },
         select: { status: true, ownerStaffId: true, total: true },
       }),
       db.payment.findMany({ where: { orgId }, select: { amount: true, receivedAt: true } }),
@@ -43,16 +49,19 @@ export const GET = route(async (req) => {
       }),
       db.staff.findMany({ where: { orgId }, select: { id: true, name: true } }),
       db.lead.findMany({
-        where: { orgId, createdAt: { gte: startOfToday } },
+        where: { orgId, ...branchFilter, createdAt: { gte: startOfToday } },
         include: { treatment: { select: { name: true } } },
         orderBy: { createdAt: 'desc' },
         take: 100,
       }),
       db.followUp.findMany({
-        where: { orgId, status: 'pending', dueAt: { gte: startOfToday, lt: startOfTomorrow } },
+        where: { orgId, ...followupBranchFilter, status: 'pending', dueAt: { gte: startOfToday, lt: startOfTomorrow } },
         include: { lead: { select: { id: true, contactName: true, status: true } } },
         orderBy: { dueAt: 'asc' },
         take: 100,
+      }),
+      db.followUp.count({
+        where: { orgId, ...followupBranchFilter, status: 'completed', contactedAt: { gte: startOfToday, lt: startOfTomorrow } },
       }),
     ]);
 
@@ -130,6 +139,7 @@ export const GET = route(async (req) => {
     today: {
       enquiries: todayLeads.length,
       followupsDue: dueFollowups.length,
+      followupsDone: doneFollowupsCount,
     },
     todayEnquiries: todayLeads.map((l) => ({
       id: l.id,

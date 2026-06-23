@@ -79,6 +79,56 @@ export function useAdminMasterOptions(kind: string) {
   });
 }
 
+export function useCreateAdminMasterOption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Body) => api.post<MasterOption>('/admin/master-options', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-master-options'] }),
+  });
+}
+
+export function useUpdateAdminMasterOption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Body }) =>
+      api.patch<MasterOption>(`/admin/master-options/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-master-options'] }),
+  });
+}
+
+export function useDeleteAdminMasterOption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/master-options/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-master-options'] }),
+  });
+}
+
+export function useCreateAdminTreatment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Body) => api.post<Treatment>('/admin/treatments', body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-treatments'] }),
+  });
+}
+
+export function useUpdateAdminTreatment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: Body }) =>
+      api.patch<Treatment>(`/admin/treatments/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-treatments'] }),
+  });
+}
+
+export function useDeleteAdminTreatment() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => api.delete(`/admin/treatments/${id}`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin-treatments'] }),
+  });
+}
+
 // --- Leads ------------------------------------------------------------------
 
 export function useAdminLeads(params: ListParams = {}) {

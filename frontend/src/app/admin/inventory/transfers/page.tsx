@@ -197,7 +197,7 @@ export default function AdminStockTransfersPage() {
       fixed: 'right',
       render: (_v, t) => (
         <Space size={4}>
-          <Tooltip title="View"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setActive(t)} /></Tooltip>
+          <Tooltip title="Manage"><Button size="small" type="text" icon={<EyeOutlined />} onClick={() => setActive(t)} /></Tooltip>
           {(t.status === 'requested' || t.status === 'cancelled') && (
             <Popconfirm title={`Delete ${t.number}?`} okText="Delete" okButtonProps={{ danger: true }} onConfirm={() => onDelete(t)}>
               <Tooltip title="Delete"><Button size="small" type="text" danger icon={<DeleteOutlined />} /></Tooltip>
@@ -232,7 +232,7 @@ export default function AdminStockTransfersPage() {
         {[
           { label: 'TOTAL', value: stats.total, color: colors.gold.primary },
           { label: 'IN TRANSIT', value: stats.inTransit, color: colors.text.primary },
-          { label: 'RECEIVED (view)', value: stats.received, color: colors.text.primary },
+          { label: 'RECEIVED', value: stats.received, color: colors.text.primary },
         ].map((s) => (
           <Card key={s.label} size="small" style={{ background: colors.black.secondary, border: `1px solid ${colors.border}`, minWidth: 160 }} styles={{ body: { padding: '12px 16px' } }}>
             <Statistic title={<span style={{ color: colors.text.placeholder, fontSize: 12 }}>{s.label}</span>} value={s.value} valueStyle={{ color: s.color, fontWeight: 600 }} />

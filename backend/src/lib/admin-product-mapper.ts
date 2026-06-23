@@ -32,6 +32,10 @@ export function toAdminProduct(row: ProductWithRelations): AdminProduct {
     trackBatches: row.trackBatches,
     trackExpiry: row.trackExpiry,
     hasComplementary: row.hasComplementary,
+    consumptionUom: row.consumptionUom,
+    unitsPerPurchase: row.unitsPerPurchase,
+    availableForServices: row.availableForServices,
+    availableForProducts: row.availableForProducts,
     isActive: row.isActive,
     createdBy: row.createdByAdmin
       ? {

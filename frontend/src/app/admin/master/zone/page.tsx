@@ -282,7 +282,7 @@ export default function AdminMasterZonePage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="Country"

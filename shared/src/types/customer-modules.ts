@@ -17,6 +17,7 @@ export interface Booking {
   roundOff: number;
   netAmount: number;
   paidAmount: number;
+  paymentMode: string | null;
   notes: string | null;
   createdAt: string;
   gstRateId: string | null;
@@ -28,6 +29,9 @@ export interface Booking {
   igstPct: number;
   igstAmt: number;
   taxType: string | null;
+  consultantId: string | null;
+  consultantName: string | null;
+  items: BookingItem[];
 }
 
 /** A service appointment in the calendar (a Booking with its customer name). */
@@ -45,11 +49,15 @@ export interface Appointment {
 
 /** One service line on a booking. */
 export interface BookingItem {
+  id: string;
   category: string | null;
   service: string;
   quantity: number;
   amount: number;
   lineTotal: number;
+  paidAmount: number;
+  packageSessionMasterId: string | null;
+  isPackageSummaryLine: boolean;
 }
 
 /** Full appointment detail, for the receipt. */

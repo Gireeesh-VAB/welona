@@ -69,7 +69,7 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
       if (pkg.branchId) {
         const serviceIds = resolveServiceIds(pkg);
         if (serviceIds.length > 0) {
-          await applyServiceSessionStockByIds(tx, { branchId: pkg.branchId, ref: updated.id, serviceIds });
+          await applyServiceSessionStockByIds(tx, { branchId: pkg.branchId, ref: updated.id, serviceIds, force: true });
         }
       }
     } else if (leavingCompleted) {

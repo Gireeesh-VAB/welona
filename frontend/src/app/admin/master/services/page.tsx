@@ -64,7 +64,6 @@ const SERVICE_BULK_SAMPLES = [
 interface InventoryItemFormRow {
   productId: string;
   quantityPerSession: number;
-  lowStockThreshold?: number;
   sortOrder?: number;
 }
 
@@ -79,6 +78,7 @@ interface ServiceFormValues {
   hasMeasurements: boolean;
   hasComplementary: boolean;
   isActive: boolean;
+  sessions: number;
   inventoryItems?: InventoryItemFormRow[];
 }
 
@@ -182,11 +182,11 @@ export default function AdminMasterServicesPage() {
         taxType: (editing.taxType as 'inclusive' | 'exclusive') ?? 'exclusive',
         hasMeasurements: editing.hasMeasurements,
         hasComplementary: editing.hasComplementary,
+        sessions: editing.sessions ?? 1,
         isActive: editing.isActive,
         inventoryItems: (editing.inventoryItems ?? []).map((item) => ({
           productId: item.productId,
           quantityPerSession: item.quantityPerSession,
-          lowStockThreshold: item.lowStockThreshold ?? undefined,
           sortOrder: item.sortOrder,
         })),
       };
@@ -199,6 +199,7 @@ export default function AdminMasterServicesPage() {
       taxType: 'exclusive' as const,
       minPriceRupees: 0,
       maxPriceRupees: 0,
+      sessions: 1,
       inventoryItems: [],
     };
   }, [editing]);
@@ -214,23 +215,21 @@ export default function AdminMasterServicesPage() {
       taxType: values.taxType,
       hasMeasurements: values.hasMeasurements,
       hasComplementary: values.hasComplementary,
+      sessions: values.sessions ?? 1,
       isActive: values.isActive,
     };
-    // Inventory items are only saved in edit mode (need a persisted service ID).
-    const inventoryItems = editing
-      ? (values.inventoryItems ?? []).map((item, i) => ({
-          productId: item.productId,
-          quantityPerSession: item.quantityPerSession,
-          lowStockThreshold: item.lowStockThreshold ?? undefined,
-          sortOrder: i,
-        }))
-      : undefined;
+    const inventoryItems = (values.inventoryItems ?? []).map((item, i) => ({
+      productId: item.productId,
+      quantityPerSession: item.quantityPerSession,
+      chargeType: 'consume_only' as const,
+      sortOrder: i,
+    }));
     try {
       if (editing) {
         await update.mutateAsync({ id: editing.id, body: { ...body, inventoryItems } });
         message.success('Service updated');
       } else {
-        await create.mutateAsync(body);
+        await create.mutateAsync({ ...body, inventoryItems });
         message.success('Service added');
       }
       setModalOpen(false);
@@ -392,12 +391,12 @@ export default function AdminMasterServicesPage() {
               {row.inventoryItems.map((item) => (
                 <div key={item.productId} style={{
                   display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                  padding: '5px 0', borderBottom: '1px dashed #f0f0f0',
+                  padding: '5px 0', borderBottom: '1px dashed #f0f0f0', gap: 8,
                 }}>
-                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text.primary }}>
+                  <span style={{ fontSize: 12, fontWeight: 500, color: colors.text.primary, flex: 1 }}>
                     {item.productName}
                   </span>
-                  <span style={{ fontSize: 12, color: colors.text.placeholder, marginLeft: 12, whiteSpace: 'nowrap' }}>
+                  <span style={{ fontSize: 12, color: colors.text.placeholder, whiteSpace: 'nowrap' }}>
                     ×{item.quantityPerSession} {item.productUom}
                   </span>
                 </div>
@@ -419,6 +418,15 @@ export default function AdminMasterServicesPage() {
             </Popover>
           );
         },
+      },
+      {
+        title: 'Sessions',
+        key: 'sessions',
+        width: 90,
+        align: 'center' as const,
+        render: (_: unknown, row: AdminService) => (
+          <Tag color="purple">{row.sessions ?? 1}</Tag>
+        ),
       },
       {
         title: 'Created By',
@@ -498,6 +506,7 @@ export default function AdminMasterServicesPage() {
                 taxPercent: row.taxPercent !== undefined ? Number(row.taxPercent) : 0,
                 hasMeasurements: false,
                 hasComplementary: false,
+                sessions: 1,
                 taxType: 'exclusive',
                 isActive: true,
               };
@@ -569,6 +578,7 @@ export default function AdminMasterServicesPage() {
       </Card>
 
       <Modal
+        key={editing?.id ?? 'new'}
         title={editing ? 'Edit Service' : 'Add Service'}
         open={modalOpen}
         onCancel={() => { setModalOpen(false); setEditing(null); }}
@@ -756,101 +766,94 @@ export default function AdminMasterServicesPage() {
             </Col>
           </Row>
 
-          {/* Inventory mapping — edit mode only */}
-          {editing && (
-            <>
-              <Divider orientation="left" style={{ fontSize: 13, marginTop: 8 }}>
-                Inventory Consumed Per Session
-              </Divider>
-              <Form.List name="inventoryItems">
-                {(fields, { add, remove: removeField }) => (
-                  <div style={{ overflowX: 'auto' }}>
-                    {/* Header row */}
-                    <div style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 112px 132px 36px',
-                      gap: 8,
-                      padding: '0 0 6px',
-                      borderBottom: '1px solid #f0f0f0',
-                      marginBottom: 6,
-                    }}>
-                      <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>PRODUCT</Text>
-                      <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>QTY / SESSION</Text>
-                      <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>LOW STOCK LEVEL</Text>
-                      <span />
-                    </div>
+          <Row gutter={12}>
+            <Col span={8}>
+              <Form.Item
+                label="Sessions"
+                name="sessions"
+                rules={[{ required: true, message: 'Required' }]}
+              >
+                <InputNumber min={1} style={{ width: '100%' }} placeholder="1" />
+              </Form.Item>
+            </Col>
+          </Row>
 
-                    {/* Data rows */}
-                    {fields.map(({ key, name, ...restField }) => (
-                      <div key={key} style={{
-                        display: 'grid',
-                        gridTemplateColumns: '1fr 112px 132px 36px',
-                        gap: 8,
-                        alignItems: 'flex-start',
-                        marginBottom: 4,
-                      }}>
-                        <Form.Item
-                          {...restField}
-                          name={[name, 'productId']}
-                          rules={[{ required: true, message: 'Select product' }]}
-                          style={{ marginBottom: 0 }}
-                        >
-                          <Select
-                            showSearch
-                            placeholder="Select product"
-                            options={productSelectOptions}
-                            filterOption={(input, opt) =>
-                              (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
-                            }
-                          />
-                        </Form.Item>
+          <Divider orientation="left" style={{ fontSize: 13, marginTop: 8 }}>
+            Inventory Consumed Per Session
+          </Divider>
+          <Form.List name="inventoryItems">
+            {(fields, { add, remove: removeField }) => (
+              <div style={{ overflowX: 'auto' }}>
+                <div style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 100px 36px',
+                  gap: 8,
+                  padding: '0 0 6px',
+                  borderBottom: '1px solid #f0f0f0',
+                  marginBottom: 6,
+                }}>
+                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>PRODUCT</Text>
+                  <Text style={{ fontSize: 11, color: colors.text.placeholder, fontWeight: 600 }}>USAGE</Text>
+                  <span />
+                </div>
 
-                        <Form.Item
-                          {...restField}
-                          name={[name, 'quantityPerSession']}
-                          rules={[{ required: true, message: 'Required' }]}
-                          style={{ marginBottom: 0 }}
-                        >
-                          <InputNumber min={1} style={{ width: '100%' }} placeholder="e.g. 30" />
-                        </Form.Item>
-
-                        <Form.Item
-                          {...restField}
-                          name={[name, 'lowStockThreshold']}
-                          style={{ marginBottom: 0 }}
-                        >
-                          <InputNumber min={0} style={{ width: '100%' }} placeholder="e.g. 100" />
-                        </Form.Item>
-
-                        <div style={{ paddingTop: 4 }}>
-                          <Button
-                            type="text"
-                            danger
-                            icon={<MinusCircleOutlined />}
-                            onClick={() => removeField(name)}
-                            style={{ padding: '4px 6px' }}
-                          />
-                        </div>
-                      </div>
-                    ))}
-
-                    <Button
-                      type="dashed"
-                      onClick={() => add({ quantityPerSession: 1 })}
-                      icon={<PlusOutlined />}
-                      size="small"
-                      style={{ marginTop: 4, marginBottom: 8 }}
+                {fields.map(({ key, name, ...restField }) => (
+                  <div key={key} style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 100px 36px',
+                    gap: 8,
+                    alignItems: 'flex-start',
+                    marginBottom: 4,
+                  }}>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'productId']}
+                      rules={[{ required: true, message: 'Select product' }]}
+                      style={{ marginBottom: 0 }}
                     >
-                      Add Inventory Item
-                    </Button>
-                    <div style={{ fontSize: 11, color: '#888', marginBottom: 4 }}>
-                      Qty/Session: units consumed per service session. Low Stock Level: warn when on-hand falls to or below this number.
+                      <Select
+                        showSearch
+                        placeholder="Select product"
+                        options={productSelectOptions}
+                        filterOption={(input, opt) =>
+                          (opt?.label ?? '').toLowerCase().includes(input.toLowerCase())
+                        }
+                      />
+                    </Form.Item>
+
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'quantityPerSession']}
+                      rules={[{ required: true, message: 'Required' }]}
+                      style={{ marginBottom: 0 }}
+                    >
+                      <InputNumber min={0.01} step={0.5} style={{ width: '100%' }} placeholder="e.g. 100" />
+                    </Form.Item>
+
+                    <div style={{ paddingTop: 4 }}>
+                      <Button
+                        type="text"
+                        danger
+                        icon={<MinusCircleOutlined />}
+                        onClick={() => removeField(name)}
+                        style={{ padding: '4px 6px' }}
+                      />
                     </div>
                   </div>
-                )}
-              </Form.List>
-            </>
-          )}
+                ))}
+
+                <Button
+                  type="dashed"
+                  onClick={() => add({ quantityPerSession: 1 })}
+                  icon={<PlusOutlined />}
+                  size="small"
+                  style={{ marginTop: 4, marginBottom: 8 }}
+                >
+                  Add Product
+                </Button>
+              </div>
+            )}
+          </Form.List>
 
           <Form.Item label="Status" name="isActive" valuePropName="checked">
             <Switch checkedChildren="Active" unCheckedChildren="Inactive" />

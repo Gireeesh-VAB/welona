@@ -1,17 +1,10 @@
 import { db } from '@/lib/db';
-import { route, parseQuery } from '@/lib/api/handler';
-import { ok } from '@/lib/api/response';
+import { route, parseBody, parseQuery } from '@/lib/api/handler';
+import { ok, created } from '@/lib/api/response';
 import { requireAdminAuth } from '@/lib/auth/service';
 import { resolveOrgId } from '@/lib/org';
-import { masterOptionQuerySchema } from '@shared/schemas/sales';
+import { masterOptionCreateSchema, masterOptionQuerySchema } from '@shared/schemas/sales';
 
-/**
- * GET /api/v1/admin/master-options?kind= — configurable dropdown lists
- * (enquiry type, media, call type) for admin + branch sessions.
- *
- * Org-wide reference data used by the admin enquiry/lead forms. Read-only;
- * options are managed on the employee side.
- */
 export const GET = route(async (req) => {
   requireAdminAuth(req);
   const orgId = await resolveOrgId();
@@ -22,4 +15,15 @@ export const GET = route(async (req) => {
     orderBy: [{ sortOrder: 'asc' }, { label: 'asc' }],
   });
   return ok(options);
+});
+
+export const POST = route(async (req) => {
+  requireAdminAuth(req);
+  const orgId = await resolveOrgId();
+  const body = await parseBody(req, masterOptionCreateSchema);
+
+  const option = await db.masterOption.create({
+    data: { orgId, kind: body.kind, label: body.label, sortOrder: body.sortOrder ?? 0 },
+  });
+  return created(option);
 });

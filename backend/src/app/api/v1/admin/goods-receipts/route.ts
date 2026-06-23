@@ -78,7 +78,7 @@ export const POST = route(async (req) => {
     db.branch.findUnique({ where: { id: branchId }, select: { id: true } }),
     db.product.findMany({
       where: { id: { in: body.items.map((i) => i.productId) } },
-      select: { id: true, isActive: true, trackBatches: true, name: true },
+      select: { id: true, isActive: true, trackBatches: true, name: true, unitsPerPurchase: true, consumptionUom: true, uom: true },
     }),
   ]);
   if (!branch) throw Errors.notFound('Branch');
@@ -115,6 +115,10 @@ export const POST = route(async (req) => {
     // Raise stock: per line — capture batch (if tracked), GRN item, stock, movement.
     for (const it of body.items) {
       const product = productMap.get(it.productId);
+      const unitsPerPurchase = product?.unitsPerPurchase ?? 1;
+      const consumptionUom = (product as any)?.consumptionUom ?? null;
+      const isConsumable = !!(consumptionUom) && unitsPerPurchase > 1;
+
       let batchId: string | null = null;
       if (product?.trackBatches && it.batchNo) {
         batchId = await receiveBatchStock(tx, {
@@ -128,27 +132,62 @@ export const POST = route(async (req) => {
           quantity: it.quantity,
         });
       }
+
+      // GRN item records the received purchase-unit quantity (for the audit document).
       await tx.goodsReceiptItem.create({
         data: { grnId: createdGrn.id, productId: it.productId, quantity: it.quantity, batchId },
       });
-      await tx.inventoryStock.upsert({
-        where: { warehouseId_productId: { warehouseId, productId: it.productId } },
-        create: { branchId, warehouseId, productId: it.productId, quantity: it.quantity },
-        update: { quantity: { increment: it.quantity } },
-      });
-      await tx.inventoryMovement.create({
-        data: {
-          branchId,
-          warehouseId,
-          productId: it.productId,
-          batchId,
-          type: 'purchase',
-          delta: it.quantity,
-          reason: 'Goods receipt',
-          ref: number,
-          createdByAdminId,
-        },
-      });
+
+      if (isConsumable) {
+        // Consumable products: stock stays in purchase units; create one ConsumableUnit per received unit.
+        await tx.inventoryStock.upsert({
+          where: { warehouseId_productId: { warehouseId, productId: it.productId } },
+          create: { branchId, warehouseId, productId: it.productId, quantity: it.quantity },
+          update: { quantity: { increment: it.quantity } },
+        });
+        await tx.inventoryMovement.create({
+          data: {
+            branchId, warehouseId, productId: it.productId, batchId,
+            type: 'purchase',
+            delta: it.quantity,
+            reason: `Goods receipt (${it.quantity} ${product?.uom ?? 'unit'}${it.quantity !== 1 ? 's' : ''} — FIFO tracked)`,
+            ref: number,
+            createdByAdminId,
+          },
+        });
+        // Create one ConsumableUnit record per received purchase unit (FIFO).
+        for (let i = 0; i < it.quantity; i++) {
+          await (tx as any).consumableUnit.create({
+            data: {
+              orgId,
+              productId: it.productId,
+              branchId,
+              warehouseId,
+              grnId: createdGrn.id,
+              totalCapacity: unitsPerPurchase,
+              usedQuantity: 0,
+              status: 'sealed',
+            },
+          });
+        }
+      } else {
+        // Non-consumable products: stock in purchase units, direct deduction per session.
+        await tx.inventoryStock.upsert({
+          where: { warehouseId_productId: { warehouseId, productId: it.productId } },
+          create: { branchId, warehouseId, productId: it.productId, quantity: it.quantity },
+          update: { quantity: { increment: it.quantity } },
+        });
+        await tx.inventoryMovement.create({
+          data: {
+            branchId, warehouseId, productId: it.productId, batchId,
+            type: 'purchase',
+            delta: it.quantity,
+            reason: 'Goods receipt',
+            ref: number,
+            createdByAdminId,
+          },
+        });
+      }
     }
 
     // If against a PO, bump received quantities + recompute status.
@@ -169,6 +208,14 @@ export const POST = route(async (req) => {
         where: { id: po.id },
         data: { status: allReceived ? 'received' : anyReceived ? 'partially_received' : po.status },
       });
+
+      // Auto-fulfill any indents linked to this PO when fully received
+      if (allReceived) {
+        await tx.stockIndent.updateMany({
+          where: { poId: po.id, status: 'ordered' },
+          data: { status: 'fulfilled' },
+        });
+      }
     }
 
     return tx.goodsReceipt.findUniqueOrThrow({

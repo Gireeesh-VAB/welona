@@ -45,6 +45,7 @@ export const adminSupplierUpdateSchema = adminSupplierCreateSchema.partial();
 export const adminSupplierListQuerySchema = z.object({
   search: z.string().trim().optional(),
   active: z.enum(['all', 'active', 'inactive']).default('all'),
+  productId: z.string().optional(),
   page: z.coerce.number().int().positive().default(1),
   limit: z.coerce.number().int().positive().max(200).default(20),
 });

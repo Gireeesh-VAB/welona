@@ -6,8 +6,6 @@ import {
   Button,
   Card,
   Col,
-  DatePicker,
-  Drawer,
   Form,
   Input,
   InputNumber,
@@ -22,21 +20,18 @@ import {
   Tooltip,
   Typography,
 } from 'antd';
-import dayjs from 'dayjs';
 import {
   DeleteOutlined,
-  DownloadOutlined,
   EyeOutlined,
   PlusOutlined,
   SearchOutlined,
 } from '@ant-design/icons';
+import { useRouter } from 'next/navigation';
 import type { ColumnsType, TablePaginationConfig } from 'antd/es/table';
 import {
   usePurchaseOrders,
-  usePurchaseOrder,
   useCreatePurchaseOrder,
   useDeletePurchaseOrder,
-  useCreateGoodsReceipt,
 } from '@/hooks/usePurchaseOrders';
 import { useSuppliers } from '@/hooks/useSuppliers';
 import { useProducts } from '@/hooks/useProducts';
@@ -79,7 +74,6 @@ interface POItemForm {
   taxPercent?: number;
 }
 interface POForm {
-  branchId?: string;
   supplierId?: string;
   notes?: string;
   items: POItemForm[];
@@ -87,6 +81,7 @@ interface POForm {
 
 export default function AdminPurchaseOrdersPage() {
   const colors = useBrandColors();
+  const router = useRouter();
   const navItem = getAdminNavItem('inventory-purchase-orders')!;
   const { message } = App.useApp();
 
@@ -114,14 +109,8 @@ export default function AdminPurchaseOrdersPage() {
     () => (productsData?.items ?? []).map((p) => ({ value: p.id, label: `${p.name} (${p.sku})`, purchasePrice: p.purchasePrice, taxPercent: p.taxPercent })),
     [productsData],
   );
-  const branchOptions = useMemo(
-    () => (branchesData?.items ?? []).map((b) => ({ value: b.id, label: `${b.branchName} (${b.branchCode})` })),
-    [branchesData],
-  );
-
   const createPO = useCreatePurchaseOrder();
   const deletePO = useDeletePurchaseOrder();
-  const createGRN = useCreateGoodsReceipt();
 
   const fail = (err: unknown, fb: string) =>
     message.error(err instanceof ApiClientError ? err.message : fb);
@@ -149,8 +138,13 @@ export default function AdminPurchaseOrdersPage() {
       message.error('Add at least one line item with a product and quantity');
       return;
     }
+    const defaultBranchId = branchesData?.items?.[0]?.id;
+    if (!defaultBranchId) {
+      message.error('No branch found. Please configure a branch first.');
+      return;
+    }
     const body: AdminPurchaseOrderCreateInput = {
-      branchId: values.branchId as string,
+      branchId: defaultBranchId,
       supplierId: values.supplierId as string,
       notes: values.notes?.trim() || undefined,
       items,
@@ -161,51 +155,6 @@ export default function AdminPurchaseOrdersPage() {
       setCreateOpen(false);
     } catch (err) {
       fail(err, 'Could not create purchase order');
-    }
-  };
-
-  // ---- Detail / receive drawer ----
-  const [activeId, setActiveId] = useState<string | null>(null);
-  const { data: activePO } = usePurchaseOrder(activeId);
-  const [receiveQty, setReceiveQty] = useState<Record<string, number>>({});
-  // Batch number + expiry per product, for batch-tracked lines.
-  const [receiveBatch, setReceiveBatch] = useState<Record<string, { batchNo?: string; expiryDate?: string }>>({});
-
-  const openDetail = (id: string) => {
-    setReceiveQty({});
-    setReceiveBatch({});
-    setActiveId(id);
-  };
-
-  const onReceive = async () => {
-    if (!activePO) return;
-    const trackedByProduct = new Map(activePO.items.map((it) => [it.product.id, it.product.trackBatches]));
-    const items = Object.entries(receiveQty)
-      .filter(([, q]) => q > 0)
-      .map(([productId, quantity]) => ({
-        productId,
-        quantity,
-        batchNo: receiveBatch[productId]?.batchNo,
-        expiryDate: receiveBatch[productId]?.expiryDate,
-      }));
-    if (items.length === 0) {
-      message.warning('Enter a quantity to receive');
-      return;
-    }
-    // Require a batch number for batch-tracked products being received.
-    const missing = items.find((i) => trackedByProduct.get(i.productId) && !i.batchNo?.trim());
-    if (missing) {
-      message.error('Enter a batch number for batch-tracked products.');
-      return;
-    }
-    try {
-      await createGRN.mutateAsync({ poId: activePO.id, items });
-      message.success('Goods received — stock updated');
-      setReceiveQty({});
-      setReceiveBatch({});
-      setActiveId(null);
-    } catch (err) {
-      fail(err, 'Could not receive goods');
     }
   };
 
@@ -280,7 +229,7 @@ export default function AdminPurchaseOrdersPage() {
       render: (_v, po) => (
         <Space size={4}>
           <Tooltip title="View / receive">
-            <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => openDetail(po.id)} />
+            <Button size="small" type="text" icon={<EyeOutlined />} onClick={() => router.push(`/admin/inventory/purchase-orders/${po.id}`)} />
           </Tooltip>
           {(po.status === 'draft' || po.status === 'cancelled') && (
             <Popconfirm
@@ -383,20 +332,10 @@ export default function AdminPurchaseOrdersPage() {
         destroyOnClose
       >
         <Form<POForm> form={form} layout="vertical" onFinish={onCreate} requiredMark={false}>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item label="Branch" name="branchId" rules={[{ required: true, message: 'Select a branch' }]}>
-                <Select showSearch placeholder="Pick a branch" options={branchOptions}
-                  filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item label="Supplier" name="supplierId" rules={[{ required: true, message: 'Select a supplier' }]}>
-                <Select showSearch placeholder="Pick a supplier" options={supplierOptions}
-                  filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
-              </Form.Item>
-            </Col>
-          </Row>
+          <Form.Item label="Supplier" name="supplierId" rules={[{ required: true, message: 'Select a supplier' }]}>
+            <Select showSearch placeholder="Pick a supplier" options={supplierOptions}
+              filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())} />
+          </Form.Item>
 
           <Form.List name="items">
             {(fields, { add, remove }) => (
@@ -457,98 +396,6 @@ export default function AdminPurchaseOrdersPage() {
         </Form>
       </Modal>
 
-      {/* ---- Detail / receive drawer ---- */}
-      <Drawer
-        title={activePO ? `${activePO.number} — ${activePO.supplier.name}` : 'Purchase Order'}
-        open={Boolean(activeId)}
-        onClose={() => setActiveId(null)}
-        width={680}
-        extra={
-          activePO && activePO.status !== 'received' && activePO.status !== 'cancelled' ? (
-            <Button type="primary" icon={<DownloadOutlined />} loading={createGRN.isPending} onClick={onReceive}>
-              Receive entered qty
-            </Button>
-          ) : null
-        }
-      >
-        {activePO && (
-          <>
-            <Space size={16} style={{ marginBottom: 16 }} wrap>
-              <Tag color={STATUS_COLOR[activePO.status]}>{STATUS_LABEL[activePO.status]}</Tag>
-              <Text style={{ color: colors.text.placeholder }}>Branch: {activePO.branch.name}</Text>
-              <Text style={{ color: colors.text.placeholder }}>Total: {rupees(activePO.total)}</Text>
-            </Space>
-            <Table
-              rowKey={(r) => r.id}
-              size="small"
-              pagination={false}
-              dataSource={activePO.items}
-              columns={[
-                { title: 'Product', key: 'p', render: (_v, it) => (
-                  <div><div>{it.product.name}</div><Text code style={{ fontSize: 11 }}>{it.product.sku}</Text></div>
-                ) },
-                { title: 'Ordered', dataIndex: 'quantity', width: 80, align: 'center' },
-                { title: 'Received', dataIndex: 'quantityReceived', width: 90, align: 'center',
-                  render: (v: number, it) => (
-                    <Text style={{ color: v >= it.quantity ? colors.status.success : colors.text.primary }}>{v}</Text>
-                  ) },
-                {
-                  title: 'Receive now',
-                  key: 'recv',
-                  width: 110,
-                  render: (_v, it) => {
-                    const remaining = it.quantity - it.quantityReceived;
-                    const disabled = remaining <= 0 || activePO.status === 'received' || activePO.status === 'cancelled';
-                    return (
-                      <InputNumber
-                        min={0}
-                        max={remaining}
-                        disabled={disabled}
-                        value={receiveQty[it.product.id] ?? 0}
-                        onChange={(v) => setReceiveQty((m) => ({ ...m, [it.product.id]: Number(v ?? 0) }))}
-                        style={{ width: '100%' }}
-                      />
-                    );
-                  },
-                },
-                {
-                  title: 'Batch / expiry',
-                  key: 'batch',
-                  width: 220,
-                  render: (_v, it) =>
-                    it.product.trackBatches ? (
-                      <Space.Compact style={{ width: '100%' }}>
-                        <Input
-                          placeholder="Batch no."
-                          value={receiveBatch[it.product.id]?.batchNo ?? ''}
-                          onChange={(e) =>
-                            setReceiveBatch((m) => ({ ...m, [it.product.id]: { ...m[it.product.id], batchNo: e.target.value } }))
-                          }
-                          style={{ width: '55%' }}
-                        />
-                        <DatePicker
-                          placeholder="Expiry"
-                          value={receiveBatch[it.product.id]?.expiryDate ? dayjs(receiveBatch[it.product.id]!.expiryDate) : null}
-                          onChange={(d) =>
-                            setReceiveBatch((m) => ({ ...m, [it.product.id]: { ...m[it.product.id], expiryDate: d ? d.toISOString() : undefined } }))
-                          }
-                          style={{ width: '45%' }}
-                        />
-                      </Space.Compact>
-                    ) : (
-                      <Text style={{ color: colors.text.placeholder, fontSize: 11 }}>—</Text>
-                    ),
-                },
-              ]}
-            />
-            {activePO.notes && (
-              <div style={{ marginTop: 12 }}>
-                <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>Notes: {activePO.notes}</Text>
-              </div>
-            )}
-          </>
-        )}
-      </Drawer>
     </div>
   );
 }

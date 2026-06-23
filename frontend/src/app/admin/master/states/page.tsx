@@ -284,7 +284,7 @@ export default function AdminMasterStatesPage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="State Name"

@@ -4,6 +4,8 @@ export interface ServiceInventoryItem {
   productName: string;
   productUom: string;
   quantityPerSession: number;
+  /** 'collect_amount' = charged in billing; 'consume_only' = deducted from stock only */
+  chargeType: string;
   lowStockThreshold: number | null;
   sortOrder: number;
 }
@@ -23,6 +25,7 @@ export interface AdminService {
   taxType: string;
   hasMeasurements: boolean;
   hasComplementary: boolean;
+  sessions: number;
   isActive: boolean;
   inventoryItems: ServiceInventoryItem[];
   createdBy: { id: string; name: string; email: string } | null;

@@ -19,6 +19,7 @@ export const adminPurchaseOrderCreateSchema = z.object({
   expectedAt: z.string().datetime().optional().or(z.literal('').transform(() => undefined)),
   notes: z.string().trim().max(500).optional().or(z.literal('').transform(() => undefined)),
   items: z.array(poItemSchema).min(1, 'Add at least one line item'),
+  fromIndentIds: z.array(z.string().min(1)).optional(),
 });
 
 export const adminPurchaseOrderUpdateSchema = z.object({

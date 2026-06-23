@@ -18,11 +18,152 @@ export interface StockShortfall {
   available: number;
 }
 
+function effectiveUom(p: { uom: string; consumptionUom: string | null }): string {
+  return p.consumptionUom ?? p.uom;
+}
+
+function isConsumable(p: { consumptionUom: string | null; unitsPerPurchase: number }): boolean {
+  return !!(p.consumptionUom) && p.unitsPerPurchase > 1;
+}
+
 /**
- * Check whether the branch has enough stock for the given service lines.
- * Returns an array of shortfalls — empty means stock is sufficient.
- * Run BEFORE opening the write transaction so the user can be warned.
+ * FIFO deduction for a consumable product.
+ * Draws from the oldest open ConsumableUnit, spilling into the next sealed one if needed.
+ * When a unit is exhausted, InventoryStock decrements by 1 purchase unit.
  */
+async function applyConsumableUsage(
+  tx: Tx,
+  opts: {
+    productId: string;
+    branchId: string;
+    quantityUsed: number;
+    bookingId: string | null;
+    sessionRef: string | null;
+    force?: boolean;
+  },
+): Promise<void> {
+  const { productId, branchId, quantityUsed, bookingId, sessionRef, force } = opts;
+  let remaining = quantityUsed;
+
+  while (remaining > 0) {
+    // Find currently open unit (FIFO — oldest first).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let unit = await (tx as any).consumableUnit.findFirst({
+      where: { productId, branchId, status: 'open' },
+      orderBy: { createdAt: 'asc' },
+    });
+
+    if (!unit) {
+      // Open the oldest sealed unit.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const sealed = await (tx as any).consumableUnit.findFirst({
+        where: { productId, branchId, status: 'sealed' },
+        orderBy: { createdAt: 'asc' },
+      });
+      if (!sealed) {
+        if (force) break;
+        throw Errors.conflict(`No stock available for product (no consumable units remaining).`);
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      unit = await (tx as any).consumableUnit.update({
+        where: { id: sealed.id },
+        data: { status: 'open', openedAt: new Date() },
+      });
+    }
+
+    const unitRemaining = unit.totalCapacity - unit.usedQuantity;
+    const toDeduct = Math.min(remaining, unitRemaining);
+
+    if (toDeduct >= unitRemaining) {
+      // This unit is now exhausted.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (tx as any).consumableUnit.update({
+        where: { id: unit.id },
+        data: { usedQuantity: unit.totalCapacity, status: 'exhausted', exhaustedAt: new Date() },
+      });
+      // Decrement stock by 1 purchase unit.
+      await tx.inventoryStock.updateMany({
+        where: { warehouseId: unit.warehouseId, productId },
+        data: { quantity: { decrement: 1 } },
+      });
+      await tx.inventoryMovement.create({
+        data: {
+          branchId,
+          warehouseId: unit.warehouseId,
+          productId,
+          type: 'service_consumption',
+          delta: -1,
+          reason: `Consumable unit exhausted (${unit.totalCapacity} ${unit.totalCapacity === 1 ? 'unit' : 'units'} consumed)`,
+          ref: sessionRef,
+          createdByAdminId: null,
+        },
+      });
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (tx as any).consumableUnit.update({
+        where: { id: unit.id },
+        data: { usedQuantity: { increment: toDeduct } },
+      });
+    }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (tx as any).consumableUsageLog.create({
+      data: {
+        consumableUnitId: unit.id,
+        branchId,
+        bookingId,
+        sessionRef,
+        quantityUsed: toDeduct,
+      },
+    });
+
+    remaining -= toDeduct;
+  }
+}
+
+/**
+ * Reverse FIFO usage for a given sessionRef — used when a package session is un-completed.
+ * Finds all ConsumableUsageLog rows for this sessionRef and reverses them.
+ */
+async function reverseConsumableUsage(
+  tx: Tx,
+  opts: { productId: string; branchId: string; sessionRef: string },
+): Promise<void> {
+  const { productId, branchId, sessionRef } = opts;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const logs = await (tx as any).consumableUsageLog.findMany({
+    where: { branchId, sessionRef },
+    include: { consumableUnit: true },
+    orderBy: { createdAt: 'desc' },
+  });
+
+  for (const log of logs) {
+    if ((log.consumableUnit as any).productId !== productId) continue;
+    const unit = log.consumableUnit as any;
+    if (unit.status === 'exhausted') {
+      // Reopen the unit and restore stock.
+      await (tx as any).consumableUnit.update({
+        where: { id: unit.id },
+        data: {
+          usedQuantity: { decrement: log.quantityUsed },
+          status: 'open',
+          exhaustedAt: null,
+        },
+      });
+      await tx.inventoryStock.updateMany({
+        where: { warehouseId: unit.warehouseId, productId },
+        data: { quantity: { increment: 1 } },
+      });
+    } else {
+      await (tx as any).consumableUnit.update({
+        where: { id: unit.id },
+        data: { usedQuantity: { decrement: log.quantityUsed } },
+      });
+    }
+    await (tx as any).consumableUsageLog.delete({ where: { id: log.id } });
+  }
+}
+
 export async function checkServiceSessionStock(
   tx: Tx,
   opts: { branchId: string; orgId: string; lines: ServiceSessionLine[] },
@@ -40,7 +181,7 @@ export async function checkServiceSessionStock(
         select: {
           productId: true,
           quantityPerSession: true,
-          product: { select: { name: true, uom: true } },
+          product: { select: { name: true, uom: true, consumptionUom: true, unitsPerPurchase: true } },
         },
       },
     },
@@ -50,8 +191,10 @@ export async function checkServiceSessionStock(
 
   const serviceMap = new Map(services.map((s) => [s.name, s]));
 
-  // Aggregate required qty per product across all service lines.
-  const required = new Map<string, { name: string; uom: string; qty: number }>();
+  const required = new Map<
+    string,
+    { name: string; uom: string; qty: number; consumable: boolean }
+  >();
   for (const line of lines) {
     const svc = serviceMap.get(line.serviceName);
     if (!svc || svc.inventoryItems.length === 0) continue;
@@ -61,45 +204,60 @@ export async function checkServiceSessionStock(
       if (existing) {
         existing.qty += total;
       } else {
-        required.set(item.productId, { name: item.product.name, uom: item.product.uom, qty: total });
+        required.set(item.productId, {
+          name: item.product.name,
+          uom: effectiveUom(item.product as any),
+          qty: total,
+          consumable: isConsumable(item.product as any),
+        });
       }
     }
   }
 
   if (required.size === 0) return [];
 
-  // Try to find branch warehouse — if none, skip check (no stock configured).
   const wh =
     (await tx.warehouse.findFirst({ where: { branchId, isDefault: true }, select: { id: true } })) ??
     (await tx.warehouse.findFirst({ where: { branchId, isActive: true }, select: { id: true } }));
   if (!wh) return [];
 
-  const productIds = [...required.keys()];
-  const stocks = await tx.inventoryStock.findMany({
-    where: { warehouseId: wh.id, productId: { in: productIds } },
-    select: { productId: true, quantity: true },
-  });
-  const stockMap = new Map(stocks.map((s) => [s.productId, s.quantity]));
-
   const shortfalls: StockShortfall[] = [];
-  for (const [productId, { name, uom, qty }] of required) {
-    const available = stockMap.get(productId) ?? 0;
-    if (available < qty) {
-      shortfalls.push({ productId, productName: name, productUom: uom, required: qty, available });
+
+  for (const [productId, { name, uom, qty, consumable }] of required) {
+    if (consumable) {
+      // Available = sum of remaining capacity across open/sealed units.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const units = await (tx as any).consumableUnit.findMany({
+        where: { productId, branchId, status: { in: ['sealed', 'open'] } },
+        select: { totalCapacity: true, usedQuantity: true },
+      });
+      const available = (units as any[]).reduce(
+        (sum: number, u: any) => sum + (u.totalCapacity - u.usedQuantity),
+        0,
+      );
+      if (available < qty) {
+        shortfalls.push({ productId, productName: name, productUom: uom, required: qty, available });
+      }
+    } else {
+      const stock = await tx.inventoryStock.findFirst({
+        where: { warehouseId: wh.id, productId },
+        select: { quantity: true },
+      });
+      const available = stock?.quantity ?? 0;
+      if (available < qty) {
+        shortfalls.push({ productId, productName: name, productUom: uom, required: qty, available });
+      }
     }
   }
+
   return shortfalls;
 }
 
-/**
- * Deduct inventory for all service lines in a completed booking.
- * Must be called INSIDE a write transaction after the Booking row is created.
- */
 export async function applyServiceSessionStock(
   tx: Tx,
-  opts: { branchId: string; orgId: string; bookingRef: string; lines: ServiceSessionLine[] },
+  opts: { branchId: string; orgId: string; bookingRef: string; lines: ServiceSessionLine[]; force?: boolean },
 ): Promise<void> {
-  const { branchId, bookingRef, lines } = opts;
+  const { branchId, bookingRef, lines, force } = opts;
   if (lines.length === 0) return;
 
   const serviceNames = [...new Set(lines.map((l) => l.serviceName))];
@@ -112,7 +270,7 @@ export async function applyServiceSessionStock(
         select: {
           productId: true,
           quantityPerSession: true,
-          product: { select: { id: true, trackBatches: true } },
+          product: { select: { id: true, trackBatches: true, consumptionUom: true, unitsPerPurchase: true } },
         },
       },
     },
@@ -120,7 +278,10 @@ export async function applyServiceSessionStock(
 
   const serviceMap = new Map(services.map((s) => [s.name, s]));
 
-  const toDeduct = new Map<string, { qty: number; trackBatches: boolean }>();
+  const toDeduct = new Map<
+    string,
+    { qty: number; trackBatches: boolean; consumable: boolean }
+  >();
   for (const line of lines) {
     const svc = serviceMap.get(line.serviceName);
     if (!svc || svc.inventoryItems.length === 0) continue;
@@ -130,7 +291,11 @@ export async function applyServiceSessionStock(
       if (existing) {
         existing.qty += total;
       } else {
-        toDeduct.set(item.productId, { qty: total, trackBatches: item.product.trackBatches });
+        toDeduct.set(item.productId, {
+          qty: total,
+          trackBatches: item.product.trackBatches,
+          consumable: isConsumable(item.product as any),
+        });
       }
     }
   }
@@ -139,45 +304,50 @@ export async function applyServiceSessionStock(
 
   const warehouseId = await getDefaultWarehouseId(tx, branchId);
 
-  for (const [productId, { qty, trackBatches }] of toDeduct) {
-    // Ensure the stock row exists, then atomically decrement.
-    await tx.inventoryStock.upsert({
-      where: { warehouseId_productId: { warehouseId, productId } },
-      create: { branchId, warehouseId, productId, quantity: 0 },
-      update: {},
-    });
-    const updated = await tx.inventoryStock.update({
-      where: { warehouseId_productId: { warehouseId, productId } },
-      data: { quantity: { decrement: qty } },
-    });
-    if (updated.quantity < 0) {
-      throw Errors.conflict(
-        `Insufficient stock: required ${qty}, available ${updated.quantity + qty}.`,
-      );
-    }
-    if (trackBatches) {
-      await depleteBatchStockFEFO(tx, { productId, warehouseId, quantity: qty });
-    }
-    await tx.inventoryMovement.create({
-      data: {
-        branchId,
-        warehouseId,
+  for (const [productId, { qty, trackBatches, consumable }] of toDeduct) {
+    if (consumable) {
+      await applyConsumableUsage(tx, {
         productId,
-        type: 'service_consumption',
-        delta: -qty,
-        reason: 'Service booking consumption',
-        ref: bookingRef,
-        createdByAdminId: null,
-      },
-    });
+        branchId,
+        quantityUsed: qty,
+        bookingId: bookingRef,
+        sessionRef: bookingRef,
+        force,
+      });
+    } else {
+      await tx.inventoryStock.upsert({
+        where: { warehouseId_productId: { warehouseId, productId } },
+        create: { branchId, warehouseId, productId, quantity: 0 },
+        update: {},
+      });
+      const updated = await tx.inventoryStock.update({
+        where: { warehouseId_productId: { warehouseId, productId } },
+        data: { quantity: { decrement: qty } },
+      });
+      if (updated.quantity < 0 && !force) {
+        throw Errors.conflict(
+          `Insufficient stock: required ${qty}, available ${updated.quantity + qty}.`,
+        );
+      }
+      if (trackBatches) {
+        await depleteBatchStockFEFO(tx, { productId, warehouseId, quantity: qty, force: true });
+      }
+      await tx.inventoryMovement.create({
+        data: {
+          branchId,
+          warehouseId,
+          productId,
+          type: 'service_consumption',
+          delta: -qty,
+          reason: 'Service booking consumption',
+          ref: bookingRef,
+          createdByAdminId: null,
+        },
+      });
+    }
   }
 }
 
-/**
- * Deduct (or restore) inventory for a list of service IDs — used when a
- * package session is completed or un-completed. Each service contributes 1
- * session's worth of inventory items.
- */
 export async function applyServiceSessionStockByIds(
   tx: Tx,
   opts: {
@@ -185,9 +355,10 @@ export async function applyServiceSessionStockByIds(
     ref: string;
     serviceIds: string[];
     reverse?: boolean;
+    force?: boolean;
   },
 ): Promise<void> {
-  const { branchId, ref, serviceIds, reverse = false } = opts;
+  const { branchId, ref, serviceIds, reverse = false, force = false } = opts;
   if (serviceIds.length === 0 || !branchId) return;
 
   const services = await tx.service.findMany({
@@ -198,13 +369,16 @@ export async function applyServiceSessionStockByIds(
         select: {
           productId: true,
           quantityPerSession: true,
-          product: { select: { id: true, trackBatches: true } },
+          product: { select: { id: true, trackBatches: true, consumptionUom: true, unitsPerPurchase: true } },
         },
       },
     },
   });
 
-  const toDeduct = new Map<string, { qty: number; trackBatches: boolean }>();
+  const toDeduct = new Map<
+    string,
+    { qty: number; trackBatches: boolean; consumable: boolean }
+  >();
   for (const svc of services) {
     for (const item of svc.inventoryItems) {
       const existing = toDeduct.get(item.productId);
@@ -214,6 +388,7 @@ export async function applyServiceSessionStockByIds(
         toDeduct.set(item.productId, {
           qty: item.quantityPerSession,
           trackBatches: item.product.trackBatches,
+          consumable: isConsumable(item.product as any),
         });
       }
     }
@@ -222,44 +397,59 @@ export async function applyServiceSessionStockByIds(
 
   const warehouseId = await getDefaultWarehouseId(tx, branchId);
 
-  for (const [productId, { qty, trackBatches }] of toDeduct) {
-    await tx.inventoryStock.upsert({
-      where: { warehouseId_productId: { warehouseId, productId } },
-      create: { branchId, warehouseId, productId, quantity: 0 },
-      update: {},
-    });
-
-    if (reverse) {
-      await tx.inventoryStock.update({
-        where: { warehouseId_productId: { warehouseId, productId } },
-        data: { quantity: { increment: qty } },
-      });
+  for (const [productId, { qty, trackBatches, consumable }] of toDeduct) {
+    if (consumable) {
+      if (reverse) {
+        await reverseConsumableUsage(tx, { productId, branchId, sessionRef: ref });
+      } else {
+        await applyConsumableUsage(tx, {
+          productId,
+          branchId,
+          quantityUsed: qty,
+          bookingId: null,
+          sessionRef: ref,
+          force,
+        });
+      }
     } else {
-      const updated = await tx.inventoryStock.update({
+      await tx.inventoryStock.upsert({
         where: { warehouseId_productId: { warehouseId, productId } },
-        data: { quantity: { decrement: qty } },
+        create: { branchId, warehouseId, productId, quantity: 0 },
+        update: {},
       });
-      if (updated.quantity < 0) {
-        throw Errors.conflict(
-          `Insufficient stock: required ${qty}, available ${updated.quantity + qty}.`,
-        );
-      }
-      if (trackBatches) {
-        await depleteBatchStockFEFO(tx, { productId, warehouseId, quantity: qty });
-      }
-    }
 
-    await tx.inventoryMovement.create({
-      data: {
-        branchId,
-        warehouseId,
-        productId,
-        type: 'service_consumption',
-        delta: reverse ? qty : -qty,
-        reason: reverse ? 'Package session reversal' : 'Package session consumption',
-        ref,
-        createdByAdminId: null,
-      },
-    });
+      if (reverse) {
+        await tx.inventoryStock.update({
+          where: { warehouseId_productId: { warehouseId, productId } },
+          data: { quantity: { increment: qty } },
+        });
+      } else {
+        const updated = await tx.inventoryStock.update({
+          where: { warehouseId_productId: { warehouseId, productId } },
+          data: { quantity: { decrement: qty } },
+        });
+        if (updated.quantity < 0 && !force) {
+          throw Errors.conflict(
+            `Insufficient stock: required ${qty}, available ${updated.quantity + qty}.`,
+          );
+        }
+        if (trackBatches) {
+          await depleteBatchStockFEFO(tx, { productId, warehouseId, quantity: qty, force: true });
+        }
+      }
+
+      await tx.inventoryMovement.create({
+        data: {
+          branchId,
+          warehouseId,
+          productId,
+          type: 'service_consumption',
+          delta: reverse ? qty : -qty,
+          reason: reverse ? 'Package session reversal' : 'Package session consumption',
+          ref,
+          createdByAdminId: null,
+        },
+      });
+    }
   }
 }

@@ -7,6 +7,6 @@ export function usePackageSessionMasters(enabled = true) {
     queryKey: ['package-session-masters'],
     queryFn:  () => api.get<PackageSessionMasterOption[]>('/package-session-masters'),
     enabled,
-    staleTime: 60_000,
+    staleTime: 0,
   });
 }

@@ -77,14 +77,16 @@ export async function issueSession(staff: StaffWithRelations) {
   const accessToken = signAccessToken(buildClaims(staff));
   const refreshToken = randomBytes(48).toString('hex');
 
-  await db.refreshToken.create({
-    data: {
-      staffId: staff.id,
-      token: refreshToken,
-      expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
-    },
-  });
-  await db.staff.update({ where: { id: staff.id }, data: { lastLoginAt: new Date() } });
+  await Promise.all([
+    db.refreshToken.create({
+      data: {
+        staffId: staff.id,
+        token: refreshToken,
+        expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
+      },
+    }),
+    db.staff.update({ where: { id: staff.id }, data: { lastLoginAt: new Date() } }),
+  ]);
 
   return { accessToken, refreshToken, user: toAuthUser(staff) };
 }
@@ -250,14 +252,16 @@ export async function issueAdminSession(admin: AdminUser) {
   const accessToken = signAccessToken(buildAdminClaims(admin));
   const refreshToken = randomBytes(48).toString('hex');
 
-  await db.adminRefreshToken.create({
-    data: {
-      adminId: admin.id,
-      token: refreshToken,
-      expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
-    },
-  });
-  await db.adminUser.update({ where: { id: admin.id }, data: { lastLoginAt: new Date() } });
+  await Promise.all([
+    db.adminRefreshToken.create({
+      data: {
+        adminId: admin.id,
+        token: refreshToken,
+        expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
+      },
+    }),
+    db.adminUser.update({ where: { id: admin.id }, data: { lastLoginAt: new Date() } }),
+  ]);
 
   return { accessToken, refreshToken, user: toAdminAuthUser(admin) };
 }
@@ -363,14 +367,16 @@ export async function issueSystemSession(su: SystemUserWithRelations) {
   const accessToken = signAccessToken(buildSystemUserClaims(su));
   const refreshToken = randomBytes(48).toString('hex');
 
-  await db.systemRefreshToken.create({
-    data: {
-      systemUserId: su.id,
-      token: refreshToken,
-      expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
-    },
-  });
-  await db.systemUser.update({ where: { id: su.id }, data: { lastLoginAt: new Date() } });
+  await Promise.all([
+    db.systemRefreshToken.create({
+      data: {
+        systemUserId: su.id,
+        token: refreshToken,
+        expiresAt: new Date(Date.now() + REFRESH_TTL_SEC * 1000),
+      },
+    }),
+    db.systemUser.update({ where: { id: su.id }, data: { lastLoginAt: new Date() } }),
+  ]);
 
   return { accessToken, refreshToken, user: toSystemAuthUser(su) };
 }

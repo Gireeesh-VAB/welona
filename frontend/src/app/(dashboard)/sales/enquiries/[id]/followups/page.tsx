@@ -14,10 +14,11 @@ import {
   Spin,
   Typography,
 } from 'antd';
-import { ArrowLeftOutlined, SaveOutlined } from '@ant-design/icons';
+import { ArrowLeftOutlined, SaveOutlined, UserOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
-import { useLead, useFollowUps, useCreateFollowUp, useSalespeople } from '@/hooks/useSales';
+import { useLead, useFollowUps, useCreateFollowUp, useConvertLeadToCustomer, useSalespeople } from '@/hooks/useSales';
 import SalesNav from '@/components/sales/SalesNav';
+import EnquiryStats from '@/components/sales/EnquiryStats';
 import StatusTag from '@/components/sales/StatusTag';
 import FollowUpTimeline from '@/components/sales/FollowUpTimeline';
 import { ApiClientError } from '@/lib/api-client';
@@ -41,6 +42,7 @@ export default function EnquiryFollowUpsPage() {
   const { data: followUps, isLoading: fuLoading } = useFollowUps(id);
   const { data: salespeople } = useSalespeople();
   const createFollowUp = useCreateFollowUp();
+  const convertToCustomer = useConvertLeadToCustomer();
 
   const [form] = Form.useForm();
   const autoCreated = useRef(false);
@@ -67,6 +69,16 @@ export default function EnquiryFollowUpsPage() {
 
   const fail = (e: unknown, fallback: string) =>
     message.error(e instanceof ApiClientError ? e.message : fallback);
+
+  const convertCustomer = async () => {
+    try {
+      const customer = await convertToCustomer.mutateAsync(id);
+      message.success('Customer profile created');
+      router.push(`/customers/${customer.id}`);
+    } catch (e) {
+      fail(e, 'Could not convert to customer');
+    }
+  };
 
   const addFollowUp = async () => {
     const v = await form.validateFields();
@@ -102,6 +114,8 @@ export default function EnquiryFollowUpsPage() {
     <div>
       <SalesNav />
 
+      <EnquiryStats />
+
       <Button
         type="link"
         icon={<ArrowLeftOutlined />}
@@ -119,7 +133,19 @@ export default function EnquiryFollowUpsPage() {
             </Title>
             <Text type="secondary">{lead.contactPhone || '—'}</Text>
           </div>
-          <StatusTag status={lead.status} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+            <StatusTag status={lead.status} />
+            {lead.status !== 'converted' && lead.status !== 'lost' && (
+              <Button
+                type="primary"
+                icon={<UserOutlined />}
+                loading={convertToCustomer.isPending}
+                onClick={convertCustomer}
+              >
+                Convert to Customer
+              </Button>
+            )}
+          </div>
         </div>
         <Descriptions column={2} size="small" style={{ marginTop: 12 }}>
           <Descriptions.Item label="Enquiry Type">{lead.enquiryType || '—'}</Descriptions.Item>

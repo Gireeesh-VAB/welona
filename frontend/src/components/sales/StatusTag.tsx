@@ -11,6 +11,7 @@ const STATUS_COLORS: Record<string, string> = {
   qualified: 'gold',
   unqualified: 'default',
   lost: 'red',
+  transferred: 'purple',
   // Quotations / orders (converted, draft, sent, expired …)
   draft: 'default',
   sent: 'blue',

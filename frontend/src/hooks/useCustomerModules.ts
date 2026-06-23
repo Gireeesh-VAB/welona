@@ -61,15 +61,29 @@ export const useUpdateBooking = bookings.useUpdate;
 export function useBookingAction(customerId: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ bookingId, action, amount, notes }: { bookingId: string; action: 'cancel' | 'pay' | 'note'; amount?: number; notes?: string }) => {
+    mutationFn: ({ bookingId, action, amount, notes, paymentMode, serviceAllocations }: {
+      bookingId: string;
+      action: 'cancel' | 'pay' | 'note';
+      amount?: number;
+      notes?: string;
+      paymentMode?: string;
+      serviceAllocations?: Array<{ bookingItemId: string; amount: number }>;
+    }) => {
       const body = action === 'cancel'
         ? { status: 'cancelled' }
         : action === 'note'
         ? { notes }
-        : { paidAmount: amount ?? 0 };
+        : {
+            paidAmount: amount ?? 0,
+            ...(paymentMode ? { paymentMode } : {}),
+            ...(serviceAllocations?.length ? { serviceAllocations } : {}),
+          };
       return api.patch(`/customers/${customerId}/bookings/${bookingId}`, body);
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['customer-bookings', customerId] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['customer-bookings', customerId] });
+      qc.invalidateQueries({ queryKey: ['customer-sales', customerId] });
+    },
   });
 }
 
@@ -100,6 +114,83 @@ export function useAddPackageSession(customerId: string, packageId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['customer-packages', customerId] });
     },
+  });
+}
+
+export function useBookingSessions(customerId: string, bookingId: string) {
+  return useQuery({
+    queryKey: ['booking-sessions', customerId, bookingId],
+    queryFn: () => api.get<{ items: any[]; sessions: any[] }>(`/customers/${customerId}/bookings/${bookingId}/sessions`),
+    enabled: !!customerId && !!bookingId,
+  });
+}
+
+export function useAddBookingSession(customerId: string, bookingId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: Body) =>
+      api.post(`/customers/${customerId}/bookings/${bookingId}/sessions`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['booking-sessions', customerId, bookingId] });
+    },
+  });
+}
+
+export function useUpdateBookingSession(customerId: string, bookingId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, ...body }: { sessionId: string } & Body) =>
+      api.patch(`/customers/${customerId}/bookings/${bookingId}/sessions/${sessionId}`, body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['booking-sessions', customerId, bookingId] });
+    },
+  });
+}
+
+export function useSessionEmployees() {
+  return useQuery({
+    queryKey: ['session-employees'],
+    queryFn: () => api.get<any[]>('/employees'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSessionProducts(search?: string) {
+  return useQuery({
+    queryKey: ['session-products', search],
+    queryFn: () => api.get<any>(`/products?limit=100${search ? `&search=${encodeURIComponent(search)}` : ''}&isActive=true`),
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useServiceDefaultProducts(serviceName: string | null | undefined, branchId?: string | null) {
+  return useQuery({
+    queryKey: ['service-default-products', serviceName, branchId ?? ''],
+    queryFn: () => {
+      let url = `/sessions/service-defaults?serviceName=${encodeURIComponent(serviceName!)}`;
+      if (branchId) url += `&branchId=${encodeURIComponent(branchId)}`;
+      return api.get<Array<{ productId: string; productName: string; quantityPerSession: number; chargeType: string; uom: string | null; availableStock: number | null }>>(url);
+    },
+    enabled: !!serviceName,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useStartBookingSession(customerId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, bookingId, body }: { sessionId: string; bookingId: string; body: Record<string, unknown> }) =>
+      api.patch(`/customers/${customerId}/bookings/${bookingId}/sessions/${sessionId}`, body),
+    onSuccess: (_, { bookingId }) => qc.invalidateQueries({ queryKey: ['booking-sessions', customerId, bookingId] }),
+  });
+}
+
+export function useCompleteBookingSession(customerId: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ sessionId, bookingId, body }: { sessionId: string; bookingId: string; body: Record<string, unknown> }) =>
+      api.patch(`/customers/${customerId}/bookings/${bookingId}/sessions/${sessionId}`, body),
+    onSuccess: (_, { bookingId }) => qc.invalidateQueries({ queryKey: ['booking-sessions', customerId, bookingId] }),
   });
 }
 

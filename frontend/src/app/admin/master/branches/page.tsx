@@ -1114,7 +1114,7 @@ export default function AdminMasterBranchesPage() {
           layout="vertical"
           onFinish={onSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="Branch Name"
@@ -1668,7 +1668,7 @@ export default function AdminMasterBranchesPage() {
           layout="vertical"
           onFinish={onAddressSubmit}
           requiredMark={false}
-          preserve={false}
+         
         >
           <Form.Item
             label="Label"
