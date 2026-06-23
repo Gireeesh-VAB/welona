@@ -56,7 +56,6 @@ jobs:
           rsync -az \
             --exclude='node_modules' \
             --exclude='.next' \
-            --exclude='*.db' \
             --exclude='*.db-journal' \
             --exclude='.env' \
             -e "ssh -i ~/.ssh/deploy_key" \
@@ -120,8 +119,19 @@ jobs:
             echo "── Pushing database schema ──"
             npx prisma db push --accept-data-loss
 
-            echo "── Seeding database ──"
-            npm run db:seed-all
+            echo "── Seeding database (only if empty) ──"
+            ROW_COUNT=$(node -e "
+              const { PrismaClient } = require('@prisma/client');
+              const db = new PrismaClient();
+              db.organization.count().then(n => { console.log(n); db.\$disconnect(); }).catch(() => { console.log(0); });
+            " 2>/dev/null || echo "0")
+            echo "Organization row count: $ROW_COUNT"
+            if [ "$ROW_COUNT" = "0" ]; then
+              echo "Empty DB — seeding..."
+              npm run db:seed-all
+            else
+              echo "DB has data — skipping seed"
+            fi
 
             echo "── Building backend ──"
             npm run build
