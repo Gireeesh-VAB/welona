@@ -3,6 +3,7 @@ name: Deploy — Development
 on:
   push:
     branches:
+      - main
       - development
 
 jobs:
@@ -82,6 +83,25 @@ jobs:
             ./frontend/postcss.config.js \
             ./frontend/tsconfig.json \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/var/www/html/welona-dev/frontend/
+
+      - name: Write backend .env on server
+        run: |
+          ssh -i ~/.ssh/deploy_key ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} bash << 'ENVSSH'
+            set -e
+            ENV_FILE=/var/www/html/welona-dev/backend/.env
+
+            # Ensure the file exists
+            touch "$ENV_FILE"
+
+            # Write or update DATABASE_URL
+            if grep -q "^DATABASE_URL=" "$ENV_FILE"; then
+              sed -i 's|^DATABASE_URL=.*|DATABASE_URL=file:./prisma/dev.db|' "$ENV_FILE"
+            else
+              echo "DATABASE_URL=file:./prisma/dev.db" >> "$ENV_FILE"
+            fi
+
+            echo "DATABASE_URL set: $(grep DATABASE_URL $ENV_FILE)"
+          ENVSSH
 
       - name: Install dependencies, migrate DB, build & restart (dev)
         run: |
