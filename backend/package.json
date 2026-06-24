@@ -20,6 +20,7 @@
     "db:studio": "prisma studio",
     "db:reset": "prisma db push --force-reset && prisma db seed",
     "db:reset-all": "prisma db push --force-reset && npm run db:seed-all",
+    "db:fix-permissions": "tsx prisma/fix-permissions.ts",
     "postinstall": "prisma generate"
   },
   "prisma": {

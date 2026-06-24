@@ -17,7 +17,6 @@ interface CredentialsForm {
   password: string;
 }
 
-/** State carried between the two sign-in steps. */
 interface PendingChallenge {
   challengeId: string;
   sentTo: string;
@@ -29,13 +28,6 @@ const TEST_CREDENTIALS = {
   password: 'welona@123',
 };
 
-/**
- * Staff sign-in (sections 6.1, 7.1).
- *
- * Two-step flow: email + password, then a mandatory 2FA code. Both steps call
- * the real /api/v1/auth endpoints; the session is established via httpOnly
- * cookies set by the server.
- */
 export default function LoginPage() {
   const router = useRouter();
   const { message } = App.useApp();
@@ -63,13 +55,8 @@ export default function LoginPage() {
     try {
       const result = await login.mutateAsync(values);
       if (isTwoFactorChallenge(result)) {
-        setChallenge({
-          challengeId: result.challengeId,
-          sentTo: result.sentTo,
-          devOtp: result.devOtp,
-        });
+        setChallenge({ challengeId: result.challengeId, sentTo: result.sentTo, devOtp: result.devOtp });
       } else {
-        // 2FA disabled for this account — signed in directly.
         setSession(result.user);
         message.success('Welcome back to Welona');
         router.replace('/');
@@ -93,134 +80,123 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{
-      width: 420,
-      maxWidth: '100%',
-      background: 'rgba(255,255,255,0.97)',
-      borderRadius: 20,
-      boxShadow: '0 24px 64px rgba(0,0,0,0.4)',
-      overflow: 'hidden',
-    }}>
-      {/* Top accent bar */}
-      <div style={{ height: 4, background: 'linear-gradient(90deg, #6366f1 0%, #06b6d4 100%)' }} />
-
-      <div style={{ padding: '36px 36px 32px' }}>
-        {/* Branding */}
-        <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <div style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 52, height: 52, borderRadius: 14,
-            background: 'linear-gradient(135deg, #6366f1 0%, #06b6d4 100%)',
-            marginBottom: 14,
-          }}>
-            <span style={{ fontSize: 22, color: '#fff', fontWeight: 700 }}>W</span>
-          </div>
-          <div style={{ fontSize: 22, fontWeight: 700, color: '#0f172a', letterSpacing: '-0.02em' }}>Welona</div>
-          <div style={{ fontSize: 12, color: '#94a3b8', letterSpacing: '0.12em', textTransform: 'uppercase', marginTop: 2 }}>Branch Portal</div>
+    <Card
+      style={{ width: 420, maxWidth: '100%', border: `1px solid ${colors.gold.primary}` }}
+      styles={{ body: { padding: 32 } }}
+    >
+      <div style={{ textAlign: 'center', marginBottom: 24 }}>
+        <UserOutlined style={{ fontSize: 32, color: colors.gold.primary, marginBottom: 8 }} />
+        <Title level={3} style={{ margin: 0, letterSpacing: 4, color: colors.gold.primary }}>
+          WELONA
+        </Title>
+        <Text style={{ color: colors.gold.light, fontSize: 11, letterSpacing: 3 }}>
+          BRANCH PORTAL
+        </Text>
+        <div style={{ marginTop: 12 }}>
+          <Text style={{ color: colors.text.placeholder, fontSize: 12 }}>
+            Sign in with your branch staff credentials.
+          </Text>
         </div>
-
-        {challenge ? (
-          <>
-            <Alert
-              type="info"
-              showIcon
-              icon={<SafetyOutlined />}
-              message="Two-factor verification"
-              description={`Enter the 6-digit code sent to ${challenge.sentTo}.`}
-              style={{ marginBottom: 16, borderRadius: 10 }}
-            />
-            {challenge.devOtp && (
-              <Alert
-                type="warning"
-                showIcon
-                message={`Development code: ${challenge.devOtp}`}
-                style={{ marginBottom: 16, borderRadius: 10 }}
-              />
-            )}
-            <Form<{ otp: string }> layout="vertical" onFinish={onSubmitOtp} requiredMark={false} size="large">
-              <Form.Item
-                name="otp"
-                label={<span style={{ color: '#475569', fontWeight: 500, fontSize: 13 }}>Verification code</span>}
-                rules={[{ required: true, pattern: /^\d{6}$/, message: 'Enter the 6-digit code' }]}
-              >
-                <Input
-                  prefix={<SafetyOutlined style={{ color: '#94a3b8' }} />}
-                  placeholder="000000"
-                  maxLength={6}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  style={{ borderRadius: 10, height: 46 }}
-                />
-              </Form.Item>
-              <Form.Item style={{ marginBottom: 8 }}>
-                <Button type="primary" htmlType="submit" block loading={verifyOtp.isPending}
-                  style={{ height: 46, borderRadius: 10, background: 'linear-gradient(90deg, #6366f1, #06b6d4)', border: 'none', fontWeight: 600, fontSize: 14 }}>
-                  Verify &amp; Sign In
-                </Button>
-              </Form.Item>
-            </Form>
-            <Button type="link" block onClick={() => setChallenge(null)} style={{ color: '#94a3b8', fontSize: 13 }}>
-              Back to sign in
-            </Button>
-          </>
-        ) : (
-          <Form<CredentialsForm>
-            form={form}
-            layout="vertical"
-            onFinish={onSubmitCredentials}
-            requiredMark={false}
-            size="large"
-          >
-            <Form.Item
-              name="identifier"
-              label={<span style={{ color: '#475569', fontWeight: 500, fontSize: 13 }}>Username</span>}
-              rules={[{ required: true, message: 'Enter your username' }]}
-            >
-              <Input prefix={<UserOutlined style={{ color: '#94a3b8' }} />} placeholder="rohit.sharma" autoComplete="username"
-                style={{ borderRadius: 10, height: 46 }} />
-            </Form.Item>
-
-            <Form.Item
-              name="password"
-              label={<span style={{ color: '#475569', fontWeight: 500, fontSize: 13 }}>Password</span>}
-              rules={[{ required: true, message: 'Enter your password' }]}
-            >
-              <Input.Password
-                prefix={<LockOutlined style={{ color: '#94a3b8' }} />}
-                placeholder="••••••••"
-                autoComplete="current-password"
-                style={{ borderRadius: 10, height: 46 }}
-              />
-            </Form.Item>
-
-            <Form.Item style={{ marginBottom: 10, marginTop: 4 }}>
-              <Button type="primary" htmlType="submit" block loading={login.isPending && loginSource === 'manual'}
-                disabled={login.isPending}
-                style={{ height: 48, borderRadius: 10, background: 'linear-gradient(90deg, #6366f1 0%, #06b6d4 100%)', border: 'none', fontWeight: 600, fontSize: 14, letterSpacing: '0.01em' }}>
-                Sign In
-              </Button>
-            </Form.Item>
-
-            <Form.Item style={{ marginBottom: 0 }}>
-              <Button block onClick={handleAutoFill} loading={login.isPending && loginSource === 'demo'}
-                disabled={login.isPending}
-                style={{ height: 42, borderRadius: 10, border: '1px solid #e2e8f0', color: '#94a3b8', fontSize: 13, background: '#f8fafc' }}>
-                Use test credentials
-              </Button>
-            </Form.Item>
-
-            <p style={{ color: '#cbd5e1', fontSize: 11, textAlign: 'center', marginTop: 14, marginBottom: 0 }}>
-              Roles with 2FA enabled will be prompted after sign-in.
-            </p>
-
-            <div style={{ marginTop: 18, paddingTop: 18, borderTop: '1px solid #f1f5f9', textAlign: 'center' }}>
-              <Link href="/admin/login" style={{ fontSize: 12, color: '#6366f1', fontWeight: 600, letterSpacing: '0.04em', textDecoration: 'none' }}>
-                Admin Panel →
-              </Link>
-            </div>
-          </Form>
-        )}
       </div>
-    </div>
+
+      {challenge ? (
+        <>
+          <Alert
+            type="info"
+            showIcon
+            icon={<SafetyOutlined />}
+            message="Two-factor verification"
+            description={`Enter the 6-digit code sent to ${challenge.sentTo}.`}
+            style={{ marginBottom: 16 }}
+          />
+          {challenge.devOtp && (
+            <Alert
+              type="warning"
+              showIcon
+              message={`Development code: ${challenge.devOtp}`}
+              style={{ marginBottom: 16 }}
+            />
+          )}
+          <Form<{ otp: string }> layout="vertical" onFinish={onSubmitOtp} requiredMark={false} size="large">
+            <Form.Item
+              name="otp"
+              label="Verification code"
+              rules={[{ required: true, pattern: /^\d{6}$/, message: 'Enter the 6-digit code' }]}
+            >
+              <Input
+                prefix={<SafetyOutlined />}
+                placeholder="000000"
+                maxLength={6}
+                inputMode="numeric"
+                autoComplete="one-time-code"
+              />
+            </Form.Item>
+            <Form.Item style={{ marginBottom: 8 }}>
+              <Button type="primary" htmlType="submit" block loading={verifyOtp.isPending}>
+                Verify &amp; Sign In
+              </Button>
+            </Form.Item>
+          </Form>
+          <Button type="link" block onClick={() => setChallenge(null)} style={{ color: colors.text.placeholder, fontSize: 13 }}>
+            Back to sign in
+          </Button>
+        </>
+      ) : (
+        <Form<CredentialsForm>
+          form={form}
+          layout="vertical"
+          onFinish={onSubmitCredentials}
+          requiredMark={false}
+          size="large"
+        >
+          <Form.Item
+            name="identifier"
+            label="Username"
+            rules={[{ required: true, message: 'Enter your username' }]}
+          >
+            <Input prefix={<UserOutlined />} placeholder="rohit.sharma" autoComplete="username" />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label="Password"
+            rules={[{ required: true, message: 'Enter your password' }]}
+          >
+            <Input.Password prefix={<LockOutlined />} placeholder="••••••••" autoComplete="current-password" />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 8 }}>
+            <Button
+              type="primary"
+              htmlType="submit"
+              block
+              loading={login.isPending && loginSource === 'manual'}
+              disabled={login.isPending}
+            >
+              Sign In to Branch Portal
+            </Button>
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 12 }}>
+            <Button
+              type="dashed"
+              block
+              onClick={handleAutoFill}
+              loading={login.isPending && loginSource === 'demo'}
+              disabled={login.isPending}
+              style={{ color: colors.text.placeholder, borderColor: colors.border }}
+            >
+              Use test credentials
+            </Button>
+          </Form.Item>
+
+          <div style={{ paddingTop: 16, borderTop: `1px solid ${colors.border}`, textAlign: 'center' }}>
+            <Link href="/admin/login" style={{ fontSize: 12, color: colors.text.placeholder, textDecoration: 'none' }}>
+              Admin Console →
+            </Link>
+          </div>
+        </Form>
+      )}
+    </Card>
   );
 }

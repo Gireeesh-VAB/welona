@@ -94,33 +94,60 @@ export const POST = route(async (req) => {
   const existing = await db.staff.findUnique({ where: { email } });
   if (existing) throw Errors.conflict('An employee with this email already exists');
 
-  // Auto-generate employee code: EMP-XXXX (next available number for this org)
-  const lastStaff = await db.staff.findFirst({
-    where: { orgId: claims.orgId, employeeCode: { startsWith: 'EMP-' } },
-    orderBy: { createdAt: 'desc' },
-    select: { employeeCode: true },
-  });
-  let nextCode = 'EMP-0001';
-  if (lastStaff?.employeeCode) {
-    const match = lastStaff.employeeCode.match(/EMP-(\d+)/);
-    if (match) nextCode = `EMP-${String(parseInt(match[1], 10) + 1).padStart(4, '0')}`;
+  // Auto-generate employee code: pick max across both Staff and Employee tables
+  function parseEmpNum(code: string | null | undefined): number {
+    if (!code) return 0;
+    const m = code.match(/EMP-(\d+)/);
+    return m ? parseInt(m[1], 10) : 0;
   }
+  const [lastStaff, lastEmployee] = await Promise.all([
+    db.staff.findFirst({
+      where: { orgId: claims.orgId, employeeCode: { startsWith: 'EMP-' } },
+      orderBy: { createdAt: 'desc' },
+      select: { employeeCode: true },
+    }),
+    db.employee.findFirst({
+      where: { employeeCode: { startsWith: 'EMP-' } },
+      orderBy: { createdAt: 'desc' },
+      select: { employeeCode: true },
+    }),
+  ]);
+  const nextNum = Math.max(parseEmpNum(lastStaff?.employeeCode), parseEmpNum(lastEmployee?.employeeCode)) + 1;
+  const nextCode = `EMP-${String(nextNum).padStart(4, '0')}`;
 
-  const staff = await db.staff.create({
-    data: {
-      orgId: claims.orgId,
-      roleId: body.roleId,
-      branchId: body.branchId ?? null,
-      name: body.name,
-      email,
-      phone: body.phone || null,
-      passwordHash: await bcrypt.hash(body.password, 10),
-      status: body.status ?? 'active',
-      employeeCode: nextCode,
-      designation: body.designation || null,
-      gender: body.gender || null,
-    },
-  });
+  const passwordHash = await bcrypt.hash(body.password, 10);
+  const branchId = body.branchId ?? null;
+
+  const [staff] = await db.$transaction([
+    db.staff.create({
+      data: {
+        orgId: claims.orgId,
+        roleId: body.roleId,
+        branchId,
+        name: body.name,
+        email,
+        phone: body.phone || null,
+        passwordHash,
+        status: body.status ?? 'active',
+        employeeCode: nextCode,
+        designation: body.designation || null,
+        gender: body.gender || null,
+      },
+    }),
+    db.employee.create({
+      data: {
+        name: body.name,
+        employeeCode: nextCode,
+        mobileNo: body.phone || '0000000000',
+        email,
+        gender: body.gender || null,
+        branchId,
+        designation: body.designation ? undefined : undefined,
+        joiningDate: new Date(),
+        isActive: (body.status ?? 'active') === 'active',
+      },
+    }),
+  ]);
 
   return created({ id: staff.id, name: staff.name, email: staff.email });
 });
