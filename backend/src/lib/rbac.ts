@@ -107,6 +107,8 @@ export const SYSTEM_ROLES: SystemRole[] = [
       'customers:read',
       'customers:create',
       'staff:read',
+      'staff:create',
+      'staff:update',
       'support:read',
       'support:update',
       'reports:read',

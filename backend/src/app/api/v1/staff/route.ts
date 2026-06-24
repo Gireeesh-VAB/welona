@@ -14,6 +14,8 @@ const staffCreateSchema = z.object({
   roleId: z.string().min(1, 'Role is required'),
   branchId: z.string().min(1).optional(),
   status: z.enum(['active', 'suspended']).optional(),
+  designation: z.string().trim().optional(),
+  gender: z.string().trim().optional(),
 });
 
 /**
@@ -92,6 +94,18 @@ export const POST = route(async (req) => {
   const existing = await db.staff.findUnique({ where: { email } });
   if (existing) throw Errors.conflict('An employee with this email already exists');
 
+  // Auto-generate employee code: EMP-XXXX (next available number for this org)
+  const lastStaff = await db.staff.findFirst({
+    where: { orgId: claims.orgId, employeeCode: { startsWith: 'EMP-' } },
+    orderBy: { createdAt: 'desc' },
+    select: { employeeCode: true },
+  });
+  let nextCode = 'EMP-0001';
+  if (lastStaff?.employeeCode) {
+    const match = lastStaff.employeeCode.match(/EMP-(\d+)/);
+    if (match) nextCode = `EMP-${String(parseInt(match[1], 10) + 1).padStart(4, '0')}`;
+  }
+
   const staff = await db.staff.create({
     data: {
       orgId: claims.orgId,
@@ -102,6 +116,9 @@ export const POST = route(async (req) => {
       phone: body.phone || null,
       passwordHash: await bcrypt.hash(body.password, 10),
       status: body.status ?? 'active',
+      employeeCode: nextCode,
+      designation: body.designation || null,
+      gender: body.gender || null,
     },
   });
 
