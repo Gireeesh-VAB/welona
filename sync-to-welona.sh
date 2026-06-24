@@ -133,6 +133,11 @@ if $SYNC_BACKEND; then
     log "Database fully re-seeded"
   fi
 
+  warn "Patching role permissions to match rbac.ts..."
+  eval "$SSH 'cd $SERVER_APP_DIR/backend && npm run db:fix-permissions'" \
+    || err "Permission patch failed"
+  log "Role permissions updated"
+
   warn "Building backend on server..."
   eval "$SSH 'cd $SERVER_APP_DIR/backend && npm run build'" \
     || err "Backend build failed"
