@@ -86,14 +86,34 @@ export const POST = route(async (req) => {
   requirePermission(claims, 'sales:create');
   const body = await parseBody(req, leadCreateSchema);
 
-  // "Follow-Up By" is optional — validate only when explicitly provided.
-  // SystemUser logins have a non-Staff sub, so we never default to claims.sub.
-  const ownerStaffId = body.ownerStaffId ?? null;
+  // "Follow-Up By" is optional for SystemUser logins (their sub is not a Staff ID).
+  // If not provided, fall back to: the logged-in Staff (if sub is a Staff), else
+  // the first active staff member in the branch.
+  let ownerStaffId = body.ownerStaffId ?? null;
   if (ownerStaffId) {
     const owner = await db.staff.findFirst({
       where: { id: ownerStaffId, orgId: claims.orgId },
     });
     if (!owner) throw Errors.badRequest('Selected salesperson does not exist');
+  } else {
+    // Try claims.sub as a Staff ID first (regular Staff login).
+    const selfAsStaff = await db.staff.findFirst({
+      where: { id: claims.sub, orgId: claims.orgId },
+      select: { id: true },
+    });
+    if (selfAsStaff) {
+      ownerStaffId = selfAsStaff.id;
+    } else {
+      // SystemUser login — pick first active staff in the branch.
+      const branchId = claims.branchIds[0] ?? null;
+      const fallback = await db.staff.findFirst({
+        where: { orgId: claims.orgId, status: 'active', ...(branchId ? { branchId } : {}) },
+        select: { id: true },
+        orderBy: { name: 'asc' },
+      });
+      if (!fallback) throw Errors.badRequest('No active staff found to assign this enquiry to. Please add a staff member first.');
+      ownerStaffId = fallback.id;
+    }
   }
 
   if (body.customerId) {

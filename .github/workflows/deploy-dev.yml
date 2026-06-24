@@ -65,6 +65,7 @@ jobs:
       - name: Sync frontend build
         run: |
           rsync -az --delete \
+            --exclude='cache' \
             -e "ssh -i ~/.ssh/deploy_key" \
             ./frontend/.next/ \
             ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:/var/www/html/welona-dev/frontend/.next/
