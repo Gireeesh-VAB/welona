@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   App,
   Badge,
   Button,
@@ -32,15 +33,19 @@ import {
   PrinterOutlined,
   SendOutlined,
   ShopOutlined,
+  ShoppingCartOutlined,
   SyncOutlined,
   TruckOutlined,
   WarningOutlined,
 } from '@ant-design/icons';
 import { useAdminIndents, useAdminIndentAction, useWarehouseAvailability, type WarehouseAvailabilityResult } from '@/hooks/useAdminIndents';
 import { useAdminBranches } from '@/hooks/useAdminBranches';
+import { useSuppliers } from '@/hooks/useSuppliers';
+import { useCreatePurchaseOrder } from '@/hooks/usePurchaseOrders';
 import { useBrandColors } from '@/hooks/useBrandColors';
 import { ApiClientError } from '@/lib/api-client';
 import type { StockIndent, StockIndentItem } from '@shared/types/stock-indent';
+import { formatMoney } from '@shared/format';
 
 const { Title, Text } = Typography;
 
@@ -93,6 +98,24 @@ ${groups.length === 0 ? '<p>No warehouse pickup groups available.</p>' : groupRo
   win.document.close();
   setTimeout(() => win.print(), 400);
 }
+
+const DISPATCH_METHOD_LABELS: Record<string, string> = {
+  company_vehicle: 'Company Vehicle',
+  branch_staff_pickup: 'Branch Staff Pickup',
+  porter: 'Porter Service',
+  rapido: 'Rapido / Bike Delivery',
+  courier: 'Courier / Transport',
+  other: 'Other',
+};
+
+const DISPATCH_METHOD_OPTIONS = [
+  { value: 'company_vehicle', label: 'Company Vehicle' },
+  { value: 'branch_staff_pickup', label: 'Branch Staff Pickup' },
+  { value: 'porter', label: 'Porter Service' },
+  { value: 'rapido', label: 'Rapido / Bike Delivery' },
+  { value: 'courier', label: 'Courier / Transport' },
+  { value: 'other', label: 'Other' },
+];
 
 const STATUS_COLOR: Record<string, string> = {
   pending: 'orange',
@@ -173,33 +196,79 @@ function ExpandedRow({ record }: { record: StockIndent }) {
     },
   ];
 
-  const hasDelivery = record.vehicleNumber || record.driverName || record.driverMobile || record.dispatchedAt || record.expectedDeliveryAt || record.deliveryNotes;
+  const hasDelivery = record.dispatchMethod || record.vehicleNumber || record.driverName || record.driverMobile || record.dispatchedAt || record.expectedDeliveryAt || record.deliveryNotes || record.providerName || record.trackingNumber;
+  const isThirdParty = record.dispatchMethod === 'porter' || record.dispatchMethod === 'rapido' || record.dispatchMethod === 'courier';
 
   return (
     <div style={{ margin: '0 48px', paddingBottom: 12 }}>
       {/* Delivery tracking info */}
       {hasDelivery && (
         <div style={{ marginBottom: 12, padding: '10px 14px', background: '#1a2a1a', border: '1px solid #2d4a2d', borderRadius: 6 }}>
-          <Text style={{ color: '#86efac', fontWeight: 600, display: 'block', marginBottom: 8 }}>
-            Dispatch / Tracking Details
-          </Text>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+            <Text style={{ color: '#86efac', fontWeight: 600 }}>Dispatch / Tracking Details</Text>
+            {record.dispatchMethod && (
+              <Tag color="blue" style={{ fontSize: 12 }}>
+                {DISPATCH_METHOD_LABELS[record.dispatchMethod] ?? record.dispatchMethod}
+              </Tag>
+            )}
+          </div>
           <Space size={20} wrap>
+            {/* Company Vehicle */}
             {record.vehicleNumber && (
               <span style={{ fontSize: 13 }}>
                 <Text style={{ color: colors.text.placeholder }}>Vehicle: </Text>
                 <Text strong style={{ color: colors.text.primary }}>{record.vehicleNumber}</Text>
               </span>
             )}
+            {/* Driver / Employee / Delivery Person name */}
             {record.driverName && (
               <span style={{ fontSize: 13 }}>
-                <Text style={{ color: colors.text.placeholder }}>Driver: </Text>
+                <Text style={{ color: colors.text.placeholder }}>
+                  {record.dispatchMethod === 'branch_staff_pickup' ? 'Employee: ' : isThirdParty ? 'Delivery Person: ' : 'Driver: '}
+                </Text>
                 <Text strong style={{ color: colors.text.primary }}>{record.driverName}</Text>
               </span>
             )}
+            {/* Employee ID (branch staff pickup) */}
+            {record.pickupEmployeeId && (
+              <span style={{ fontSize: 13 }}>
+                <Text style={{ color: colors.text.placeholder }}>Emp ID: </Text>
+                <Text strong style={{ color: colors.text.primary }}>{record.pickupEmployeeId}</Text>
+              </span>
+            )}
+            {/* Mobile */}
             {record.driverMobile && (
               <span style={{ fontSize: 13 }}>
                 <Text style={{ color: colors.text.placeholder }}>Mobile: </Text>
                 <Text strong style={{ color: colors.text.primary }}>{record.driverMobile}</Text>
+              </span>
+            )}
+            {/* Provider (porter/rapido/courier) */}
+            {record.providerName && (
+              <span style={{ fontSize: 13 }}>
+                <Text style={{ color: colors.text.placeholder }}>Provider: </Text>
+                <Text strong style={{ color: colors.text.primary }}>{record.providerName}</Text>
+              </span>
+            )}
+            {/* Tracking number */}
+            {record.trackingNumber && (
+              <span style={{ fontSize: 13 }}>
+                <Text style={{ color: colors.text.placeholder }}>Tracking: </Text>
+                <Text strong style={{ color: colors.text.primary }}>{record.trackingNumber}</Text>
+              </span>
+            )}
+            {/* Delivery charges */}
+            {record.deliveryCharges != null && (
+              <span style={{ fontSize: 13 }}>
+                <Text style={{ color: colors.text.placeholder }}>Charges: </Text>
+                <Text strong style={{ color: colors.text.primary }}>{formatMoney(record.deliveryCharges)}</Text>
+              </span>
+            )}
+            {/* Other: custom method name */}
+            {record.customMethodName && (
+              <span style={{ fontSize: 13 }}>
+                <Text style={{ color: colors.text.placeholder }}>Method: </Text>
+                <Text strong style={{ color: colors.text.primary }}>{record.customMethodName}</Text>
               </span>
             )}
             {record.dispatchedAt && (
@@ -210,13 +279,17 @@ function ExpandedRow({ record }: { record: StockIndent }) {
             )}
             {record.expectedDeliveryAt && (
               <span style={{ fontSize: 13 }}>
-                <Text style={{ color: colors.text.placeholder }}>Expected: </Text>
+                <Text style={{ color: colors.text.placeholder }}>
+                  {record.dispatchMethod === 'branch_staff_pickup' ? 'Pickup Time: ' : 'Expected: '}
+                </Text>
                 <Text strong style={{ color: '#86efac' }}>{fmt(record.expectedDeliveryAt)}</Text>
               </span>
             )}
             {record.deliveryNotes && (
               <span style={{ fontSize: 13 }}>
-                <Text style={{ color: colors.text.placeholder }}>Notes: </Text>
+                <Text style={{ color: colors.text.placeholder }}>
+                  {record.dispatchMethod === 'other' ? 'Remarks: ' : 'Notes: '}
+                </Text>
                 <Text style={{ color: colors.text.primary }}>{record.deliveryNotes}</Text>
               </span>
             )}
@@ -264,6 +337,14 @@ export default function StockRequestsPage() {
   const [approveNotes, setApproveNotes] = useState('');
 
   const [dispatchForm] = Form.useForm();
+  const selectedDispatchMethod = Form.useWatch('dispatchMethod', dispatchForm) as string | undefined;
+
+  // ── PO creation modal state ───────────────────────────────────────────────
+  const [poModalOpen, setPoModalOpen] = useState(false);
+  const [poIndentRef, setPoIndentRef] = useState<StockIndent | null>(null);
+  type InsufficientItem = WarehouseAvailabilityResult['items'][number];
+  const [poItemsForOrder, setPoItemsForOrder] = useState<InsufficientItem[]>([]);
+  const [poForm] = Form.useForm();
 
 
   // ── Data ─────────────────────────────────────────────────────────────────
@@ -273,7 +354,9 @@ export default function StockRequestsPage() {
   const { data: dispatchedData } = useAdminIndents({ status: 'dispatched', limit: 1 });
   const { data: receivedData } = useAdminIndents({ status: 'delivered', limit: 1 });
   const { data: branchesData } = useAdminBranches({ limit: 200 });
+  const { data: suppliersData } = useSuppliers({ limit: 200 });
   const indentAction = useAdminIndentAction();
+  const createPO = useCreatePurchaseOrder();
   const { data: approveAvailability, isLoading: approveWhLoading } = useWarehouseAvailability(approveTarget?.id ?? null);
   const { data: warehouseAvailability, isLoading: warehouseLoading } = useWarehouseAvailability(dispatchTarget?.id ?? null);
   const { data: slipAvailability, isLoading: slipLoading } = useWarehouseAvailability(slipTarget?.id ?? null);
@@ -282,6 +365,24 @@ export default function StockRequestsPage() {
     () => (branchesData?.items ?? []).map((b) => ({ value: b.id, label: b.branchName })),
     [branchesData],
   );
+
+  const supplierOptions = useMemo(
+    () => (suppliersData?.items ?? []).filter((s) => s.isActive).map((s) => ({ value: s.id, label: s.name })),
+    [suppliersData],
+  );
+
+  // Items in the dispatch modal that don't have enough stock in the selected warehouse
+  const insufficientItems = useMemo(() => {
+    if (!warehouseAvailability || !dispatchTarget) return [];
+    return warehouseAvailability.items.filter((avail) => {
+      const selectedWhId = dispatchSelections[avail.itemId] ?? avail.recommendation?.warehouseId;
+      if (!selectedWhId) return true;
+      const wh = avail.warehouses.find((w) => w.warehouseId === selectedWhId);
+      return !wh || wh.quantity < avail.neededQty;
+    });
+  }, [warehouseAvailability, dispatchSelections, dispatchTarget]);
+
+  const hasInsufficientStock = insufficientItems.length > 0;
 
   // Init approve qtys when approve modal opens
   useEffect(() => {
@@ -391,6 +492,7 @@ export default function StockRequestsPage() {
       {
         id: dispatchTarget.id,
         action: 'dispatch',
+        dispatchMethod: values.dispatchMethod,
         items: dispatchTarget.items.map((it, idx) => ({
           itemId: it.id,
           fulfilledQty: values.items[idx].fulfilledQty,
@@ -399,6 +501,11 @@ export default function StockRequestsPage() {
         vehicleNumber: values.vehicleNumber || undefined,
         driverName: values.driverName || undefined,
         driverMobile: values.driverMobile || undefined,
+        pickupEmployeeId: values.pickupEmployeeId || undefined,
+        providerName: values.providerName || undefined,
+        trackingNumber: values.trackingNumber || undefined,
+        deliveryCharges: values.deliveryCharges != null ? Math.round(values.deliveryCharges * 100) : undefined,
+        customMethodName: values.customMethodName || undefined,
         expectedDeliveryAt: values.expectedDeliveryAt?.toISOString(),
         deliveryNotes: values.deliveryNotes || undefined,
       },
@@ -407,6 +514,49 @@ export default function StockRequestsPage() {
     setDispatchTarget(null);
     setDispatchSelections({});
     dispatchForm.resetFields();
+  };
+
+  // ── Create PO for missing stock ───────────────────────────────────────────
+  const openPoModal = () => {
+    setPoIndentRef(dispatchTarget);
+    setPoItemsForOrder(insufficientItems);
+    poForm.setFieldsValue({
+      branchId: undefined,
+      supplierId: undefined,
+      notes: `Restock for indent ${dispatchTarget?.number ?? ''}`,
+      items: insufficientItems.map((item) => ({
+        productId: item.productId,
+        quantity: item.neededQty,
+        unitPrice: 0,
+        taxRate: 0,
+      })),
+    });
+    setPoModalOpen(true);
+  };
+
+  const handleCreatePO = async () => {
+    const values = await poForm.validateFields();
+    try {
+      const po = await createPO.mutateAsync({
+        branchId: values.branchId,
+        supplierId: values.supplierId,
+        notes: values.notes || undefined,
+        items: (values.items as Array<{ productId: string; quantity: number; unitPrice?: number; taxRate?: number }>).map((item) => ({
+          productId: item.productId,
+          quantity: item.quantity,
+          unitPrice: Math.round((item.unitPrice ?? 0) * 100),
+          taxRate: Math.round((item.taxRate ?? 0) * 100),
+        })),
+      });
+      message.success(`Purchase Order ${po.number} created. Receive a GRN to add stock, then return here to dispatch.`);
+      setPoModalOpen(false);
+      setDispatchTarget(null);
+      setDispatchSelections({});
+      dispatchForm.resetFields();
+      poForm.resetFields();
+    } catch (err) {
+      message.error(err instanceof ApiClientError ? err.message : 'Failed to create purchase order.');
+    }
   };
 
   // ── Table columns ─────────────────────────────────────────────────────────
@@ -536,6 +686,7 @@ export default function StockRequestsPage() {
                         setDispatchTarget(row);
                         setDispatchSelections({});
                         dispatchForm.setFieldsValue({
+                          dispatchMethod: 'company_vehicle',
                           items: row.items.map((it) => ({ fulfilledQty: it.approvedQty ?? it.requestedQty })),
                         });
                       }}
@@ -912,9 +1063,26 @@ export default function StockRequestsPage() {
         title={`Dispatch — ${dispatchTarget?.number ?? ''} to ${dispatchTarget?.branchName ?? ''}`}
         open={!!dispatchTarget}
         onCancel={() => { setDispatchTarget(null); setDispatchSelections({}); dispatchForm.resetFields(); }}
-        onOk={handleDispatch}
-        okText={<><SendOutlined /> Dispatch</>}
-        confirmLoading={indentAction.isPending}
+        footer={[
+          <Button key="cancel" onClick={() => { setDispatchTarget(null); setDispatchSelections({}); dispatchForm.resetFields(); }}>
+            Cancel
+          </Button>,
+          hasInsufficientStock && (
+            <Button key="create-po" type="primary" icon={<ShoppingCartOutlined />} onClick={openPoModal}>
+              Order Stock (Create PO)
+            </Button>
+          ),
+          <Button
+            key="dispatch"
+            type="primary"
+            icon={<SendOutlined />}
+            disabled={hasInsufficientStock}
+            loading={indentAction.isPending}
+            onClick={handleDispatch}
+          >
+            Dispatch
+          </Button>,
+        ].filter(Boolean)}
         width={720}
         destroyOnClose
       >
@@ -978,33 +1146,142 @@ export default function StockRequestsPage() {
             </div>
           )}
 
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="vehicleNumber" label="Vehicle Number">
-                <Input maxLength={20} placeholder="e.g. TS09 AB 1234" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="driverName" label="Driver Name">
-                <Input maxLength={100} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="driverMobile" label="Driver Mobile">
-                <Input maxLength={15} placeholder="+91 9876543210" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="expectedDeliveryAt" label="Expected Delivery">
-                <DatePicker showTime style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-            <Col span={24}>
-              <Form.Item name="deliveryNotes" label="Delivery Notes">
-                <Input.TextArea rows={2} maxLength={500} />
-              </Form.Item>
-            </Col>
-          </Row>
+          <Form.Item name="dispatchMethod" label="Dispatch Method" rules={[{ required: true, message: 'Select a dispatch method' }]}>
+            <Select options={DISPATCH_METHOD_OPTIONS} placeholder="Select how stock will be transported" />
+          </Form.Item>
+
+          {/* Company Vehicle */}
+          {selectedDispatchMethod === 'company_vehicle' && (
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="vehicleNumber" label="Vehicle Number">
+                  <Input maxLength={20} placeholder="e.g. TS09 AB 1234" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="driverName" label="Driver Name">
+                  <Input maxLength={100} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="driverMobile" label="Driver Mobile">
+                  <Input maxLength={15} placeholder="+91 9876543210" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="expectedDeliveryAt" label="Expected Delivery">
+                  <DatePicker showTime style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+
+          {/* Branch Staff Pickup */}
+          {selectedDispatchMethod === 'branch_staff_pickup' && (
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="driverName" label="Employee Name">
+                  <Input maxLength={100} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="pickupEmployeeId" label="Employee ID">
+                  <Input maxLength={50} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="driverMobile" label="Mobile Number">
+                  <Input maxLength={15} placeholder="+91 9876543210" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="expectedDeliveryAt" label="Pickup Time">
+                  <DatePicker showTime style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+
+          {/* Porter / Rapido / Courier */}
+          {(selectedDispatchMethod === 'porter' || selectedDispatchMethod === 'rapido' || selectedDispatchMethod === 'courier') && (
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="providerName" label="Provider Name">
+                  <Input maxLength={100} placeholder="e.g. Porter, Dunzo, BlueDart" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="trackingNumber" label="Booking / Tracking ID">
+                  <Input maxLength={100} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="driverName" label="Delivery Person Name">
+                  <Input maxLength={100} placeholder="Optional" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="driverMobile" label="Mobile Number">
+                  <Input maxLength={15} placeholder="+91 9876543210" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="deliveryCharges" label="Delivery Charges (₹)">
+                  <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="expectedDeliveryAt" label="Expected Delivery">
+                  <DatePicker showTime style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+
+          {/* Other */}
+          {selectedDispatchMethod === 'other' && (
+            <Row gutter={12}>
+              <Col span={24}>
+                <Form.Item name="customMethodName" label="Transport Method" rules={[{ required: true, message: 'Please describe the transport method' }]}>
+                  <Input maxLength={100} placeholder="e.g. Staff personal vehicle, auto-rickshaw…" />
+                </Form.Item>
+              </Col>
+            </Row>
+          )}
+
+          {/* Notes / Remarks — shown for all methods */}
+          {selectedDispatchMethod && (
+            <Form.Item name="deliveryNotes" label={selectedDispatchMethod === 'other' ? 'Remarks' : 'Notes (optional)'}>
+              <Input.TextArea rows={2} maxLength={500} />
+            </Form.Item>
+          )}
+
+          {hasInsufficientStock && (
+            <Alert
+              type="error"
+              showIcon
+              icon={<WarningOutlined />}
+              style={{ marginBottom: 12 }}
+              message="Insufficient stock — dispatch blocked"
+              description={
+                <div>
+                  <div style={{ marginBottom: 6 }}>The following products do not have enough stock in the selected warehouse:</div>
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    {insufficientItems.map((item) => {
+                      const selectedWhId = dispatchSelections[item.itemId] ?? item.recommendation?.warehouseId;
+                      const wh = item.warehouses.find((w) => w.warehouseId === selectedWhId);
+                      return (
+                        <li key={item.itemId}>
+                          <strong>{item.productName}</strong> — need <strong>{item.neededQty}</strong>, available: <strong>{wh?.quantity ?? 0}</strong>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <div style={{ marginTop: 8 }}>Click <strong>Order Stock (Create PO)</strong> below to raise a Purchase Order. After the GRN is received, come back here to dispatch.</div>
+                </div>
+              }
+            />
+          )}
 
           <div style={{ marginBottom: 12, border: `1px solid ${colors.border}`, borderRadius: 6, overflow: 'hidden' }}>
             <div style={{ padding: '8px 12px', borderBottom: `1px solid ${colors.border}` }}>
@@ -1024,6 +1301,95 @@ export default function StockRequestsPage() {
               </div>
             ))}
           </div>
+        </Form>
+      </Modal>
+
+      {/* ── Create PO Modal ───────────────────────────────────────────────── */}
+      <Modal
+        title={`Order Stock — ${poIndentRef?.number ?? ''}`}
+        open={poModalOpen}
+        onCancel={() => { setPoModalOpen(false); poForm.resetFields(); }}
+        onOk={handleCreatePO}
+        okText={<><ShoppingCartOutlined /> Create Purchase Order</>}
+        confirmLoading={createPO.isPending}
+        width={680}
+        destroyOnClose
+      >
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="This will create a Purchase Order to restock your warehouse. After receiving the GRN, return to this stock request to dispatch."
+        />
+        <Form form={poForm} layout="vertical">
+          <Row gutter={12}>
+            <Col span={12}>
+              <Form.Item name="branchId" label="Deliver Stock To (Branch)" rules={[{ required: true, message: 'Select the branch / warehouse to receive stock' }]}>
+                <Select
+                  showSearch
+                  options={branchOptions}
+                  placeholder="Select branch"
+                  filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())}
+                />
+              </Form.Item>
+            </Col>
+            <Col span={12}>
+              <Form.Item name="supplierId" label="Supplier" rules={[{ required: true, message: 'Select a supplier' }]}>
+                <Select
+                  showSearch
+                  options={supplierOptions}
+                  placeholder="Select supplier"
+                  filterOption={(i, o) => (o?.label ?? '').toLowerCase().includes(i.toLowerCase())}
+                />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <div style={{ border: `1px solid ${colors.border}`, borderRadius: 6, overflow: 'hidden', marginBottom: 12 }}>
+            <div style={{ padding: '8px 12px', borderBottom: `1px solid ${colors.border}` }}>
+              <Text strong style={{ color: colors.text.primary }}>Items to Order</Text>
+              <Text style={{ color: colors.text.placeholder, fontSize: 12, marginLeft: 8 }}>Unit price and tax are optional — fill them in or leave as 0</Text>
+            </div>
+            <Form.List name="items">
+              {(fields) => (
+                <div>
+                  {fields.map((field, idx) => {
+                    const item = poItemsForOrder[idx];
+                    return (
+                      <div key={field.key} style={{ padding: '10px 12px', borderBottom: idx < fields.length - 1 ? `1px solid ${colors.border}` : 'none' }}>
+                        <div style={{ marginBottom: 8 }}>
+                          <Text style={{ fontWeight: 600, color: colors.text.primary }}>{item?.productName}</Text>
+                          <Text style={{ color: colors.text.placeholder, fontSize: 12 }}> · {item?.productSku} · {item?.productUom}</Text>
+                        </div>
+                        <Form.Item name={[field.name, 'productId']} hidden><Input /></Form.Item>
+                        <Row gutter={8}>
+                          <Col span={8}>
+                            <Form.Item name={[field.name, 'quantity']} label="Qty to Order" rules={[{ required: true, type: 'number', min: 1 }]} style={{ marginBottom: 0 }}>
+                              <InputNumber min={1} style={{ width: '100%' }} />
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item name={[field.name, 'unitPrice']} label="Unit Price (₹)" style={{ marginBottom: 0 }}>
+                              <InputNumber min={0} precision={2} style={{ width: '100%' }} placeholder="0.00" />
+                            </Form.Item>
+                          </Col>
+                          <Col span={8}>
+                            <Form.Item name={[field.name, 'taxRate']} label="Tax (%)" style={{ marginBottom: 0 }}>
+                              <InputNumber min={0} max={100} precision={2} style={{ width: '100%' }} placeholder="0" />
+                            </Form.Item>
+                          </Col>
+                        </Row>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </Form.List>
+          </div>
+
+          <Form.Item name="notes" label="Notes">
+            <Input.TextArea rows={2} maxLength={500} />
+          </Form.Item>
         </Form>
       </Modal>
 

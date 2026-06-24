@@ -46,6 +46,7 @@ export const GET = route(async (req) => {
       include: {
         createdByAdmin: true,
         _count: { select: { supplierProducts: true } },
+        supplierProducts: { select: { productId: true, isActive: true, unitPrice: true } },
       },
       orderBy: { createdAt: 'desc' },
       skip: (page - 1) * limit,
@@ -81,6 +82,7 @@ export const POST = route(async (req) => {
         include: {
           createdByAdmin: true,
           _count: { select: { supplierProducts: true } },
+          supplierProducts: { select: { productId: true, isActive: true, unitPrice: true } },
         },
       });
 

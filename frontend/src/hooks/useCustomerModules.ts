@@ -169,7 +169,7 @@ export function useServiceDefaultProducts(serviceName: string | null | undefined
     queryFn: () => {
       let url = `/sessions/service-defaults?serviceName=${encodeURIComponent(serviceName!)}`;
       if (branchId) url += `&branchId=${encodeURIComponent(branchId)}`;
-      return api.get<Array<{ productId: string; productName: string; quantityPerSession: number; chargeType: string; uom: string | null; availableStock: number | null }>>(url);
+      return api.get<Array<{ productId: string; productName: string; quantityPerSession: number; chargeType: string; uom: string | null; consumptionUom: string | null; unitsPerPurchase: number; availableStock: number | null }>>(url);
     },
     enabled: !!serviceName,
     staleTime: 5 * 60 * 1000,

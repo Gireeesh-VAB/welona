@@ -50,6 +50,11 @@ export function toAdminPurchaseOrder(row: PurchaseOrderWithRelations): AdminPurc
     taxAmt: row.taxAmt,
     total: row.total,
     notes: row.notes,
+    paymentStatus: row.paymentStatus ?? null,
+    paymentDate: row.paymentDate ? row.paymentDate.toISOString() : null,
+    paymentMethod: row.paymentMethod ?? null,
+    amountPaid: row.amountPaid ?? null,
+    paymentReference: row.paymentReference ?? null,
     items: [...row.items]
       .sort((a, b) => a.sortOrder - b.sortOrder)
       .map((it) => ({
@@ -85,6 +90,10 @@ export function toAdminGoodsReceipt(row: GoodsReceiptWithRelations): AdminGoodsR
     poNumber: row.po?.number ?? null,
     receivedAt: row.receivedAt.toISOString(),
     notes: row.notes,
+    invoiceNumber: row.invoiceNumber ?? null,
+    invoiceDate: row.invoiceDate ? row.invoiceDate.toISOString() : null,
+    invoiceAmount: row.invoiceAmount ?? null,
+    poPaymentStatus: row.po?.paymentStatus ?? null,
     items: row.items.map((it) => ({
       id: it.id,
       product: {
@@ -94,6 +103,7 @@ export function toAdminGoodsReceipt(row: GoodsReceiptWithRelations): AdminGoodsR
         uom: it.product.uom as ProductUom,
       },
       quantity: it.quantity,
+      damagedQty: (it as any).damagedQty ?? 0,
     })),
     createdBy: creator(row.createdByAdmin),
     createdAt: row.createdAt.toISOString(),

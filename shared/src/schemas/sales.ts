@@ -45,7 +45,7 @@ export const customerCreateSchema = z.object({
   address: z.string().trim().optional(),
   city: z.string().trim().optional(),
   stateId: z.string().optional(),
-  country: z.string().trim().min(1, 'Country is required'),
+  country: z.string().trim().optional().default('India'),
   notes: z.string().trim().optional(),
   branchId: id.optional(),
   tags: z.array(z.string().trim()).optional(),

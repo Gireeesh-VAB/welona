@@ -24,8 +24,13 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
   if ('paidAmount' in raw) {
     const { paidAmount, paymentMode, serviceAllocations } = bookingPaySchema.parse(raw);
 
-    const increment = Math.min(paidAmount, Math.max(0, booking.netAmount - booking.paidAmount));
-    if (increment === 0) return ok(booking);
+    const balance = Math.max(0, booking.netAmount - booking.paidAmount);
+    if (paidAmount > balance) throw Errors.badRequest('Payment amount exceeds the outstanding balance.');
+    const increment = Math.min(paidAmount, balance);
+    if (increment === 0) {
+      const fresh = await db.booking.findUnique({ where: { id: params.itemId } });
+      return ok(fresh ?? booking);
+    }
 
     // Always fetch items so BookingItem.paidAmount is kept in sync for service-wise reporting
     const bk = await db.booking.findUnique({

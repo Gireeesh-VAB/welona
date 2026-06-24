@@ -226,14 +226,22 @@ export const POST = route(async (req) => {
 
   const isIntraState = !!(branchData?.stateId && customerData?.stateId && branchData.stateId === customerData.stateId);
 
+  // Derive effective GST split rates from the computed amounts (basis points: 900 = 9%)
+  const cgstPctDerived = (aggregateTaxable > 0 && isIntraState)
+    ? Math.round((aggregateCgst * 10000) / aggregateTaxable) : 0;
+  const sgstPctDerived = (aggregateTaxable > 0 && isIntraState)
+    ? Math.round((aggregateSgst * 10000) / aggregateTaxable) : 0;
+  const igstPctDerived = (aggregateTaxable > 0 && !isIntraState)
+    ? Math.round((aggregateIgst * 10000) / aggregateTaxable) : 0;
+
   const gstData: Record<string, unknown> = aggregateTax > 0
     ? {
         taxableAmt: aggregateTaxable,
-        cgstPct: isIntraState ? 50 : 0,   // 50 = 0.5 in basis points representation — half of full rate
+        cgstPct: cgstPctDerived,
         cgstAmt: aggregateCgst,
-        sgstPct: isIntraState ? 50 : 0,
+        sgstPct: sgstPctDerived,
         sgstAmt: aggregateSgst,
-        igstPct: isIntraState ? 0 : 100,
+        igstPct: igstPctDerived,
         igstAmt: aggregateIgst,
         taxType: isIntraState ? 'cgst_sgst' : 'igst',
       }

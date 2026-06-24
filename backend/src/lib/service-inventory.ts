@@ -31,7 +31,7 @@ function isConsumable(p: { consumptionUom: string | null; unitsPerPurchase: numb
  * Draws from the oldest open ConsumableUnit, spilling into the next sealed one if needed.
  * When a unit is exhausted, InventoryStock decrements by 1 purchase unit.
  */
-async function applyConsumableUsage(
+export async function applyConsumableUsage(
   tx: Tx,
   opts: {
     productId: string;

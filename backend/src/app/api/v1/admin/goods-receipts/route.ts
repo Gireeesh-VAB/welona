@@ -108,6 +108,9 @@ export const POST = route(async (req) => {
         number,
         receivedAt: body.receivedAt ? new Date(body.receivedAt) : new Date(),
         notes: body.notes ?? null,
+        invoiceNumber: body.invoiceNumber ?? null,
+        invoiceDate: body.invoiceDate ? new Date(body.invoiceDate) : null,
+        invoiceAmount: body.invoiceAmount ?? null,
         createdByAdminId,
       },
     });
@@ -118,6 +121,8 @@ export const POST = route(async (req) => {
       const unitsPerPurchase = product?.unitsPerPurchase ?? 1;
       const consumptionUom = (product as any)?.consumptionUom ?? null;
       const isConsumable = !!(consumptionUom) && unitsPerPurchase > 1;
+      const damagedQty = it.damagedQty ?? 0;
+      const goodQty = it.quantity - damagedQty; // only good units go into stock
 
       let batchId: string | null = null;
       if (product?.trackBatches && it.batchNo) {
@@ -129,64 +134,66 @@ export const POST = route(async (req) => {
           mfgDate: it.mfgDate ? new Date(it.mfgDate) : null,
           expiryDate: it.expiryDate ? new Date(it.expiryDate) : null,
           supplierId,
-          quantity: it.quantity,
+          quantity: goodQty,
         });
       }
 
-      // GRN item records the received purchase-unit quantity (for the audit document).
-      await tx.goodsReceiptItem.create({
-        data: { grnId: createdGrn.id, productId: it.productId, quantity: it.quantity, batchId },
+      // GRN item records total received + damaged (full audit).
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      await (tx.goodsReceiptItem.create as any)({
+        data: { grnId: createdGrn.id, productId: it.productId, quantity: it.quantity, damagedQty, batchId },
       });
 
-      if (isConsumable) {
-        // Consumable products: stock stays in purchase units; create one ConsumableUnit per received unit.
-        await tx.inventoryStock.upsert({
-          where: { warehouseId_productId: { warehouseId, productId: it.productId } },
-          create: { branchId, warehouseId, productId: it.productId, quantity: it.quantity },
-          update: { quantity: { increment: it.quantity } },
-        });
-        await tx.inventoryMovement.create({
-          data: {
-            branchId, warehouseId, productId: it.productId, batchId,
-            type: 'purchase',
-            delta: it.quantity,
-            reason: `Goods receipt (${it.quantity} ${product?.uom ?? 'unit'}${it.quantity !== 1 ? 's' : ''} — FIFO tracked)`,
-            ref: number,
-            createdByAdminId,
-          },
-        });
-        // Create one ConsumableUnit record per received purchase unit (FIFO).
-        for (let i = 0; i < it.quantity; i++) {
-          await (tx as any).consumableUnit.create({
+      if (goodQty > 0) {
+        if (isConsumable) {
+          // Consumable products: stock stays in purchase units; create one ConsumableUnit per good unit.
+          await tx.inventoryStock.upsert({
+            where: { warehouseId_productId: { warehouseId, productId: it.productId } },
+            create: { branchId, warehouseId, productId: it.productId, quantity: goodQty },
+            update: { quantity: { increment: goodQty } },
+          });
+          await tx.inventoryMovement.create({
             data: {
-              orgId,
-              productId: it.productId,
-              branchId,
-              warehouseId,
-              grnId: createdGrn.id,
-              totalCapacity: unitsPerPurchase,
-              usedQuantity: 0,
-              status: 'sealed',
+              branchId, warehouseId, productId: it.productId, batchId,
+              type: 'purchase',
+              delta: goodQty,
+              reason: `Goods receipt (${goodQty} good, ${damagedQty} damaged — FIFO tracked)`,
+              ref: number,
+              createdByAdminId,
+            },
+          });
+          for (let i = 0; i < goodQty; i++) {
+            await (tx as any).consumableUnit.create({
+              data: {
+                orgId,
+                productId: it.productId,
+                branchId,
+                warehouseId,
+                grnId: createdGrn.id,
+                totalCapacity: unitsPerPurchase,
+                usedQuantity: 0,
+                status: 'sealed',
+              },
+            });
+          }
+        } else {
+          // Non-consumable products: credit only good units to stock.
+          await tx.inventoryStock.upsert({
+            where: { warehouseId_productId: { warehouseId, productId: it.productId } },
+            create: { branchId, warehouseId, productId: it.productId, quantity: goodQty },
+            update: { quantity: { increment: goodQty } },
+          });
+          await tx.inventoryMovement.create({
+            data: {
+              branchId, warehouseId, productId: it.productId, batchId,
+              type: 'purchase',
+              delta: goodQty,
+              reason: damagedQty > 0 ? `Goods receipt (${goodQty} good, ${damagedQty} damaged)` : 'Goods receipt',
+              ref: number,
+              createdByAdminId,
             },
           });
         }
-      } else {
-        // Non-consumable products: stock in purchase units, direct deduction per session.
-        await tx.inventoryStock.upsert({
-          where: { warehouseId_productId: { warehouseId, productId: it.productId } },
-          create: { branchId, warehouseId, productId: it.productId, quantity: it.quantity },
-          update: { quantity: { increment: it.quantity } },
-        });
-        await tx.inventoryMovement.create({
-          data: {
-            branchId, warehouseId, productId: it.productId, batchId,
-            type: 'purchase',
-            delta: it.quantity,
-            reason: 'Goods receipt',
-            ref: number,
-            createdByAdminId,
-          },
-        });
       }
     }
 

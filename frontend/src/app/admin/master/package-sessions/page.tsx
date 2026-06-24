@@ -153,6 +153,7 @@ export default function PackageSessionMastersPage() {
   const watchedServiceIds     = Form.useWatch('serviceIds',     form) as string[] | undefined;
   const watchedPriceRupees    = Form.useWatch('priceRupees',    form) as number   | undefined;
   const watchedCollectAdvance = Form.useWatch('collectAdvance', form) as boolean  | undefined;
+  const watchedInventoryItems = Form.useWatch('inventoryItems', form) as Array<{ productId?: string; quantityPerSession?: number }> | undefined;
 
   // When the selected service list changes, keep perServiceSessions in sync:
   // - add new services with their master default (customSessions from snapshot when editing, else service.sessions)
@@ -223,15 +224,29 @@ export default function PackageSessionMastersPage() {
       sessions: number; pct: number; subtotal: number; tax: number; total: number; totalPerSes: number;
     }[];
 
-    const grandSubtotal  = rows.reduce((s, r) => s + r.subtotal, 0);
-    const grandTax       = rows.reduce((s, r) => s + r.tax, 0);
-    const grandTotal     = grandSubtotal + grandTax; // true total across all services × their session counts
-    const sellingPaise   = Math.round((watchedPriceRupees ?? 0) * 100);
-    const suggestedPaise = grandTotal;
-    const discountAmt    = suggestedPaise - sellingPaise;
-    const discountPct    = suggestedPaise > 0 ? (discountAmt / suggestedPaise) * 100 : 0;
+    // Product cost rows (additional inventory items added to the package)
+    const productRows = (watchedInventoryItems ?? [])
+      .filter((item) => item?.productId)
+      .map((item) => {
+        const prod = productOptions.find((p) => p.id === item.productId);
+        if (!prod) return null;
+        const qty       = item.quantityPerSession ?? 1;
+        const unitPaise = prod.effectivePrice ?? 0;
+        const total     = unitPaise * qty;
+        return { productId: item.productId!, name: prod.name, unitPaise, qty, total, uom: prod.uom };
+      })
+      .filter(Boolean) as { productId: string; name: string; unitPaise: number; qty: number; total: number; uom: string }[];
 
-    return { rows, grandSubtotal, grandTax, grandTotal, suggestedPaise, sellingPaise, discountAmt, discountPct };
+    const grandSubtotal   = rows.reduce((s, r) => s + r.subtotal, 0);
+    const grandTax        = rows.reduce((s, r) => s + r.tax, 0);
+    const productTotal    = productRows.reduce((s, r) => s + r.total, 0);
+    const grandTotal      = grandSubtotal + grandTax + productTotal;
+    const sellingPaise    = Math.round((watchedPriceRupees ?? 0) * 100);
+    const suggestedPaise  = grandTotal;
+    const discountAmt     = suggestedPaise - sellingPaise;
+    const discountPct     = suggestedPaise > 0 ? (discountAmt / suggestedPaise) * 100 : 0;
+
+    return { rows, productRows, grandSubtotal, grandTax, productTotal, grandTotal, suggestedPaise, sellingPaise, discountAmt, discountPct };
   })();
 
   const filtered = masters.filter(m =>
@@ -516,7 +531,7 @@ export default function PackageSessionMastersPage() {
                 </div>
               </div>
 
-              {breakdown && breakdown.suggestedPaise > 0 && breakdown.sellingPaise > 0 && (
+              {breakdown && breakdown.suggestedPaise > 0 && (
                 <div style={{
                   background: breakdown.discountAmt > 0 ? 'rgba(82,196,26,0.05)' : 'rgba(255,77,79,0.05)',
                   border: `1px solid ${breakdown.discountAmt > 0 ? 'rgba(82,196,26,0.3)' : 'rgba(255,77,79,0.3)'}`,
@@ -675,13 +690,32 @@ export default function PackageSessionMastersPage() {
                       </div>
                     ))}
                   </div>
+                  {breakdown.productRows.length > 0 && (
+                    <div style={{ marginBottom: 6 }}>
+                      <div style={{ fontSize: 11, fontWeight: 600, color: '#fa8c16', marginBottom: 4 }}>Products</div>
+                      {breakdown.productRows.map((row) => (
+                        <div key={row.productId} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '4px 0', borderBottom: '1px dashed #f0f0f0', gap: 6 }}>
+                          <span style={{ fontSize: 11, flex: 1, fontWeight: 500, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{row.name}</span>
+                          <span style={{ fontSize: 10, color: '#888', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                            {fmt(row.unitPaise)} × {row.qty} {row.uom}
+                          </span>
+                          <span style={{ fontSize: 11, fontWeight: 600, whiteSpace: 'nowrap', minWidth: 65, textAlign: 'right' }}>{fmt(row.total)}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                   <div style={{ borderTop: '1px solid rgba(22,119,255,0.2)', paddingTop: 6 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
-                      <span style={{ color: '#555' }}>Subtotal</span><span>{fmt(breakdown.grandSubtotal)}</span>
+                      <span style={{ color: '#555' }}>Services Subtotal</span><span>{fmt(breakdown.grandSubtotal)}</span>
                     </div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
                       <span style={{ color: '#555' }}>GST</span><span>{fmt(breakdown.grandTax)}</span>
                     </div>
+                    {breakdown.productTotal > 0 && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, marginBottom: 2 }}>
+                        <span style={{ color: '#555' }}>Products Cost</span><span>{fmt(breakdown.productTotal)}</span>
+                      </div>
+                    )}
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, fontWeight: 700, borderTop: '1px solid rgba(22,119,255,0.2)', paddingTop: 5, marginTop: 3 }}>
                       <span>Actual Value</span>
                       <span style={{ color: '#1677ff' }}>{fmt(breakdown.grandTotal)}</span>

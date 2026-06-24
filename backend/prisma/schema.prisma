@@ -1653,6 +1653,11 @@ model PurchaseOrder {
   taxAmt           Int                 @default(0)
   total            Int                 @default(0)
   notes            String?
+  paymentStatus    String?
+  paymentDate      DateTime?
+  paymentMethod    String?
+  amountPaid       Int?
+  paymentReference String?
   createdByAdminId String?
   createdByAdmin   AdminUser?          @relation(fields: [createdByAdminId], references: [id])
   items            PurchaseOrderItem[]
@@ -1696,6 +1701,9 @@ model GoodsReceipt {
   number           String
   receivedAt       DateTime           @default(now())
   notes            String?
+  invoiceNumber    String?
+  invoiceDate      DateTime?
+  invoiceAmount    Int?
   createdByAdminId String?
   createdByAdmin   AdminUser?         @relation(fields: [createdByAdminId], references: [id])
   items            GoodsReceiptItem[]
@@ -1708,14 +1716,15 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptItem {
-  id        String       @id @default(cuid())
-  grnId     String
-  grn       GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
-  productId String
-  product   Product      @relation(fields: [productId], references: [id])
-  quantity  Int
+  id          String       @id @default(cuid())
+  grnId       String
+  grn         GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  productId   String
+  product     Product      @relation(fields: [productId], references: [id])
+  quantity    Int
+  damagedQty  Int          @default(0)
   /// Batch this line was received into (batch-tracked products only).
-  batchId   String?
+  batchId     String?
 
   @@index([grnId])
   @@index([productId])
@@ -2063,9 +2072,15 @@ model StockIndent {
   notes                String?
 
   // Delivery tracking — populated on dispatch
+  dispatchMethod       String?   // company_vehicle | branch_staff_pickup | porter | rapido | courier | other
   vehicleNumber        String?
-  driverName           String?
-  driverMobile         String?
+  driverName           String?   // driver / employee / delivery person name (reused across methods)
+  driverMobile         String?   // contact mobile (reused across methods)
+  pickupEmployeeId     String?   // branch_staff_pickup: employee ID
+  providerName         String?   // porter/rapido/courier: service provider name
+  trackingNumber       String?   // porter/rapido/courier: booking or tracking ID
+  deliveryCharges      Int?      // porter/rapido/courier: transport cost in paise
+  customMethodName     String?   // other: free-text method name
   dispatchedAt         DateTime?
   expectedDeliveryAt   DateTime?
   deliveryNotes        String?

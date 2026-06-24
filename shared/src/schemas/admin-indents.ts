@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { DISPATCH_METHODS } from '../enums';
 
 // --- Create (multi-item) ---
 
@@ -34,6 +35,7 @@ export const stockIndentActionSchema = z.discriminatedUnion('action', [
   // Dispatch: delivery info + fulfilledQty per item; deducts from sourceWarehouseId
   z.object({
     action: z.literal('dispatch'),
+    dispatchMethod: z.enum(DISPATCH_METHODS),
     sourceWarehouseId: z.string().min(1).optional(),
     items: z
       .array(z.object({
@@ -42,9 +44,21 @@ export const stockIndentActionSchema = z.discriminatedUnion('action', [
         warehouseId: z.string().min(1).optional(),
       }))
       .min(1),
+    // Company vehicle
     vehicleNumber: z.string().trim().max(20).optional(),
+    // Shared: driver / employee / delivery person name
     driverName: z.string().trim().max(100).optional(),
+    // Shared: contact mobile
     driverMobile: z.string().trim().max(15).optional(),
+    // Branch staff pickup
+    pickupEmployeeId: z.string().trim().max(50).optional(),
+    // Porter / Rapido / Courier
+    providerName: z.string().trim().max(100).optional(),
+    trackingNumber: z.string().trim().max(100).optional(),
+    deliveryCharges: z.coerce.number().int().min(0).optional(),
+    // Other
+    customMethodName: z.string().trim().max(100).optional(),
+    // All methods
     expectedDeliveryAt: z.string().datetime({ offset: true }).optional(),
     deliveryNotes: z.string().trim().max(500).optional(),
   }),

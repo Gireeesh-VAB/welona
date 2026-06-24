@@ -85,6 +85,7 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
         include: {
           createdByAdmin: true,
           _count: { select: { supplierProducts: true } },
+          supplierProducts: { select: { productId: true, isActive: true, unitPrice: true } },
         },
       });
 

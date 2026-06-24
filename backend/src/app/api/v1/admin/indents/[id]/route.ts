@@ -129,29 +129,37 @@ export const PATCH = route<RouteContext>(async (req, { params }) => {
           whId = best?.warehouseId ?? null;
         }
 
-        if (whId && qty > 0) {
+        if (qty > 0) {
+          if (!whId) {
+            throw Errors.badRequest(
+              `No warehouse selected for a dispatch item. Please select a source warehouse for all items.`,
+            );
+          }
           const stock = await tx.inventoryStock.findUnique({
             where: { warehouseId_productId: { warehouseId: whId, productId: item.productId } },
             select: { quantity: true, branchId: true },
           });
-          if (stock) {
-            await tx.inventoryStock.update({
-              where: { warehouseId_productId: { warehouseId: whId, productId: item.productId } },
-              data: { quantity: { decrement: qty } },
-            });
-            await tx.inventoryMovement.create({
-              data: {
-                branchId: stock.branchId,
-                warehouseId: whId,
-                productId: item.productId,
-                type: 'transfer_out',
-                delta: -qty,
-                reason: `Dispatched to branch (indent ${indent.number ?? indent.id})`,
-                ref: indent.number ?? indent.id,
-                createdByAdminId,
-              },
-            });
+          if (!stock || stock.quantity < qty) {
+            throw Errors.badRequest(
+              `Insufficient stock: need ${qty} unit(s) but only ${stock?.quantity ?? 0} available in the selected warehouse. Please create a Purchase Order to restock.`,
+            );
           }
+          await tx.inventoryStock.update({
+            where: { warehouseId_productId: { warehouseId: whId, productId: item.productId } },
+            data: { quantity: { decrement: qty } },
+          });
+          await tx.inventoryMovement.create({
+            data: {
+              branchId: stock.branchId,
+              warehouseId: whId,
+              productId: item.productId,
+              type: 'transfer_out',
+              delta: -qty,
+              reason: `Dispatched to branch (indent ${indent.number ?? indent.id})`,
+              ref: indent.number ?? indent.id,
+              createdByAdminId,
+            },
+          });
         }
       }
       return tx.stockIndent.update({
@@ -159,9 +167,15 @@ export const PATCH = route<RouteContext>(async (req, { params }) => {
         data: {
           status: 'dispatched',
           dispatchedAt: new Date(),
+          dispatchMethod: body.dispatchMethod,
           vehicleNumber: body.vehicleNumber ?? null,
           driverName: body.driverName ?? null,
           driverMobile: body.driverMobile ?? null,
+          pickupEmployeeId: body.pickupEmployeeId ?? null,
+          providerName: body.providerName ?? null,
+          trackingNumber: body.trackingNumber ?? null,
+          deliveryCharges: body.deliveryCharges ?? null,
+          customMethodName: body.customMethodName ?? null,
           expectedDeliveryAt: body.expectedDeliveryAt ? new Date(body.expectedDeliveryAt) : null,
           deliveryNotes: body.deliveryNotes ?? null,
         },

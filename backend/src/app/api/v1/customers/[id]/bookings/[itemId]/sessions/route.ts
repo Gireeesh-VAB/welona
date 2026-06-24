@@ -6,6 +6,7 @@ import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
 import { getDefaultWarehouseId } from '@/lib/warehouse';
 import { depleteBatchStockFEFO } from '@/lib/batch';
+import { applyConsumableUsage } from '@/lib/service-inventory';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dba = db as any;
@@ -98,27 +99,42 @@ export const GET = route<Ctx>(async (req, { params }) => {
     for (const m of masters) masterMap.set(m.name, m.defaultSessions);
   }
 
-  // If no BookingItem rows exist (flat/legacy booking), synthesise one from serviceName
+  // Build a lookup of packageSessionMasterId → package name from summary lines
+  const pkgNameMap = new Map<string, string>();
+  for (const it of booking.items as any[]) {
+    if (it.isPackageSummaryLine && it.packageSessionMasterId) {
+      pkgNameMap.set(it.packageSessionMasterId, it.service);
+    }
+  }
+
+  // Package summary lines (isPackageSummaryLine=true) are excluded — sessions are consumed
+  // against the individual service sub-items, not the package header row.
   const items = booking.items.length > 0
-    ? booking.items.map((it: any) => {
-        let qty = it.quantity;
-        if (it.isSessionBased && qty === 1 && masterMap.has(it.service)) {
-          qty = masterMap.get(it.service)!;
-        }
-        return {
-          id:             it.id,
-          service:        it.service,
-          category:       it.category,
-          quantity:       qty,
-          isSessionBased: it.isSessionBased ?? false,
-        };
-      })
+    ? (booking.items as any[])
+        .filter((it) => !it.isPackageSummaryLine)
+        .map((it) => {
+          let qty = it.quantity;
+          if (it.isSessionBased && qty === 1 && masterMap.has(it.service)) {
+            qty = masterMap.get(it.service)!;
+          }
+          return {
+            id:                     it.id,
+            service:                it.service,
+            category:               it.category,
+            quantity:               qty,
+            isSessionBased:         it.isSessionBased ?? false,
+            packageSessionMasterId: it.packageSessionMasterId ?? null,
+            packageName:            it.packageSessionMasterId ? (pkgNameMap.get(it.packageSessionMasterId) ?? null) : null,
+          };
+        })
     : [{
-        id:             booking.id,
-        service:        (booking as any).serviceName ?? 'Service',
-        category:       null,
-        quantity:       1,
-        isSessionBased: false,
+        id:                     booking.id,
+        service:                (booking as any).serviceName ?? 'Service',
+        category:               null,
+        quantity:               1,
+        isSessionBased:         false,
+        packageSessionMasterId: null,
+        packageName:            null,
       }];
 
   return ok({ items, sessions: sessions.map(serializeSession) });
@@ -198,42 +214,58 @@ export const POST = route<Ctx>(async (req, { params }) => {
       include: { products: true },
     });
 
-    // Deduct extra products from inventory when session is completed
+    // Deduct products from inventory when session is completed.
+    // Consumable products (consumptionUom set, unitsPerPurchase > 1) use the FIFO
+    // ConsumableUnit logic; others use direct stock decrement.
     if (body.status === 'completed' && body.products.length > 0 && booking.branchId) {
       const warehouseId = await getDefaultWarehouseId(tx, booking.branchId);
       const productIds  = body.products.map((p) => p.productId);
       const productRows = await tx.product.findMany({
         where:  { id: { in: productIds } },
-        select: { id: true, trackBatches: true },
+        select: { id: true, trackBatches: true, consumptionUom: true, unitsPerPurchase: true },
       });
-      const trackMap = new Map(productRows.map((p) => [p.id, p.trackBatches]));
+      const productMeta = new Map(productRows.map((p) => [p.id, p]));
 
       for (const line of body.products) {
-        const qty = line.quantity;
-        await tx.inventoryStock.upsert({
-          where:  { warehouseId_productId: { warehouseId, productId: line.productId } },
-          create: { branchId: booking.branchId!, warehouseId, productId: line.productId, quantity: 0 },
-          update: {},
-        });
-        await tx.inventoryStock.update({
-          where: { warehouseId_productId: { warehouseId, productId: line.productId } },
-          data:  { quantity: { decrement: qty } },
-        });
-        if (trackMap.get(line.productId)) {
-          await depleteBatchStockFEFO(tx, { productId: line.productId, warehouseId, quantity: qty, force: true });
+        const qty  = line.quantity;
+        const meta = productMeta.get(line.productId);
+        const isConsumable = !!(meta?.consumptionUom) && (meta?.unitsPerPurchase ?? 1) > 1;
+
+        if (isConsumable) {
+          await applyConsumableUsage(tx, {
+            productId:    line.productId,
+            branchId:     booking.branchId!,
+            quantityUsed: qty,
+            bookingId:    booking.id,
+            sessionRef:   session.id,
+            force:        true,
+          });
+        } else {
+          await tx.inventoryStock.upsert({
+            where:  { warehouseId_productId: { warehouseId, productId: line.productId } },
+            create: { branchId: booking.branchId!, warehouseId, productId: line.productId, quantity: 0 },
+            update: {},
+          });
+          await tx.inventoryStock.update({
+            where: { warehouseId_productId: { warehouseId, productId: line.productId } },
+            data:  { quantity: { decrement: qty } },
+          });
+          if (meta?.trackBatches) {
+            await depleteBatchStockFEFO(tx, { productId: line.productId, warehouseId, quantity: qty, force: true });
+          }
+          await tx.inventoryMovement.create({
+            data: {
+              branchId:        booking.branchId!,
+              warehouseId,
+              productId:       line.productId,
+              type:            'service_consumption',
+              delta:           -qty,
+              reason:          `Session #${sessionNumber} extra product (${body.serviceName ?? 'booking'})`,
+              ref:             session.id,
+              createdByAdminId: null,
+            },
+          });
         }
-        await tx.inventoryMovement.create({
-          data: {
-            branchId:        booking.branchId!,
-            warehouseId,
-            productId:       line.productId,
-            type:            'service_consumption',
-            delta:           -qty,
-            reason:          `Session #${sessionNumber} extra product (${body.serviceName ?? 'booking'})`,
-            ref:             session.id,
-            createdByAdminId: null,
-          },
-        });
       }
     }
 

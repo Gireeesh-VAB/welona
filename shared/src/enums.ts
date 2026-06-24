@@ -200,6 +200,16 @@ export type InventoryMovementType = (typeof INVENTORY_MOVEMENT_TYPES)[number];
 export const STOCK_INDENT_STATUSES = ['pending', 'approved', 'dispatched', 'delivered', 'closed', 'rejected'] as const;
 export type StockIndentStatus = (typeof STOCK_INDENT_STATUSES)[number];
 
+export const DISPATCH_METHODS = [
+  'company_vehicle',
+  'branch_staff_pickup',
+  'porter',
+  'rapido',
+  'courier',
+  'other',
+] as const;
+export type DispatchMethod = (typeof DISPATCH_METHODS)[number];
+
 /** Procurement RFQ lifecycle. */
 export const RFQ_STATUSES = ['draft', 'sent', 'comparing', 'ordered', 'cancelled'] as const;
 export type RFQStatus = (typeof RFQ_STATUSES)[number];
@@ -217,6 +227,12 @@ export const PURCHASE_ORDER_STATUSES = [
   'cancelled',
 ] as const;
 export type PurchaseOrderStatus = (typeof PURCHASE_ORDER_STATUSES)[number];
+
+export const PO_PAYMENT_STATUSES = ['unpaid', 'partial', 'paid'] as const;
+export type PoPaymentStatus = (typeof PO_PAYMENT_STATUSES)[number];
+
+export const PO_PAYMENT_METHODS = ['bank_transfer', 'cheque', 'upi', 'cash', 'other'] as const;
+export type PoPaymentMethod = (typeof PO_PAYMENT_METHODS)[number];
 
 /** Lifecycle states of an inter-branch Stock Transfer. */
 export const STOCK_TRANSFER_STATUSES = [
