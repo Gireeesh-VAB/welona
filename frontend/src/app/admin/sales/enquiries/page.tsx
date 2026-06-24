@@ -26,6 +26,7 @@ import {
   useAdminTreatments,
   useAdminMasterOptions,
 } from '@/hooks/useAdminSales';
+import { useAdminMediaOptions } from '@/hooks/useAdminMedias';
 import SalesNav from '@/components/admin-sales/SalesNav';
 import StatusTag from '@/components/sales/StatusTag';
 import OwnerAssign from '@/components/admin-sales/OwnerAssign';
@@ -67,7 +68,7 @@ export default function EnquiriesPage() {
   const { data: salespeople } = useAdminSalespeople();
   const { data: treatments } = useAdminTreatments();
   const { data: enquiryTypes } = useAdminMasterOptions('enquiry_type');
-  const { data: mediaOptions } = useAdminMasterOptions('media');
+  const { data: mediaData } = useAdminMediaOptions();
   const { data: callTypes } = useAdminMasterOptions('call_type');
   const createLead = useCreateAdminLead();
   const updateLead = useUpdateAdminLead();
@@ -291,8 +292,8 @@ export default function EnquiriesPage() {
               allowClear
               showSearch
               optionFilterProp="label"
-              options={toSelectOptions(mediaOptions)}
-              notFoundContent="Add options in Settings → Media"
+              options={(mediaData ?? []).map((m) => ({ value: m.name, label: m.name }))}
+              notFoundContent="Add media in Admin → Master → Media"
             />
           </Form.Item>
 

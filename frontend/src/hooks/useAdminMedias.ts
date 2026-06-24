@@ -32,6 +32,18 @@ export function useAdminMedias(params: ListParams = {}) {
   });
 }
 
+/** Lightweight dropdown list of all active medias — for select inputs. */
+export function useAdminMediaOptions() {
+  return useQuery({
+    queryKey: [KEY, 'options'],
+    queryFn: async () => {
+      const res = await apiList<AdminMedia>('/admin/medias', { query: { limit: 500 } });
+      return res.items ?? [];
+    },
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 export function useCreateAdminMedia() {
   const qc = useQueryClient();
   return useMutation({

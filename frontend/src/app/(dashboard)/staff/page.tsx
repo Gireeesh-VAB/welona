@@ -34,6 +34,7 @@ import {
   useRoles,
   useBranches,
 } from '@/hooks/useStaff';
+import { useAuthStore } from '@/store/authStore';
 import { ApiClientError } from '@/lib/api-client';
 import { GENDERS } from '@shared/enums';
 import { formatDate, formatMoney, titleCase, toMinorUnits } from '@shared/format';
@@ -73,6 +74,7 @@ function StatusTag({ status }: { status: string }) {
 /** Employees directory — every staff member, with their full HR profile. */
 export default function StaffPage() {
   const { message } = App.useApp();
+  const myBranchId = useAuthStore((s) => s.user?.branchId ?? null);
   const { data, isLoading } = useStaff();
   const { data: roles } = useRoles();
   const { data: branches } = useBranches();
@@ -146,7 +148,7 @@ export default function StaffPage() {
         phone: v.phone || undefined,
         password: v.password,
         roleId: v.roleId,
-        branchId: v.branchId || undefined,
+        branchId: myBranchId ?? (v.branchId || undefined),
         status: v.status,
       });
       message.success('Employee added');
@@ -516,7 +518,7 @@ export default function StaffPage() {
           form={addForm}
           layout="vertical"
           preserve={false}
-          initialValues={{ status: 'active' }}
+          initialValues={{ status: 'active', branchId: myBranchId ?? undefined }}
         >
           <Form.Item
             name="name"
@@ -553,13 +555,15 @@ export default function StaffPage() {
                 options={(roles ?? []).map((r) => ({ label: r.name, value: r.id }))}
               />
             </Form.Item>
-            <Form.Item name="branchId" label="Branch" style={{ flex: 1 }}>
-              <Select
-                allowClear
-                placeholder="All branches"
-                options={(branches ?? []).map((b) => ({ label: b.name, value: b.id }))}
-              />
-            </Form.Item>
+            {!myBranchId && (
+              <Form.Item name="branchId" label="Branch" style={{ flex: 1 }}>
+                <Select
+                  allowClear
+                  placeholder="All branches"
+                  options={(branches ?? []).map((b) => ({ label: b.name, value: b.id }))}
+                />
+              </Form.Item>
+            )}
           </div>
           <Form.Item
             name="password"

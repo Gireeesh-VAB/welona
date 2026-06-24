@@ -27,6 +27,7 @@ import {
   useSalespeople,
   useTreatments,
   useMasterOptions,
+  useMedias,
   useCustomers,
 } from '@/hooks/useSales';
 import SalesNav from '@/components/sales/SalesNav';
@@ -84,7 +85,7 @@ export default function EnquiriesPage() {
   const { data: salespeople } = useSalespeople();
   const { data: treatments } = useTreatments();
   const { data: enquiryTypes } = useMasterOptions('enquiry_type');
-  const { data: mediaOptions } = useMasterOptions('media');
+  const { data: mediaData } = useMedias();
   const { data: callTypes } = useMasterOptions('call_type');
   const createLead = useCreateLead();
   const updateLead = useUpdateLead();
@@ -399,8 +400,8 @@ export default function EnquiriesPage() {
               allowClear
               showSearch
               optionFilterProp="label"
-              options={toSelectOptions(mediaOptions)}
-              notFoundContent="Add options in Settings → Media"
+              options={(mediaData ?? []).map((m) => ({ value: m.name, label: m.name }))}
+              notFoundContent="Add media in Admin → Master → Media"
             />
           </Form.Item>
 
