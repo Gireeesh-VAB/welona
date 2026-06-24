@@ -18,7 +18,7 @@ import type { MasterOption } from '@shared/types/sales';
 
 const { Title } = Typography;
 
-interface FormValues { label: string; sortOrder?: number }
+interface FormValues { label: string }
 
 export default function EnquiryTypePage() {
   const colors = useBrandColors();
@@ -45,17 +45,17 @@ export default function EnquiryTypePage() {
   const openCreate = () => { setEditing(null); form.resetFields(); setModalOpen(true); };
   const openEdit = (row: MasterOption) => {
     setEditing(row);
-    form.setFieldsValue({ label: row.label, sortOrder: row.sortOrder });
+    form.setFieldsValue({ label: row.label });
     setModalOpen(true);
   };
 
   const onSubmit = async (values: FormValues) => {
     try {
       if (editing) {
-        await update.mutateAsync({ id: editing.id, body: { label: values.label.trim(), sortOrder: values.sortOrder ?? 0 } });
+        await update.mutateAsync({ id: editing.id, body: { label: values.label.trim() } });
         message.success('Updated');
       } else {
-        await create.mutateAsync({ kind: 'enquiry_type', label: values.label.trim(), sortOrder: values.sortOrder ?? 0 });
+        await create.mutateAsync({ kind: 'enquiry_type', label: values.label.trim() });
         message.success('Added');
       }
       setModalOpen(false);
@@ -98,7 +98,6 @@ export default function EnquiryTypePage() {
       ),
     },
     { title: 'Label', dataIndex: 'label', sorter: (a, b) => a.label.localeCompare(b.label) },
-    { title: 'Sort', dataIndex: 'sortOrder', width: 80 },
     {
       title: 'Status', dataIndex: 'isActive', width: 100,
       render: (v: boolean) => <Tag color={v ? 'success' : 'default'}>{v ? 'Active' : 'Inactive'}</Tag>,
@@ -131,9 +130,6 @@ export default function EnquiryTypePage() {
         <Form form={form} layout="vertical" onFinish={onSubmit}>
           <Form.Item name="label" label="Label" rules={[{ required: true, message: 'Label is required' }]}>
             <Input placeholder="e.g. Walk-in, Phone, Online" maxLength={80} />
-          </Form.Item>
-          <Form.Item name="sortOrder" label="Sort Order">
-            <Input type="number" placeholder="0" />
           </Form.Item>
         </Form>
       </Modal>

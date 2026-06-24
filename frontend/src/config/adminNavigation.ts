@@ -105,9 +105,9 @@ export const adminNavigation: AdminNavItem[] = [
         description: 'Retail product master — SKU, brand, prices, tax and stock thresholds.',
       },
       {
-        key: 'master-role',
-        label: 'Role',
-        path: '/admin/master/role',
+        key: 'master-rbac',
+        label: 'RBAC',
+        path: '/admin/master/rbac',
         description: 'Staff roles and the module permissions each role carries.',
       },
       {

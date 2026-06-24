@@ -252,7 +252,7 @@ export const invoiceCreateSchema = z.object({
 
 export const paymentCreateSchema = z.object({
   amount: money.refine((v) => v > 0, 'Amount must be greater than zero'),
-  method: z.enum(PAYMENT_METHODS).default('cash'),
+  method: z.string().trim().min(1).default('cash'),
   reference: z.string().trim().optional(),
   receivedAt: z.string().datetime().optional(),
 });

@@ -136,6 +136,7 @@ model Role {
   name        String
   key         String
   scope       String // "organization" | "branch"
+  description String       @default("")
   permissions String // JSON string: string[]
   isSystem    Boolean      @default(true)
   staff       Staff[]

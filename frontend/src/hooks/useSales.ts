@@ -189,6 +189,16 @@ export function useBranches() {
   });
 }
 
+// --- Media (from Admin → Master → Media) -----------------------------------
+
+export function useMedias() {
+  return useQuery({
+    queryKey: ['medias'],
+    queryFn: () => api.get<{ id: string; name: string }[]>('/medias'),
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
 // --- Master options (configurable dropdowns) -------------------------------
 
 export function useMasterOptions(kind: string) {
@@ -475,5 +485,19 @@ export function useRecordPayment() {
     mutationFn: ({ invoiceId, body }: { invoiceId: string; body: Record<string, unknown> }) =>
       api.post<Payment>(`/sales/invoices/${invoiceId}/payments`, body),
     onSuccess: () => invalidateSales(qc),
+  });
+}
+
+export interface BranchPaymentMode {
+  id: string;
+  name: string;
+  remarks: string | null;
+}
+
+export function useBranchPaymentModes() {
+  return useQuery<BranchPaymentMode[]>({
+    queryKey: ['branch-payment-modes'],
+    queryFn: () => api.get<BranchPaymentMode[]>('/payment-modes'),
+    staleTime: 5 * 60 * 1000,
   });
 }
