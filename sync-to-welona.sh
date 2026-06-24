@@ -154,7 +154,7 @@ if $SYNC_FRONTEND; then
   log "Frontend built locally"
 
   warn "Syncing frontend .next build to server..."
-  eval "$RSYNC --delete \
+  eval "$RSYNC --delete --exclude='cache' \
     $LOCAL_APP_DIR/frontend/.next/ \
     $SERVER_USER@$SERVER_HOST:$SERVER_APP_DIR/frontend/.next/"
 

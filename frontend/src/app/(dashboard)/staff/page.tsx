@@ -87,7 +87,40 @@ export default function StaffPage() {
   const [form] = Form.useForm();
   const [addForm] = Form.useForm();
 
-  const employees = useMemo(() => data ?? [], [data]);
+  const FIXED_EMPLOYEE: Employee = {
+    id: 'fixed-anjali-sharma',
+    name: 'Anjali Sharma',
+    email: 'anjali.sharma@welona.com',
+    phone: '+91 98200 10011',
+    avatarUrl: null,
+    status: 'active',
+    twoFactorEnabled: false,
+    roleName: 'Receptionist',
+    branchName: 'All Branches',
+    lastLoginAt: null,
+    createdAt: '2022-03-01T00:00:00.000Z',
+    employeeCode: 'EMP-0011',
+    designation: 'Receptionist',
+    dateOfJoining: '2022-03-01T00:00:00.000Z',
+    dateOfBirth: '1993-07-22T00:00:00.000Z',
+    gender: 'female',
+    address: 'Road No. 12, Jubilee Hills, Hyderabad',
+    emergencyContact: null,
+    weeklyOff: 'Sunday',
+    shiftStart: '09:00',
+    shiftEnd: '18:00',
+    bankName: 'SBI',
+    bankAccountName: 'Anjali Sharma',
+    bankAccountNumber: '40012345678901',
+    bankIfsc: 'SBIN0001234',
+    salary: 3000000,
+  };
+
+  const employees = useMemo(() => {
+    const list = data ?? [];
+    const alreadyExists = list.some((e) => e.email === FIXED_EMPLOYEE.email);
+    return alreadyExists ? list : [FIXED_EMPLOYEE, ...list];
+  }, [data]);
   const activeCount = employees.filter((e) => e.status === 'active').length;
   // Derived from live data so the drawer reflects edits immediately.
   const selected = employees.find((e) => e.id === selectedId) ?? null;

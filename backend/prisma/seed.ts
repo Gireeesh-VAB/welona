@@ -135,6 +135,7 @@ async function main() {
     { name: 'Sneha Iyer', email: 'reception.cp@welona.com', roleKey: 'receptionist', branchId: cp.id },
     { name: 'Karan Shah', email: 'manager.bnd@welona.com', roleKey: 'branch_manager', branchId: bandra.id },
     { name: 'Divya Rao', email: 'finance@welona.com', roleKey: 'finance', branchId: null },
+    { name: 'Anjali Sharma', email: 'anjali.sharma@welona.com', roleKey: 'receptionist', branchId: null },
   ];
 
   const staff: Record<string, string> = {};
