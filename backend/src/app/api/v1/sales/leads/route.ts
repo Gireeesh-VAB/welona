@@ -86,12 +86,15 @@ export const POST = route(async (req) => {
   requirePermission(claims, 'sales:create');
   const body = await parseBody(req, leadCreateSchema);
 
-  // "Follow-Up By" defaults to the current user when not chosen.
-  const ownerStaffId = body.ownerStaffId ?? claims.sub;
-  const owner = await db.staff.findFirst({
-    where: { id: ownerStaffId, orgId: claims.orgId },
-  });
-  if (!owner) throw Errors.badRequest('Selected salesperson does not exist');
+  // "Follow-Up By" is optional — validate only when explicitly provided.
+  // SystemUser logins have a non-Staff sub, so we never default to claims.sub.
+  const ownerStaffId = body.ownerStaffId ?? null;
+  if (ownerStaffId) {
+    const owner = await db.staff.findFirst({
+      where: { id: ownerStaffId, orgId: claims.orgId },
+    });
+    if (!owner) throw Errors.badRequest('Selected salesperson does not exist');
+  }
 
   if (body.customerId) {
     const customer = await db.customer.findFirst({
