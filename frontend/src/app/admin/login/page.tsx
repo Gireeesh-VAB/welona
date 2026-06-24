@@ -63,12 +63,12 @@ export default function AdminLoginPage() {
   return (
     <div
       style={{
-        minHeight: '100vh',
+        height: '100vh',
+        overflow: 'hidden',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        background:
-          'radial-gradient(circle at 50% 0%, #FFFFFF 0%, #EFE9DC 70%)',
+        background: 'radial-gradient(circle at 50% 0%, #FFFFFF 0%, #EFE9DC 70%)',
         padding: 24,
       }}
     >
