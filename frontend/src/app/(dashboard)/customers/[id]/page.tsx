@@ -187,6 +187,14 @@ const HISTORY_TYPE_CONFIG: Record<string, { color: string; bg: string; label: st
       </svg>
     ),
   },
+  quotation: {
+    color: '#006d75', bg: '#e6fffb', label: 'Quotation',
+    icon: (
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="12" y1="17" x2="8" y2="17"/>
+      </svg>
+    ),
+  },
 };
 
 function getHistoryDateLabel(isoStr: string): string {
@@ -476,6 +484,7 @@ export default function CustomerDetailPage() {
   const [expandedModuleView, setExpandedModuleView] = useState<string | null>(null);
   const [packageOfferStep, setPackageOfferStep] = useState<1 | 2 | 3 | 4>(1);
   const [savedBookingId, setSavedBookingId] = useState<string | null>(null);
+  const [savedBookingNumber, setSavedBookingNumber] = useState<string | null>(null);
   const [savedNetAmountPaise, setSavedNetAmountPaise] = useState<number>(0);
   const [packagePaymentAmount, setPackagePaymentAmount] = useState<number>(0);
   const [printMode, setPrintMode] = useState<'normal' | 'pos'>('normal');
@@ -535,6 +544,7 @@ export default function CustomerDetailPage() {
     if (!expandedModuleView) {
       setPackageOfferStep(1);
       setSavedBookingId(null);
+      setSavedBookingNumber(null);
       setSavedNetAmountPaise(0);
       setPackagePaymentAmount(0);
       setBookingRows([{ id: Date.now(), category: '', service: '', quantity: 1, amount: 0, taxPercent: 0, taxType: 'exclusive', serviceBy: '', discPct: 0 }]);
@@ -859,12 +869,10 @@ export default function CustomerDetailPage() {
     }
 
     try {
-      // Check if customer with same name and phone already exists
-      const existingCustomer = allCustomers?.items?.find((c) => {
-        const nameMatch = c.name.toLowerCase() === nameInput.trim().toLowerCase();
-        const phoneMatch = phoneInput.trim() ? c.phone === phoneInput.trim() : false;
-        return nameMatch || (phoneMatch && phoneInput.trim());
-      });
+      // Match only on phone — names are not unique; phone number uniquely identifies a customer
+      const existingCustomer = phoneInput.trim()
+        ? allCustomers?.items?.find((c) => c.phone === phoneInput.trim())
+        : null;
 
       if (existingCustomer) {
         message.info('Customer already exists');
@@ -1012,7 +1020,7 @@ export default function CustomerDetailPage() {
     return {
       customerId: id,
       consultantStaffId: bookingData.consultant || undefined,
-      scheduledAt: new Date(bookingData.bookingDate).toISOString(),
+      scheduledAt: new Date(bookingData.bookingDate + 'T12:00:00').toISOString(),
       status: 'completed',
       notes: bookingData.remarks || undefined,
       discount: discountPaise,
@@ -1032,9 +1040,11 @@ export default function CustomerDetailPage() {
 
       const result = await createBooking.mutateAsync(apiPayload);
       const bookingId = (result as any).id ?? null;
+      const bookingNumber = (result as any).number ?? null;
       const retItems = (result as any).items ?? [];
 
       setSavedBookingId(bookingId);
+      setSavedBookingNumber(bookingNumber);
       setSavedNetAmountPaise(netPaise);
       setSavedBookingItems(retItems);
       return { id: bookingId, items: retItems };
@@ -1052,8 +1062,10 @@ export default function CustomerDetailPage() {
           const { _netPaise: __, ...forceApiPayload } = forcePayload;
           const result = await createBooking.mutateAsync(forceApiPayload);
           const bookingId = (result as any).id ?? null;
+          const bookingNumber = (result as any).number ?? null;
           const retItems = (result as any).items ?? [];
           setSavedBookingId(bookingId);
+          setSavedBookingNumber(bookingNumber);
           setSavedNetAmountPaise(forceNetPaise);
           setSavedBookingItems(retItems);
           const names = shortfalls.map((s) => s.productName).join(', ');
@@ -1672,10 +1684,8 @@ export default function CustomerDetailPage() {
                               e.currentTarget.style.boxShadow = 'none';
                             }}
                           >
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 6 }}>
-                              <div style={{ fontWeight: 600, fontSize: 13, color: colors.text.primary }}>
-                                {item.comment ? item.comment.substring(0, 30) + '...' : 'Feedback'}
-                              </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', marginBottom: 4 }}>
+                              <div style={{ fontWeight: 600, fontSize: 13, color: colors.text.primary }}>Feedback</div>
                               <div style={{ color: '#fadb14', fontSize: 14 }}>
                                 {'★'.repeat(item.rating || 0)}
                               </div>
@@ -1730,7 +1740,7 @@ export default function CustomerDetailPage() {
                       )}
 
                       {/* Booking payments section */}
-                      {bookings && bookings.filter((b: any) => b.paidAmount > 0).length > 0 && (
+                      {bookings && bookings.filter((b: any) => (b.netAmount ?? 0) > 0).length > 0 && (
                         <div style={{ marginBottom: 24 }}>
                           <Typography.Text strong style={{ fontSize: 13, display: 'block', marginBottom: 10 }}>Service Bookings</Typography.Text>
                           <div style={{ border: `1px solid ${colors.border}`, borderRadius: 6, overflow: 'hidden' }}>
@@ -1746,7 +1756,7 @@ export default function CustomerDetailPage() {
                                 </tr>
                               </thead>
                               <tbody>
-                                {bookings.filter((b: any) => b.paidAmount > 0).map((b: any) => {
+                                {bookings.filter((b: any) => (b.netAmount ?? 0) > 0).map((b: any) => {
                                   const bal = Math.max(0, b.netAmount - b.paidAmount);
                                   const hasAllocations = b.items?.some((it: any) => it.paidAmount > 0);
                                   const isExpanded = expandedBookingId === b.id;
@@ -2148,8 +2158,9 @@ export default function CustomerDetailPage() {
                                 const allSessions: any[] = sessData?.sessions ?? [];
                                 // Use API items (have isSessionBased) once loaded, else fall back to localItems
                                 const displayItems: any[] = sessData?.items ?? localItems;
-                                const sessionItems = displayItems.filter((item: any) => item.isSessionBased);
-                                const singleItems = displayItems.filter((item: any) => !item.isSessionBased);
+                                // Summary lines are already excluded by the backend; filter defensively on frontend too
+                                const sessionItems = displayItems.filter((item: any) => item.isSessionBased && !item.isPackageSummaryLine);
+                                const singleItems = displayItems.filter((item: any) => !item.isSessionBased && !item.isPackageSummaryLine);
                                 return (
                                   <>
                                   <tr key={b.id} style={{ borderBottom: isExpanded ? 'none' : `1px solid #f0f0f0`, background: idx % 2 === 0 ? '#fff' : '#fafafa' }}>
@@ -2254,7 +2265,9 @@ export default function CustomerDetailPage() {
                                                         <td style={{ padding: '10px 14px', color: '#1677ff', fontWeight: 500 }}>
                                                           <span style={{ marginRight: 8, fontSize: 12, color: '#888' }}>{itemExpanded ? '▼' : '▶'}</span>
                                                           {item.service}
-                                                          {item.category ? <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({item.category})</span> : null}
+                                                          {item.packageName
+                                                            ? <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({item.packageName})</span>
+                                                            : item.category && item.category !== 'Packages' ? <span style={{ fontSize: 11, color: '#888', marginLeft: 6 }}>({item.category})</span> : null}
                                                         </td>
                                                         <td style={{ padding: '10px 14px', textAlign: 'center', fontWeight: 600 }}>{total}</td>
                                                         <td style={{ padding: '10px 14px', textAlign: 'center', color: taken > 0 ? '#1677ff' : '#aaa', fontWeight: 600 }}>{taken}</td>
@@ -5010,14 +5023,13 @@ export default function CustomerDetailPage() {
                                     {effectiveFlags.hasQuantity && (
                                       <td style={{ padding: '6px 10px', textAlign: 'center', borderRight: `1px solid ${colors.border}`, color: '#555', fontSize: 12 }}>1</td>
                                     )}
-                                    {/* Amount — editable */}
+                                    {/* Amount — read-only */}
                                     <td style={{ padding: '6px 8px', borderRight: `1px solid ${colors.border}` }}>
                                       <input
-                                        type="text" inputMode="decimal"
+                                        type="text"
+                                        readOnly
                                         value={row.amount}
-                                        onChange={(e) => { const v = e.target.value.replace(/[^0-9.]/g, ''); handleRowChange(row.id, 'amount', v); }}
-                                        onBlur={(e) => handleRowChange(row.id, 'amount', parseFloat(e.target.value) || 0)}
-                                        style={{ width: '100%', padding: '5px 6px', border: `1px solid #90caf9`, borderRadius: 3, textAlign: 'right', fontSize: 12, background: '#e8f4fd' }}
+                                        style={{ width: '100%', padding: '5px 6px', border: `1px solid ${colors.border}`, borderRadius: 3, textAlign: 'right', fontSize: 12, background: '#f5f5f5', color: '#555', cursor: 'not-allowed' }}
                                       />
                                     </td>
                                     {/* Disc% */}
@@ -5905,7 +5917,7 @@ export default function CustomerDetailPage() {
                         <div style={{ padding: '14px 22px', background: '#0f172a', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
                             <span style={{ fontSize: 15, fontWeight: 700, color: '#fff', letterSpacing: '-0.01em' }}>Payment Receipt</span>
-                            <span style={{ fontSize: 11, color: '#94a3b8', background: 'rgba(255,255,255,0.08)', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.08)' }}>{bookingData.bookingId}</span>
+                            <span style={{ fontSize: 11, color: '#94a3b8', background: 'rgba(255,255,255,0.08)', padding: '3px 10px', borderRadius: 20, border: '1px solid rgba(255,255,255,0.08)' }}>{savedBookingNumber ?? bookingData.bookingId}</span>
                           </div>
                           <div style={{ display: 'flex', gap: 24 }}>
                             <div>
@@ -6421,7 +6433,7 @@ export default function CustomerDetailPage() {
                               <div style={{ marginTop: 10, fontSize: 13, fontWeight: 700, letterSpacing: 3, color: '#333' }}>SERVICE BOOKING RECEIPT</div>
                             </div>
                             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, marginBottom: 16 }}>
-                              <div><span style={{ color: '#888' }}>Booking ID: </span><strong>{bookingData.bookingId}</strong></div>
+                              <div><span style={{ color: '#888' }}>Booking ID: </span><strong>{savedBookingNumber ?? bookingData.bookingId}</strong></div>
                               <div><span style={{ color: '#888' }}>Date: </span><strong>{dateStr4}</strong></div>
                             </div>
                             <div style={{ display: 'flex', gap: 32, marginBottom: 20, padding: '12px 14px', background: '#f9f9f9', borderRadius: 4, fontSize: 12 }}>
@@ -6561,7 +6573,7 @@ export default function CustomerDetailPage() {
                               <div style={{ fontSize: 9, marginTop: 4, color: '#777' }}>SERVICE BOOKING RECEIPT</div>
                             </div>
                             <div style={{ borderTop: '1px dashed #333', borderBottom: '1px dashed #333', padding: '5px 0', margin: '6px 0', fontSize: 10 }}>
-                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>ID:</span><span>{bookingData.bookingId}</span></div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>ID:</span><span>{savedBookingNumber ?? bookingData.bookingId}</span></div>
                               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Date:</span><span>{dateStr4}</span></div>
                               <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Customer:</span><span style={{ maxWidth: 170, textAlign: 'right' }}>{customer?.name}</span></div>
                               {customer?.phone && <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Phone:</span><span>{customer.phone}</span></div>}

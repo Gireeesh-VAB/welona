@@ -22,8 +22,13 @@ export const GET = route(async (req) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const dba = db as any;
 
-  type RawItem = { productId: string; productName: string; quantityPerSession: number; chargeType: string; uom?: string | null };
+  type RawItem = {
+    productId: string; productName: string; quantityPerSession: number; chargeType: string;
+    uom?: string | null; consumptionUom?: string | null; unitsPerPurchase?: number;
+  };
   let rawItems: RawItem[] = [];
+
+  const productSelect = { id: true, name: true, uom: true, consumptionUom: true, unitsPerPurchase: true };
 
   // Look up service by name and fetch its ServiceInventoryItem mappings
   const service = await db.service.findFirst({
@@ -34,7 +39,7 @@ export const GET = route(async (req) => {
   if (service) {
     const svcItems = await dba.serviceInventoryItem.findMany({
       where:   { serviceId: service.id },
-      include: { product: { select: { id: true, name: true, uom: true } } },
+      include: { product: { select: productSelect } },
       orderBy: { sortOrder: 'asc' },
     });
     rawItems = svcItems.map((it: any) => ({
@@ -43,6 +48,8 @@ export const GET = route(async (req) => {
       quantityPerSession: it.quantityPerSession,
       chargeType:         it.chargeType ?? 'consume_only',
       uom:                it.product.uom ?? null,
+      consumptionUom:     it.product.consumptionUom ?? null,
+      unitsPerPurchase:   it.product.unitsPerPurchase ?? 1,
     }));
   }
 
@@ -58,7 +65,7 @@ export const GET = route(async (req) => {
       if (serviceIds.length > 0) {
         const svcItems = await dba.serviceInventoryItem.findMany({
           where:   { serviceId: { in: serviceIds } },
-          include: { product: { select: { id: true, name: true, uom: true } } },
+          include: { product: { select: productSelect } },
           orderBy: { sortOrder: 'asc' },
         });
         rawItems = svcItems.map((it: any) => ({
@@ -67,6 +74,8 @@ export const GET = route(async (req) => {
           quantityPerSession: it.quantityPerSession,
           chargeType:         it.chargeType ?? 'consume_only',
           uom:                it.product.uom ?? null,
+          consumptionUom:     it.product.consumptionUom ?? null,
+          unitsPerPurchase:   it.product.unitsPerPurchase ?? 1,
         }));
       }
     }
@@ -74,19 +83,39 @@ export const GET = route(async (req) => {
 
   if (rawItems.length === 0) return ok([]);
 
-  // Fetch available stock if branchId provided
-  let stockMap = new Map<string, number>();
+  // Fetch available stock in consumption units when branchId is provided.
+  // For consumable products (consumptionUom set, unitsPerPurchase > 1) available capacity
+  // comes from ConsumableUnit records; for others use InventoryStock directly.
+  const availableMap = new Map<string, number | null>();
   if (branchId) {
     try {
       const warehouseId = await getDefaultWarehouseId(dba, branchId);
       const productIds  = rawItems.map((it) => it.productId);
+
       const stocks = await db.inventoryStock.findMany({
         where:  { warehouseId, productId: { in: productIds } },
         select: { productId: true, quantity: true },
       });
-      stockMap = new Map(stocks.map((s) => [s.productId, s.quantity]));
+      const stockMap = new Map(stocks.map((s) => [s.productId, s.quantity]));
+
+      for (const it of rawItems) {
+        const isConsumable = !!(it.consumptionUom) && (it.unitsPerPurchase ?? 1) > 1;
+        if (isConsumable) {
+          const units = await dba.consumableUnit.findMany({
+            where: { productId: it.productId, branchId, status: { in: ['sealed', 'open'] } },
+            select: { totalCapacity: true, usedQuantity: true },
+          });
+          const available = (units as any[]).reduce(
+            (sum: number, u: any) => sum + (u.totalCapacity - u.usedQuantity), 0,
+          );
+          availableMap.set(it.productId, available);
+        } else {
+          const qty = stockMap.get(it.productId) ?? 0;
+          availableMap.set(it.productId, qty);
+        }
+      }
     } catch {
-      // warehouse not configured — skip stock
+      // warehouse not configured — leave availableMap empty
     }
   }
 
@@ -96,8 +125,10 @@ export const GET = route(async (req) => {
       productName:        it.productName,
       quantityPerSession: it.quantityPerSession,
       chargeType:         it.chargeType ?? 'consume_only',
-      uom:                it.uom ?? null,
-      availableStock:     stockMap.get(it.productId) ?? null,
+      uom:                it.consumptionUom ?? it.uom ?? null,
+      consumptionUom:     it.consumptionUom ?? null,
+      unitsPerPurchase:   it.unitsPerPurchase ?? 1,
+      availableStock:     branchId ? (availableMap.get(it.productId) ?? null) : null,
     })),
   );
 });

@@ -10,6 +10,7 @@ import type {
   AdminPurchaseOrderCreateInput,
   AdminPurchaseOrderUpdateInput,
   AdminGoodsReceiptCreateInput,
+  AdminGoodsReceiptUpdateInput,
 } from '@shared/schemas/admin-purchase-orders';
 import type { PurchaseOrderStatus } from '@shared/enums';
 
@@ -96,6 +97,30 @@ export function useCreateGoodsReceipt() {
       qc.invalidateQueries({ queryKey: [PO_KEY] });
       qc.invalidateQueries({ queryKey: ['admin-inventory-stock'] });
       qc.invalidateQueries({ queryKey: ['admin-inventory-movements'] });
+      qc.invalidateQueries({ queryKey: ['procurement-stats'] });
     },
+  });
+}
+
+export function useUpdateGoodsReceipt() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: AdminGoodsReceiptUpdateInput }) =>
+      api.patch<AdminGoodsReceipt>(`/admin/goods-receipts/${id}`, body),
+    onSuccess: () => qc.invalidateQueries({ queryKey: [GRN_KEY] }),
+  });
+}
+
+export function useProcurementStats() {
+  return useQuery<{
+    totalSuppliers: number;
+    openPOs: number;
+    pendingDeliveries: number;
+    pendingBills: number;
+    pendingPayments: number;
+    totalPurchaseValue: number;
+  }>({
+    queryKey: ['procurement-stats'],
+    queryFn: () => api.get('/admin/procurement/stats'),
   });
 }

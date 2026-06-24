@@ -5,6 +5,7 @@ export type SupplierWithRelations = Prisma.SupplierGetPayload<{
   include: {
     createdByAdmin: true;
     _count: { select: { supplierProducts: true } };
+    supplierProducts: { select: { productId: true; isActive: true; unitPrice: true } };
   };
 }>;
 
@@ -33,5 +34,11 @@ export function toAdminSupplier(row: SupplierWithRelations): AdminSupplier {
     updatedAt: row.updatedAt.toISOString(),
     products: [],
     productCount: row._count?.supplierProducts ?? 0,
+    productIds: (row.supplierProducts ?? [])
+      .filter((sp) => sp.isActive)
+      .map((sp) => sp.productId),
+    productPrices: (row.supplierProducts ?? [])
+      .filter((sp) => sp.isActive)
+      .map((sp) => ({ productId: sp.productId, unitPrice: sp.unitPrice })),
   };
 }

@@ -6,6 +6,7 @@ import { Errors } from '@/lib/api/errors';
 import { requireAuth, requirePermission } from '@/lib/auth/service';
 import { getDefaultWarehouseId } from '@/lib/warehouse';
 import { depleteBatchStockFEFO } from '@/lib/batch';
+import { applyConsumableUsage } from '@/lib/service-inventory';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const dba = db as any;
@@ -119,34 +120,42 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
       if (productsToDeduct.length > 0 && booking.branchId) {
         const warehouseId = await getDefaultWarehouseId(tx, booking.branchId);
         const productIds  = productsToDeduct.map((p: any) => p.productId);
-        const productRows = await tx.product.findMany({ where: { id: { in: productIds } }, select: { id: true, trackBatches: true } });
-        const trackMap    = new Map(productRows.map((p) => [p.id, p.trackBatches]));
+        const productRows = await tx.product.findMany({
+          where: { id: { in: productIds } },
+          select: { id: true, trackBatches: true, consumptionUom: true, unitsPerPurchase: true },
+        });
+        const productMeta = new Map(productRows.map((p) => [p.id, p]));
         for (const line of productsToDeduct) {
-          const qty = line.quantity;
-          await tx.inventoryStock.upsert({
-            where:  { warehouseId_productId: { warehouseId, productId: line.productId } },
-            create: { branchId: booking.branchId!, warehouseId, productId: line.productId, quantity: 0 },
-            update: {},
-          });
-          await tx.inventoryStock.update({
-            where: { warehouseId_productId: { warehouseId, productId: line.productId } },
-            data:  { quantity: { decrement: qty } },
-          });
-          if (trackMap.get(line.productId)) {
-            await depleteBatchStockFEFO(tx, { productId: line.productId, warehouseId, quantity: qty, force: true });
+          const qty  = line.quantity;
+          const meta = productMeta.get(line.productId);
+          const isConsumable = !!(meta?.consumptionUom) && (meta?.unitsPerPurchase ?? 1) > 1;
+          if (isConsumable) {
+            await applyConsumableUsage(tx, {
+              productId: line.productId, branchId: booking.branchId!,
+              quantityUsed: qty, bookingId: booking.id, sessionRef: session.id, force: true,
+            });
+          } else {
+            await tx.inventoryStock.upsert({
+              where:  { warehouseId_productId: { warehouseId, productId: line.productId } },
+              create: { branchId: booking.branchId!, warehouseId, productId: line.productId, quantity: 0 },
+              update: {},
+            });
+            await tx.inventoryStock.update({
+              where: { warehouseId_productId: { warehouseId, productId: line.productId } },
+              data:  { quantity: { decrement: qty } },
+            });
+            if (meta?.trackBatches) {
+              await depleteBatchStockFEFO(tx, { productId: line.productId, warehouseId, quantity: qty, force: true });
+            }
+            await tx.inventoryMovement.create({
+              data: {
+                branchId: booking.branchId!, warehouseId, productId: line.productId,
+                type: 'service_consumption', delta: -qty,
+                reason: `Session #${session.sessionNumber} (${session.serviceName ?? 'booking'})`,
+                ref: session.id, createdByAdminId: null,
+              },
+            });
           }
-          await tx.inventoryMovement.create({
-            data: {
-              branchId:         booking.branchId!,
-              warehouseId,
-              productId:        line.productId,
-              type:             'service_consumption',
-              delta:            -qty,
-              reason:           `Session #${session.sessionNumber} (${session.serviceName ?? 'booking'})`,
-              ref:              session.id,
-              createdByAdminId: null,
-            },
-          });
         }
       }
       return updated;
@@ -172,7 +181,8 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
 
   const wasCompleted = session.status === 'completed';
   const nowCompleted = (body.status ?? session.status) === 'completed';
-  const newProducts  = body.products ?? [];
+  // Fall back to the session's stored products when completing without an explicit product list
+  const newProducts  = body.products ?? (!wasCompleted && nowCompleted ? (session.products ?? []) : []);
   const shouldDeduct = !wasCompleted && nowCompleted && newProducts.length > 0 && booking?.branchId;
 
   if (body.products !== undefined) {
@@ -191,34 +201,42 @@ export const PATCH = route<Ctx>(async (req, { params }) => {
     if (shouldDeduct) {
       const warehouseId = await getDefaultWarehouseId(tx, booking!.branchId!);
       const productIds  = newProducts.map((p) => p.productId);
-      const productRows = await tx.product.findMany({ where: { id: { in: productIds } }, select: { id: true, trackBatches: true } });
-      const trackMap    = new Map(productRows.map((p) => [p.id, p.trackBatches]));
+      const productRows = await tx.product.findMany({
+        where: { id: { in: productIds } },
+        select: { id: true, trackBatches: true, consumptionUom: true, unitsPerPurchase: true },
+      });
+      const productMeta = new Map(productRows.map((p) => [p.id, p]));
       for (const line of newProducts) {
-        const qty = line.quantity;
-        await tx.inventoryStock.upsert({
-          where:  { warehouseId_productId: { warehouseId, productId: line.productId } },
-          create: { branchId: booking!.branchId!, warehouseId, productId: line.productId, quantity: 0 },
-          update: {},
-        });
-        await tx.inventoryStock.update({
-          where: { warehouseId_productId: { warehouseId, productId: line.productId } },
-          data:  { quantity: { decrement: qty } },
-        });
-        if (trackMap.get(line.productId)) {
-          await depleteBatchStockFEFO(tx, { productId: line.productId, warehouseId, quantity: qty, force: true });
+        const qty  = line.quantity;
+        const meta = productMeta.get(line.productId);
+        const isConsumable = !!(meta?.consumptionUom) && (meta?.unitsPerPurchase ?? 1) > 1;
+        if (isConsumable) {
+          await applyConsumableUsage(tx, {
+            productId: line.productId, branchId: booking!.branchId!,
+            quantityUsed: qty, bookingId: booking!.id, sessionRef: params.sessionId, force: true,
+          });
+        } else {
+          await tx.inventoryStock.upsert({
+            where:  { warehouseId_productId: { warehouseId, productId: line.productId } },
+            create: { branchId: booking!.branchId!, warehouseId, productId: line.productId, quantity: 0 },
+            update: {},
+          });
+          await tx.inventoryStock.update({
+            where: { warehouseId_productId: { warehouseId, productId: line.productId } },
+            data:  { quantity: { decrement: qty } },
+          });
+          if (meta?.trackBatches) {
+            await depleteBatchStockFEFO(tx, { productId: line.productId, warehouseId, quantity: qty, force: true });
+          }
+          await tx.inventoryMovement.create({
+            data: {
+              branchId: booking!.branchId!, warehouseId, productId: line.productId,
+              type: 'service_consumption', delta: -qty,
+              reason: `Session #${session.sessionNumber} (edit)`,
+              ref: params.sessionId, createdByAdminId: null,
+            },
+          });
         }
-        await tx.inventoryMovement.create({
-          data: {
-            branchId:         booking!.branchId!,
-            warehouseId,
-            productId:        line.productId,
-            type:             'service_consumption',
-            delta:            -qty,
-            reason:           `Session #${session.sessionNumber} (edit)`,
-            ref:              params.sessionId,
-            createdByAdminId: null,
-          },
-        });
       }
     }
     return updated;

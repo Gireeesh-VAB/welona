@@ -34,6 +34,7 @@ export const GET = route<Ctx>(async (req, { params }) => {
   if (!customer) throw Errors.notFound('Customer');
 
   const where = { customerId: params.id };
+  const LIMIT = 200;
   const [
     leads,
     followUps,
@@ -48,20 +49,21 @@ export const GET = route<Ctx>(async (req, { params }) => {
     feedback,
     documents,
   ] = await Promise.all([
-    db.lead.findMany({ where }),
+    db.lead.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
     db.followUp.findMany({
       where: { OR: [{ customerId: params.id }, { lead: { customerId: params.id } }] },
+      take: LIMIT, orderBy: { createdAt: 'desc' },
     }),
-    db.quotation.findMany({ where }),
-    db.salesOrder.findMany({ where }),
-    db.invoice.findMany({ where }),
-    db.booking.findMany({ where }),
-    db.package.findMany({ where }),
-    db.offer.findMany({ where }),
-    db.prescription.findMany({ where }),
-    db.medicalReport.findMany({ where }),
-    db.feedback.findMany({ where }),
-    db.document.findMany({ where }),
+    db.quotation.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.salesOrder.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.invoice.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.booking.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.package.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.offer.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.prescription.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.medicalReport.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.feedback.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
+    db.document.findMany({ where, take: LIMIT, orderBy: { createdAt: 'desc' } }),
   ]);
 
   const events: HistoryEvent[] = [

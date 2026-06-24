@@ -108,12 +108,15 @@ export const POST = route<Ctx>(async (req, { params }) => {
     let inventorySkipped = false;
 
     if (body.status === 'completed') {
-      const newUsed = pkg.usedSessions + 1;
-      const newStatus = newUsed >= pkg.totalSessions ? 'completed' : pkg.status;
       await tx.package.update({
         where: { id: pkg.id },
-        data:  { usedSessions: newUsed, status: newStatus },
+        data:  { usedSessions: { increment: 1 } },
       });
+      const updatedPkg = await tx.package.findUnique({ where: { id: pkg.id }, select: { usedSessions: true } });
+      const newStatus = (updatedPkg?.usedSessions ?? 0) >= pkg.totalSessions ? 'completed' : pkg.status;
+      if (newStatus !== pkg.status) {
+        await tx.package.update({ where: { id: pkg.id }, data: { status: newStatus } });
+      }
 
       if (pkg.branchId) {
         const serviceIds = resolveServiceIds(pkg);

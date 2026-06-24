@@ -66,17 +66,29 @@ export interface ProductOption {
   name: string;
   sku: string;
   uom: string;
+  salePrice: number;
+  purchasePrice: number;
+  /** Effective price for cost display: salePrice if set, else purchasePrice */
+  effectivePrice: number;
 }
 
 /** Fetch all active products as a flat list for the inventory-item picker. */
 export function useAdminProductOptions() {
   return useQuery<ProductOption[]>({
-    queryKey: ['admin-product-options'],
+    queryKey: ['admin-product-options-v2'],
     queryFn: async () => {
       const data = await apiList<AdminProduct>('/admin/products', {
         query: { isActive: true, limit: 200 },
       });
-      return data.items.map((p) => ({ id: p.id, name: p.name, sku: p.sku, uom: p.uom }));
+      return data.items.map((p) => {
+        const salePrice     = p.salePrice     ?? 0;
+        const purchasePrice = p.purchasePrice ?? 0;
+        return {
+          id: p.id, name: p.name, sku: p.sku, uom: p.uom,
+          salePrice, purchasePrice,
+          effectivePrice: salePrice > 0 ? salePrice : purchasePrice,
+        };
+      });
     },
     staleTime: 5 * 60 * 1000,
   });

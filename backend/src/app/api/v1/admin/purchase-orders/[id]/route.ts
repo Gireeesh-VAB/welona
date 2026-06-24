@@ -57,6 +57,13 @@ export const PUT = route<RouteContext>(async (req, { params }) => {
         expectedAt: body.expectedAt ? new Date(body.expectedAt) : null,
       }),
       ...(body.notes !== undefined && { notes: body.notes }),
+      ...(body.paymentStatus !== undefined && { paymentStatus: body.paymentStatus }),
+      ...(body.paymentDate !== undefined && {
+        paymentDate: body.paymentDate ? new Date(body.paymentDate) : null,
+      }),
+      ...(body.paymentMethod !== undefined && { paymentMethod: body.paymentMethod }),
+      ...(body.amountPaid !== undefined && { amountPaid: body.amountPaid }),
+      ...(body.paymentReference !== undefined && { paymentReference: body.paymentReference }),
     },
     include: purchaseOrderInclude,
   });

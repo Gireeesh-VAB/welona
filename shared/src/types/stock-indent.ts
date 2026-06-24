@@ -20,9 +20,15 @@ export interface StockIndent {
   reason: string | null;
   notes: string | null;
   // Delivery tracking
+  dispatchMethod: string | null;
   vehicleNumber: string | null;
   driverName: string | null;
   driverMobile: string | null;
+  pickupEmployeeId: string | null;
+  providerName: string | null;
+  trackingNumber: string | null;
+  deliveryCharges: number | null;
+  customMethodName: string | null;
   dispatchedAt: string | null;
   expectedDeliveryAt: string | null;
   deliveryNotes: string | null;

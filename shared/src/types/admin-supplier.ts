@@ -30,4 +30,6 @@ export interface AdminSupplier {
   updatedAt: string;
   products: SupplierProductMapping[];
   productCount: number;
+  productIds: string[];
+  productPrices: { productId: string; unitPrice: number | null }[];
 }
